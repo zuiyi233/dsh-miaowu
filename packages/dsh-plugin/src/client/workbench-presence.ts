@@ -56,3 +56,48 @@ export function workbenchPreferenceStorage(): WorkbenchPreferenceStorage | undef
   try { return globalThis.localStorage; }
   catch { return undefined; }
 }
+
+export type WorkbenchLayoutStorage = WorkbenchPreferenceStorage;
+
+/** Session-isolated layout key; layouts never leak across sessions. */
+export function layoutStorageKey(sessionId: string): string {
+  return `oh-story.layout.v1.${sessionId}`;
+}
+
+/** Clear every persisted layout (used by the layout settings "reset" action). */
+export function clearWorkbenchLayouts(storage: WorkbenchLayoutStorage | undefined): void {
+  if (storage === undefined) return;
+  try {
+    const doomed: string[] = [];
+    const length = (storage as unknown as { readonly length?: unknown }).length;
+    const keyAt = (storage as unknown as { key?: (index: number) => string | null }).key;
+    if (typeof length === "number" && typeof keyAt === "function") {
+      for (let index = 0; index < length; index += 1) {
+        const key = keyAt.call(storage, index);
+        if (key !== null && key.startsWith("oh-story.layout.v1.")) doomed.push(key);
+      }
+      for (const key of doomed) (storage as unknown as { removeItem: (key: string) => void }).removeItem(key);
+    }
+  } catch { /* resetting layout must never break the workbench */ }
+}
+
+/** Persisted layout payload: split tree JSON plus float geometries. */
+export interface PersistedWorkbenchLayout {
+  readonly split?: unknown;
+  readonly floats?: Readonly<Record<string, unknown>> | undefined;
+}
+
+export function readWorkbenchLayoutRaw(storage: WorkbenchLayoutStorage | undefined, sessionId: string | undefined): string | undefined {
+  if (storage === undefined || sessionId === undefined || sessionId === "") return undefined;
+  try {
+    return storage.getItem(layoutStorageKey(sessionId)) ?? undefined;
+  } catch { return undefined; }
+}
+
+export function writeWorkbenchLayoutRaw(storage: WorkbenchLayoutStorage | undefined, sessionId: string | undefined, value: string): void {
+  if (storage === undefined || sessionId === undefined || sessionId === "") return;
+  // Same contract as writeWorkbenchPreference: private windows refuse storage,
+  // the Session Store stays the in-session authority.
+  try { storage.setItem(layoutStorageKey(sessionId), value); }
+  catch { /* the Session Store remains the in-session authority */ }
+}

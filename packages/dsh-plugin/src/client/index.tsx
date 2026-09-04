@@ -47,16 +47,29 @@ import { OH_STORY_PRODUCTION_TOOL_NAME } from "../production-intent.js";
 import { VideoStudio, type VideoProject } from "./video-studio.js";
 import {
   hasCreativeProject,
+  readWorkbenchLayoutRaw,
   readWorkbenchPreference,
   resolveWorkbenchOpen,
   workbenchPreferenceStorage,
+  writeWorkbenchLayoutRaw,
   writeWorkbenchPreference,
   type WorkbenchPreference
 } from "./workbench-presence.js";
-import { endpoint, handleTabKey } from "./workbench-ui.js";
+import { endpoint, handleTabKey, isLayoutRecord, readFeatureEnabled } from "./workbench-ui.js";
 import styles from "./plugin.css?inline";
 import { registerClientFeatures } from "./features/index.js";
 import { workbenchFeatures } from "./features/registry.js";
+import { SplitPaneView } from "./layout/split-pane.js";
+import { clampFloatGeometry, defaultFloatGeometry, FreeWindow, type FloatGeometry, type PartialFloatGeometry } from "./layout/free-window.js";
+import {
+  defaultSplitTree,
+  EDITOR_LEAF_ID,
+  sanitizeSplit,
+  setFraction,
+  TREE_LEAF_ID,
+  type SplitTree
+} from "./layout/split-tree.js";
+import { registerSettingsFeature, settingsBridge } from "./layout/layout-settings.js";
 
 export const name = "oh-story";
 export const inject = ["slots", "sessions", "conversation"];
@@ -136,6 +149,10 @@ interface WorkbenchMemory {
   productionZoom: Record<string, number>;
   productionIntentCalls: Record<string, boolean>;
   featurePane: string | undefined;
+  /** Phase C layout: story/drama split tree (tree|editor pair). */
+  splitTree: SplitTree;
+  /** Phase C free windows: keyed by panel id, absolute viewport geometry. */
+  floats: Record<string, FloatGeometry>;
 }
 
 type Update<T> = T | ((current: T) => T);
@@ -168,7 +185,9 @@ function createWorkbenchStore() {
       productionCanvas: {},
       productionZoom: {},
       productionIntentCalls: {},
-      featurePane: undefined
+      featurePane: undefined,
+      splitTree: defaultSplitTree(),
+      floats: {}
     }),
     actions: {
       setBuffers: (draft, update: Update<Record<string, FileBuffer>>) => {
@@ -236,6 +255,16 @@ function createWorkbenchStore() {
       },
       setFeaturePane: (draft, update: Update<string | undefined>) => {
         draft.featurePane = applyUpdate(draft.featurePane, update);
+      },
+      setSplitTree: (draft, update: Update<SplitTree>) => {
+        draft.splitTree = applyUpdate(draft.splitTree, update);
+      },
+      setFloat: (draft, panelId: string, geometry: FloatGeometry | undefined) => {
+        if (geometry === undefined) delete draft.floats[panelId];
+        else draft.floats[panelId] = geometry;
+      },
+      setFloats: (draft, update: Update<Record<string, FloatGeometry>>) => {
+        draft.floats = applyUpdate(draft.floats, update);
       }
     }
   });
@@ -254,6 +283,8 @@ const GROUP_ORDER: Readonly<Record<WorkbenchMode, readonly string[]>> = {
 
 const WORKBENCH_MODES = ["story", "drama", "game", "video"] as const;
 const EDITOR_MODES = ["preview", "source", "production"] as const;
+const GAME_FLOAT_ID = "game-studio";
+const VIDEO_FLOAT_ID = "video-studio";
 
 function groupForPath(path: string): string {
   return path === "short-drama.json" ? "项目" : path.split("/", 1)[0] ?? "其他";
@@ -505,8 +536,20 @@ function GameDesign({
   </div>;
 }
 
-function GameStudio({
-  sessionId,
+/**
+ * Float mirrors never clone the live Studio (iframe/player state would fork).
+ * The Studio stays mounted in place; the float is a status card with a
+ * dock-back action. Docking restores the original rendering.
+ */
+function FloatMirror({ title, hint }: { readonly title: string; readonly hint: string }) {
+  return <div className="oh-game-design-empty">
+    <span aria-hidden>⧉</span>
+    <strong>{title}</strong>
+    <p>{hint}</p>
+  </div>;
+}
+
+function GameStudio({  sessionId,
   workspace,
   building,
   selected,
@@ -520,7 +563,9 @@ function GameStudio({
   labelledBy,
   onWorkbench,
   onCollapse,
-  onSelect
+  onSelect,
+  floatActive,
+  onFloatToggle
 }: {
   readonly sessionId: string;
   readonly workspace: WorkspacePayload;
@@ -537,6 +582,9 @@ function GameStudio({
   readonly onWorkbench: (mode: WorkbenchMode) => void;
   readonly onCollapse: () => void;
   readonly onSelect: (path: string) => void;
+  /** The studio floats in a FreeWindow; the toolbar button docks it back. */
+  readonly floatActive: boolean;
+  readonly onFloatToggle: () => void;
 }) {
   const project = workspace.games.find((value) => value.id === gameProjectId) ?? workspace.games[0];
   const studioRef = useRef<HTMLElement>(null);
@@ -557,7 +605,7 @@ function GameStudio({
   }, [gameProjectId, onGameProject, project]);
   if (project === undefined) return <main ref={studioRef} id={paneId} className="oh-game-studio" role="tabpanel" aria-labelledby={labelledBy} hidden={hidden}><div className="oh-game-design-empty">游戏能力正在载入…</div></main>;
   const tabs = ["preview", "design"] as const;
-  return <main ref={studioRef} id={paneId} className="oh-game-studio" data-source={project.source} role="tabpanel" aria-labelledby={labelledBy} hidden={hidden}>
+  return <main ref={studioRef} id={paneId} className="oh-game-studio" data-source={project.source} data-oh-floated={floatActive || undefined} role="tabpanel" aria-labelledby={labelledBy} hidden={hidden}>
     <header className="oh-game-toolbar">
       <div className="oh-workbench-cluster">
         {workbenches.length > 1 && <div className="oh-game-mode-tabs" role="tablist" aria-label="创作工作台">
@@ -572,6 +620,7 @@ function GameStudio({
           >{workbenchLabel(mode)}</button>)}
         </div>}
         <button className="oh-workbench-collapse" type="button" title="收起创作工作台" aria-label="收起创作工作台" onClick={onCollapse}>×</button>
+        <button className="oh-workbench-float" type="button" title={floatActive ? "放回工作台" : "拖出为浮窗"} aria-label={floatActive ? "将游戏放回工作台" : "将游戏拖出为浮窗"} aria-pressed={floatActive} onClick={onFloatToggle}>⧉</button>
       </div>
       <label className="oh-game-project" title="切换项目将重新载入试玩"><span>游戏项目</span><select aria-label="游戏项目；切换将重新载入试玩" value={project.id} onChange={(event) => { onGameProject(event.target.value); }}>
         {workspace.games.some((item) => item.source === "workspace") && <optgroup label="我的项目">{workspace.games.filter((item) => item.source === "workspace").map((item) => <option value={item.id} key={item.id}>{`我的项目 · ${item.title}`}</option>)}</optgroup>}
@@ -681,6 +730,11 @@ function CreativeWorkbench({
   const productionIntentCalls = useStore((memory) => memory.productionIntentCalls);
   const featurePane = useStore((memory) => memory.featurePane);
   const setFeaturePane = actions.setFeaturePane;
+  const splitTree = useStore((memory) => memory.splitTree);
+  const setSplitTree = actions.setSplitTree;
+  const setFloat = actions.setFloat;
+  const floats = useStore((memory) => memory.floats);
+  const setFloats = actions.setFloats;
   const surfaceRef = useRef<HTMLDivElement>(null);
   const setWorkbenchPreference = actions.setWorkbenchPreference;
   const applyWorkbenchPreference = useCallback((preference: WorkbenchPreference): void => {
@@ -792,12 +846,86 @@ function CreativeWorkbench({
   const editorPositions = useRef(new Map<string, { readonly scrollTop: number; readonly selectionStart: number; readonly selectionEnd: number }>());
   const editorReady = buffer !== undefined && buffer.missing !== true;
   const workspaceKind = workbench === "game" || workbench === "video" ? undefined : workbench;
-  const featureList = useMemo(
-    () => workspaceKind === undefined ? [] : workbenchFeatures().filter((feature) => feature.workbenches.includes(workspaceKind)),
-    [workspaceKind]
-  );
+  const featureList = useMemo(() => {
+    if (workspaceKind === undefined) return [];
+    let storage: { getItem: (key: string) => string | null } | undefined;
+    try {
+      const raw = globalThis.localStorage;
+      storage = raw === undefined || raw === null ? undefined : raw;
+    } catch { storage = undefined; }
+    const active = storage;
+    // The settings panel owns the toggles; the registry itself stays read-only.
+    return workbenchFeatures().filter((feature) => feature.workbenches.includes(workspaceKind) && readFeatureEnabled(active, feature.id));
+  }, [workspaceKind, featurePane]);
   const gameBuilding = normalizedActivities.some(({ path }) => path.startsWith("game-adaptations/"));
   const videoBuilding = normalizedActivities.some(({ path }) => path.startsWith("video-recaps/"));
+
+  // Phase C layout restore (session isolated) + debounced persist. The DSH
+  // Session Store is not persisted, so localStorage stays the authority and
+  // the store mirrors it for this session.
+  const appliedLayoutSession = useRef<string>();
+  useEffect(() => {
+    if (appliedLayoutSession.current === sessionId) return;
+    appliedLayoutSession.current = sessionId;
+    const raw = readWorkbenchLayoutRaw(workbenchPreferenceStorage(), sessionId);
+    if (raw === undefined) {
+      setSplitTree(defaultSplitTree());
+      setFloats({});
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as { readonly split?: unknown; readonly floats?: Readonly<Record<string, unknown>> };
+      setSplitTree(sanitizeSplit(parsed.split));
+      const view = { width: globalThis.innerWidth, height: globalThis.innerHeight };
+      const entries = isLayoutRecord(parsed.floats) ? parsed.floats : {};
+      const next: Record<string, FloatGeometry> = {};
+      for (const [panelId, geometry] of Object.entries(entries)) {
+        if (!isLayoutRecord(geometry)) continue;
+        const partial: PartialFloatGeometry = {
+          x: typeof geometry.x === "number" ? geometry.x : undefined,
+          y: typeof geometry.y === "number" ? geometry.y : undefined,
+          width: typeof geometry.width === "number" ? geometry.width : undefined,
+          height: typeof geometry.height === "number" ? geometry.height : undefined
+        };
+        next[panelId] = clampFloatGeometry(partial, view);
+      }
+      setFloats(next);
+    } catch {
+      setSplitTree(defaultSplitTree());
+      setFloats({});
+    }
+  }, [sessionId, setFloats, setSplitTree]);
+
+  const persistTimer = useRef<ReturnType<typeof globalThis.setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    if (appliedLayoutSession.current !== sessionId) return;
+    globalThis.clearTimeout(persistTimer.current);
+    persistTimer.current = globalThis.setTimeout(() => {
+      writeWorkbenchLayoutRaw(workbenchPreferenceStorage(), sessionId, JSON.stringify({ split: splitTree, floats }));
+    }, 200);
+    return () => { globalThis.clearTimeout(persistTimer.current); };
+  }, [sessionId, splitTree, floats]);
+
+  const resetLayout = useCallback(() => {
+    setSplitTree(defaultSplitTree());
+    setFloats({});
+  }, [setFloats, setSplitTree]);
+
+  const toggleStudioFloat = useCallback((panelId: string) => {
+    const current = floats[panelId];
+    setFloat(panelId, current === undefined
+      ? defaultFloatGeometry({ width: globalThis.innerWidth, height: globalThis.innerHeight })
+      : undefined);
+  }, [floats, setFloat]);
+
+  useEffect(() => {
+    settingsBridge.current = {
+      layoutReset: resetLayout,
+      workbenchOpen: open,
+      onWorkbenchPreference: applyWorkbenchPreference,
+      cwd: workspace?.cwd
+    };
+  });
 
   useEffect(() => { buffersRef.current = buffers; }, [buffers]);
 
@@ -1395,8 +1523,30 @@ function CreativeWorkbench({
           onWorkbench={selectWorkbench}
           onCollapse={() => { applyWorkbenchPreference("closed"); }}
           onSelect={revealPath}
+          floatActive={floats[GAME_FLOAT_ID] !== undefined}
+          onFloatToggle={() => { toggleStudioFloat(GAME_FLOAT_ID); }}
         />}
+    {floats[GAME_FLOAT_ID] !== undefined && workspace !== undefined && gameStudioMounted && workbench === "game" && (() => {
+      const geometry = floats[GAME_FLOAT_ID];
+      if (geometry === undefined) return null;
+      return <FreeWindow
+        panelId={GAME_FLOAT_ID}
+        title="游戏 Studio（浮窗）"
+        geometry={geometry}
+        onMove={(panelId, next) => { setFloat(panelId, next); }}
+        onDock={(panelId) => { setFloat(panelId, undefined); }}
+      >
+        <FloatMirror title={(workspace.games.find((item) => item.id === gameProjectId) ?? workspace.games[0])?.title ?? "游戏"} hint="预览在工作台原位运行；浮窗只做状态镜像。" />
+      </FreeWindow>;
+    })()}
     {workbench === "video" && workspace === undefined && <main id={compactVideoStudioId} className="oh-video-studio" role="tabpanel" aria-labelledby={`${compactTabsId}-studio-tab`}><div className="oh-video-preview-empty">{error ?? "正在连接视频工作台…"}</div></main>}
+    {workbench === "video" && workspace !== undefined && videoStudioMounted && <button
+      className="oh-video-float-entry"
+      type="button"
+      aria-label={floats[VIDEO_FLOAT_ID] === undefined ? "将视频 Studio 拖出为浮窗" : "将视频 Studio 放回工作台"}
+      aria-pressed={floats[VIDEO_FLOAT_ID] !== undefined}
+      onClick={() => { toggleStudioFloat(VIDEO_FLOAT_ID); }}
+    >⧉</button>}
     {workspace !== undefined && videoStudioMounted && <VideoStudio
           sessionId={sessionId}
           projects={workspace.videos}
@@ -1412,8 +1562,28 @@ function CreativeWorkbench({
           onWorkbench={selectWorkbench}
           onCollapse={() => { applyWorkbenchPreference("closed"); }}
         />}
+    {floats[VIDEO_FLOAT_ID] !== undefined && workspace !== undefined && videoStudioMounted && workbench === "video" && (() => {
+      const geometry = floats[VIDEO_FLOAT_ID];
+      if (geometry === undefined) return null;
+      return <FreeWindow
+        panelId={VIDEO_FLOAT_ID}
+        title="视频 Studio（浮窗）"
+        geometry={geometry}
+        onMove={(panelId, next) => { setFloat(panelId, next); }}
+        onDock={(panelId) => { setFloat(panelId, undefined); }}
+      >
+        <FloatMirror title={(workspace.videos.find((item) => item.id === videoProjectId) ?? workspace.videos[0])?.title ?? "视频"} hint="播放器在工作台原位运行；浮窗只做状态镜像。" />
+      </FreeWindow>;
+    })()}
     {workbench !== "game" && workbench !== "video" && <>
-    <aside className="oh-story-tree">
+    <SplitPaneView
+      className="oh-story-split"
+      tree={splitTree}
+      onResize={(path, fraction) => { setSplitTree(setFraction(splitTree, path, fraction)); }}
+      renderLeaf={(leafId) => {
+        if (leafId === TREE_LEAF_ID) {
+          return (
+            <aside className="oh-story-tree" data-oh-leaf="tree">
       <div className="oh-story-brand">
         <span className="oh-story-brand-cluster"><strong>✦ <span>Oh Story</span></strong>{workspaceKind !== undefined && <span className="oh-story-kind">{workspaceKind === "story" ? "小说" : "短剧"}</span>}</span>
         <span className="oh-story-brand-actions">
@@ -1459,8 +1629,12 @@ function CreativeWorkbench({
           </details>;
         })}
       </nav>
-    </aside>
-    <main className="oh-story-editor">
+            </aside>
+          );
+        }
+        if (leafId === EDITOR_LEAF_ID) {
+          return (
+            <main className="oh-story-editor" data-oh-leaf="editor">
       <header>
         <span className="oh-story-editor-path" title={selected}><span>{selectedLabel}</span><strong>{selectedBasename}</strong></span>
         <div className="oh-story-editor-actions">
@@ -1568,19 +1742,38 @@ function CreativeWorkbench({
             spellCheck={!structured}
             aria-label={selected}
           />}
-    </main>
+            </main>
+          );
+        }
+        return null;
+      }}
+    />
     {featurePane !== undefined && (() => {
       const feature = featureList.find((value) => value.id === featurePane);
       if (feature === undefined) return null;
       const Panel = feature.component;
+      const panel = <Panel sessionId={sessionId} workspace={workspace} selected={selected} onReveal={revealFeatureTarget} onClose={() => { setFeaturePane(undefined); }} />;
+      const geometry = floats[feature.id];
+      if (geometry !== undefined) {
+        return <FreeWindow
+          panelId={feature.id}
+          title={feature.label}
+          geometry={geometry}
+          onMove={(panelId, next) => { setFloat(panelId, next); }}
+          onDock={(panelId) => { setFloat(panelId, undefined); }}
+        >{panel}</FreeWindow>;
+      }
       return <aside className="oh-feature-drawer" role="complementary" aria-label={feature.label}>
         <header className="oh-feature-drawer-header">
           <strong><span aria-hidden>{feature.icon}</span> {feature.label}</strong>
-          <button type="button" title="关闭" aria-label={`关闭 ${feature.label}`} onClick={() => { setFeaturePane(undefined); }}>×</button>
+          <span className="oh-feature-drawer-actions">
+            <button type="button" title="拖出为浮窗" aria-label={`将${feature.label}拖出为浮窗`} onClick={() => {
+              setFloat(feature.id, defaultFloatGeometry({ width: globalThis.innerWidth, height: globalThis.innerHeight }));
+            }}>⧉</button>
+            <button type="button" title="关闭" aria-label={`关闭 ${feature.label}`} onClick={() => { setFeaturePane(undefined); }}>×</button>
+          </span>
         </header>
-        <div className="oh-feature-drawer-body">
-          <Panel sessionId={sessionId} workspace={workspace} selected={selected} onReveal={revealFeatureTarget} onClose={() => { setFeaturePane(undefined); }} />
-        </div>
+        <div className="oh-feature-drawer-body">{panel}</div>
       </aside>;
     })()}
     </>}
@@ -1810,6 +2003,7 @@ function ProductionToolView({ block, inspect }: ToolCallViewProps) {
 /** Register only official DSH surfaces; the split bridge never replaces Chat. */
 export function apply(context: ClientContext): void {
   registerClientFeatures();
+  registerSettingsFeature();
   context.slots.inject("shell.overlay", () => {
     const disposeSeat = context.slots.register({
       name: "shell.overlay",

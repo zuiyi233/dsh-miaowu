@@ -1169,3 +1169,40 @@
 .oh-feature-drawer-header button:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
 .oh-feature-drawer-header button:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
 .oh-feature-drawer-body { box-sizing: border-box; min-height: 0; flex: 1; overflow: auto; }
+
+/* Phase C: split panes span the tree/editor grid columns; floats are fixed
+   viewport boxes that never push the columns. */
+.oh-story-split { display: flex; grid-column: 1 / 3; grid-row: 1; min-width: 0; min-height: 0; height: 100%; align-self: start; }
+.oh-split-contents { display: contents; }
+.oh-split-pane { display: flex; min-width: 0; min-height: 0; flex: 1; }
+.oh-split-cell { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
+.oh-split-cell > .oh-story-tree, .oh-split-cell > .oh-story-editor { height: 100%; flex: 1; }
+.oh-split-divider { flex: none; touch-action: none; cursor: col-resize; background: transparent; width: 8px; margin-inline: -4px; }
+.oh-split-divider:hover, .oh-split-divider:focus-visible { background: var(--dsw-alias-interactive-bg-hover); outline: none; }
+[data-oh-splitting] .oh-split-pane, [data-oh-splitting] .oh-split-cell { transition: none; }
+[data-oh-story-layout="compact"] .oh-split-divider { display: none; }
+[data-oh-story-layout="compact"] .oh-split-pane { flex-direction: column; }
+.oh-feature-drawer-actions { display: flex; flex: none; align-items: center; gap: 2px; }
+.oh-workbench-float, .oh-video-float-entry { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; color: var(--os-muted); background: transparent; padding: 0; cursor: pointer; font: inherit; font-size: 14px; }
+.oh-workbench-float { flex: none; border: 0; }
+.oh-video-float-entry { position: absolute; z-index: 20; top: 8px; right: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-base); }
+.oh-workbench-float:hover, .oh-video-float-entry:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
+.oh-workbench-float:focus-visible, .oh-video-float-entry:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: -2px; }
+.oh-workbench-float[aria-pressed="true"], .oh-video-float-entry[aria-pressed="true"] { color: var(--dsw-alias-state-business-primary); }
+.oh-float-window { box-sizing: border-box; display: flex; position: fixed; z-index: 60; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1); box-shadow: 0 16px 50px rgb(0 0 0 / 28%); }
+.oh-float-header { display: flex; min-height: 36px; flex: none; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px 4px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1); cursor: move; touch-action: none; user-select: none; font-size: 12px; }
+.oh-float-header strong { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.oh-float-actions { display: flex; flex: none; gap: 2px; }
+.oh-float-actions button { min-width: 28px; min-height: 28px; border: 0; border-radius: 6px; color: var(--os-muted); background: transparent; cursor: pointer; font: 600 14px/1 var(--dsw-font-family); }
+.oh-float-actions button:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
+.oh-float-body { min-height: 0; flex: 1; overflow: auto; }
+.oh-float-body > .oh-game-design-empty { min-height: 100%; box-sizing: border-box; }
+.oh-float-resize { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; touch-action: none; }
+.oh-settings-panel { display: flex; min-height: 0; height: 100%; flex-direction: column; gap: 14px; padding: 12px 14px 18px; font-size: 12px; }
+.oh-settings-section { display: flex; flex-direction: column; gap: 6px; }
+.oh-settings-section h4 { margin: 0; font-size: 12px; font-weight: 600; }
+.oh-settings-section p { margin: 0; color: var(--os-muted); line-height: 1.6; }
+.oh-settings-section button { align-self: flex-start; min-height: 30px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 7px; padding: 4px 12px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); cursor: pointer; font: inherit; }
+.oh-settings-section button:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oh-settings-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--dsw-alias-label-primary); font-size: 12px; }
+.oh-settings-toggle input { width: 15px; height: 15px; accent-color: var(--dsw-alias-state-business-primary); }
