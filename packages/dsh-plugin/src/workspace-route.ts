@@ -16,6 +16,7 @@ import { type GameVerificationBinding, WorkspaceVerificationTracker } from "./ga
 import { defaultNovelToGameSkillRoot } from "./skill-provider.js";
 import { skipVideoDirectory, summarizeVideoProject, VIDEO_DIRECTORY, videoProjectRoot, visibleVideoPath, type VideoProjectSummary } from "./video-project.js";
 import { isTrustedPreviewNavigation, isTrustedWorkspaceRequest } from "./workspace-request-trust.js";
+import { workspaceExtensions } from "./services/registry.js";
 
 const STORY_DIRECTORIES = ["正文", "大纲", "设定", "追踪", "对标", "参考资料"] as const;
 const DRAMA_DIRECTORIES = ["输入", "项目开发", "设定集", "剧集", "交付", "创作者决策", "审查"] as const;
@@ -40,7 +41,7 @@ const workspaceVerificationTracker = new WorkspaceVerificationTracker();
 const execFileAsync = promisify(execFile);
 let videoPreflightCache: { readonly expires: number; readonly value: VideoPreflightSummary } | undefined;
 
-interface WorkspaceRouteOptions {
+export interface WorkspaceRouteOptions {
   readonly maxBytes: number;
   readonly trustedHosts?: readonly string[];
 }
@@ -81,7 +82,7 @@ interface GameProjectSummary {
   readonly verification: GameVerificationSummary;
 }
 
-interface WorkspaceRealm {
+export interface WorkspaceRealm {
   readonly agent: Agent;
   readonly fs: FileSystem;
   readonly sandboxPolicy: SandboxPolicyService;
@@ -95,7 +96,7 @@ interface ReadFileResult {
   readonly version: FsVersion;
 }
 
-class WorkspaceHttpError extends Error {
+export class WorkspaceHttpError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
 }
 
@@ -145,7 +146,7 @@ async function videoPreflight(): Promise<VideoPreflightSummary> {
   return value;
 }
 
-function send(response: ServerResponse, status: number, value: unknown): void {
+export function send(response: ServerResponse, status: number, value: unknown): void {
   const body = `${JSON.stringify(value)}\n`;
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
@@ -248,7 +249,7 @@ async function sendWorkspaceMedia(request: IncomingMessage, response: ServerResp
   sendMediaBytes(request, response, await realm.fs.readBytes(target, undefined, MEDIA_MAX_BYTES), mimeType);
 }
 
-async function jsonBody(request: IncomingMessage, maxBytes: number): Promise<Record<string, unknown>> {
+export async function jsonBody(request: IncomingMessage, maxBytes: number): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request as AsyncIterable<Uint8Array>) {
@@ -319,13 +320,13 @@ async function workspaceRealmForSession(context: Context, rawId: string): Promis
   return { agent, fs, sandboxPolicy, cwd, root: await fs.resolve(cwd) };
 }
 
-async function workspaceRealm(context: Context, url: URL): Promise<WorkspaceRealm> {
+export async function workspaceRealm(context: Context, url: URL): Promise<WorkspaceRealm> {
   const rawId = url.searchParams.get("sessionId");
   if (rawId === null) throw new WorkspaceHttpError(400, "缺少 DSH sessionId。");
   return workspaceRealmForSession(context, rawId);
 }
 
-async function creativeTarget(realm: WorkspaceRealm, path: string, kind: "text" | "media" = "text"): Promise<FsTarget> {
+export async function creativeTarget(realm: WorkspaceRealm, path: string, kind: "text" | "media" = "text"): Promise<FsTarget> {
   assertCreativePath(path, kind);
   const target = await realm.fs.resolve(path, { cwd: realm.cwd });
   if (!realm.fs.contains(realm.root, target)) throw new WorkspaceHttpError(403, "文件路径离开了 DSH 工作目录。");
@@ -339,7 +340,7 @@ function requireRegularFile(info: FsInfo | undefined): FsInfo {
 }
 
 /** Read bytes and a matching opaque version, retrying if a writer wins the read window. */
-async function readVersionedFile(fs: FileSystem, target: FsTarget, maxBytes: number): Promise<ReadFileResult> {
+export async function readVersionedFile(fs: FileSystem, target: FsTarget, maxBytes: number): Promise<ReadFileResult> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const before = requireRegularFile(await fs.stat(target));
     if (before.size !== undefined && before.size > maxBytes) throw new WorkspaceHttpError(413, "文件超过工作台大小限制。");
@@ -695,7 +696,7 @@ async function previewBytes(context: Context, pathname: string): Promise<{ reado
   throw new WorkspaceHttpError(404, "游戏预览不存在。");
 }
 
-function mapFsError(error: unknown): WorkspaceHttpError | undefined {
+export function mapFsError(error: unknown): WorkspaceHttpError | undefined {
   if (!(error instanceof FsError)) return undefined;
   switch (error.code) {
     case "FS_NOT_FOUND": return new WorkspaceHttpError(404, "文件不存在。");
@@ -780,6 +781,11 @@ async function handle(context: Context, request: IncomingMessage, response: Serv
       );
       send(response, 200, { path, content: outcome.after, bytes: Buffer.byteLength(outcome.after), version: outcome.version });
       return;
+    }
+    // Feature extensions registered through the services seam handle everything the core
+    // route does not know about. Each extension returns true once it answered the request.
+    for (const extension of workspaceExtensions()) {
+      if (await extension.handle(context, request, response, options)) return;
     }
     send(response, 404, { error: "Oh Story route not found." });
   } catch (error) {

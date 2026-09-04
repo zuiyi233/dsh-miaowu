@@ -1121,3 +1121,51 @@
 [data-conversation-scroll][data-oh-story-workbench="video"][data-oh-story-layout="compact"] .oh-video-preview-actions { grid-column: 2; grid-row: 1 / 3; }
 [data-conversation-scroll][data-oh-story-workbench="video"][data-oh-story-layout="compact"] .oh-video-preview-actions button:first-child { max-width: 70px; }
 [data-conversation-scroll][data-oh-story-workbench="video"][data-oh-story-layout="compact"] .oh-video-artifacts { grid-template-columns: minmax(105px, 35%) minmax(0, 1fr); }
+
+/* Feature drawers (search / history / ...) overlay the editor column of the
+   story and drama workbench. The grid host owns the columns, so the drawer is
+   pinned between the tree and the Chat column instead of being a grid child. */
+.oh-feature-drawer {
+  box-sizing: border-box;
+  display: flex;
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  bottom: 0;
+  left: clamp(184px, 16%, 200px);
+  right: clamp(408px, 40%, 520px);
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border-left: 1px solid var(--os-border);
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base);
+}
+.oh-feature-drawer-header {
+  box-sizing: border-box;
+  display: flex;
+  min-height: 40px;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--os-border);
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base);
+  font-size: 12px;
+}
+.oh-feature-drawer-header strong { font-weight: 500; white-space: nowrap; }
+.oh-feature-drawer-header button {
+  min-width: 26px;
+  min-height: 26px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--os-muted);
+  background: transparent;
+  cursor: pointer;
+  font: 600 15px/1 var(--dsw-font-family);
+}
+.oh-feature-drawer-header button:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
+.oh-feature-drawer-header button:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
+.oh-feature-drawer-body { box-sizing: border-box; min-height: 0; flex: 1; overflow: auto; }

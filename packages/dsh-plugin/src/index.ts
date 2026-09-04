@@ -9,6 +9,7 @@ import { registerOhStoryHooks } from "./native-hooks.js";
 import { registerOhStoryRoleTool } from "./role-tool.js";
 import { registerOhStoryProductionTool } from "./production-tool.js";
 import { registerWorkspaceRoute } from "./workspace-route.js";
+import { registerWorkspaceServices } from "./services/index.js";
 import { assertTrustedWorkspaceAuthority } from "./workspace-request-trust.js";
 
 export { createDramaSkillProvider, createNovelToGameSkillProvider, createOhStorySkillProvider, createVideoRecapSkillProvider, parseBundledSkill } from "./skill-provider.js";
@@ -45,6 +46,7 @@ export async function apply(context: Context, config: Config = {}): Promise<void
   registerOhStoryHooks(context);
   registerOhStoryProductionTool(context);
   await registerOhStoryRoleTool(context);
+  registerWorkspaceServices();
   registerWorkspaceRoute(context, { maxBytes: config.editorMaxBytes ?? 2_097_152, trustedHosts });
 }
 

@@ -55,6 +55,8 @@ import {
 } from "./workbench-presence.js";
 import { endpoint, handleTabKey } from "./workbench-ui.js";
 import styles from "./plugin.css?inline";
+import { registerClientFeatures } from "./features/index.js";
+import { workbenchFeatures } from "./features/registry.js";
 
 export const name = "oh-story";
 export const inject = ["slots", "sessions", "conversation"];
@@ -133,6 +135,7 @@ interface WorkbenchMemory {
   productionCanvas: Record<string, Record<string, CanvasPoint>>;
   productionZoom: Record<string, number>;
   productionIntentCalls: Record<string, boolean>;
+  featurePane: string | undefined;
 }
 
 type Update<T> = T | ((current: T) => T);
@@ -164,7 +167,8 @@ function createWorkbenchStore() {
       productionSequence: {},
       productionCanvas: {},
       productionZoom: {},
-      productionIntentCalls: {}
+      productionIntentCalls: {},
+      featurePane: undefined
     }),
     actions: {
       setBuffers: (draft, update: Update<Record<string, FileBuffer>>) => {
@@ -229,6 +233,9 @@ function createWorkbenchStore() {
       },
       setProductionIntentCalls: (draft, update: Update<Record<string, boolean>>) => {
         draft.productionIntentCalls = applyUpdate(draft.productionIntentCalls, update);
+      },
+      setFeaturePane: (draft, update: Update<string | undefined>) => {
+        draft.featurePane = applyUpdate(draft.featurePane, update);
       }
     }
   });
@@ -672,6 +679,8 @@ function CreativeWorkbench({
   const productionCanvasByEpisode = useStore((memory) => memory.productionCanvas);
   const productionZoomByEpisode = useStore((memory) => memory.productionZoom);
   const productionIntentCalls = useStore((memory) => memory.productionIntentCalls);
+  const featurePane = useStore((memory) => memory.featurePane);
+  const setFeaturePane = actions.setFeaturePane;
   const surfaceRef = useRef<HTMLDivElement>(null);
   const setWorkbenchPreference = actions.setWorkbenchPreference;
   const applyWorkbenchPreference = useCallback((preference: WorkbenchPreference): void => {
@@ -783,6 +792,10 @@ function CreativeWorkbench({
   const editorPositions = useRef(new Map<string, { readonly scrollTop: number; readonly selectionStart: number; readonly selectionEnd: number }>());
   const editorReady = buffer !== undefined && buffer.missing !== true;
   const workspaceKind = workbench === "game" || workbench === "video" ? undefined : workbench;
+  const featureList = useMemo(
+    () => workspaceKind === undefined ? [] : workbenchFeatures().filter((feature) => feature.workbenches.includes(workspaceKind)),
+    [workspaceKind]
+  );
   const gameBuilding = normalizedActivities.some(({ path }) => path.startsWith("game-adaptations/"));
   const videoBuilding = normalizedActivities.some(({ path }) => path.startsWith("video-recaps/"));
 
@@ -836,6 +849,20 @@ function CreativeWorkbench({
     setSelected(path);
     expandPath(path);
   }, [expandPath, rememberEditorPosition]);
+
+  // Feature panels (search, history, ...) ask for a file to be opened at a line and
+  // character offset. The editor applies the remembered position once the buffer loads.
+  const revealFeatureTarget = useCallback((path: string, line: number, offset: number): void => {
+    rememberEditorPosition();
+    editorPositions.current.set(path, {
+      scrollTop: Math.max(0, (line - 1) * 28 - 72),
+      selectionStart: offset,
+      selectionEnd: offset
+    });
+    modeSelection.current = path;
+    revealPath(path);
+    setEditorMode("source");
+  }, [rememberEditorPosition, revealPath]);
 
   useEffect(() => {
     if (workspace === undefined) return;
@@ -1390,6 +1417,14 @@ function CreativeWorkbench({
       <div className="oh-story-brand">
         <span className="oh-story-brand-cluster"><strong>✦ <span>Oh Story</span></strong>{workspaceKind !== undefined && <span className="oh-story-kind">{workspaceKind === "story" ? "小说" : "短剧"}</span>}</span>
         <span className="oh-story-brand-actions">
+          {featureList.map((feature) => <button
+            key={feature.id}
+            type="button"
+            title={feature.label}
+            aria-label={feature.label}
+            aria-pressed={featurePane === feature.id}
+            onClick={() => { setFeaturePane(featurePane === feature.id ? undefined : feature.id); }}
+          >{feature.icon}</button>)}
           <button type="button" onClick={reload} title="刷新" aria-label="刷新项目文件">↻</button>
           <button type="button" onClick={() => { applyWorkbenchPreference("closed"); }} title="收起创作工作台" aria-label="收起创作工作台">×</button>
         </span>
@@ -1534,6 +1569,20 @@ function CreativeWorkbench({
             aria-label={selected}
           />}
     </main>
+    {featurePane !== undefined && (() => {
+      const feature = featureList.find((value) => value.id === featurePane);
+      if (feature === undefined) return null;
+      const Panel = feature.component;
+      return <aside className="oh-feature-drawer" role="complementary" aria-label={feature.label}>
+        <header className="oh-feature-drawer-header">
+          <strong><span aria-hidden>{feature.icon}</span> {feature.label}</strong>
+          <button type="button" title="关闭" aria-label={`关闭 ${feature.label}`} onClick={() => { setFeaturePane(undefined); }}>×</button>
+        </header>
+        <div className="oh-feature-drawer-body">
+          <Panel sessionId={sessionId} workspace={workspace} selected={selected} onReveal={revealFeatureTarget} onClose={() => { setFeaturePane(undefined); }} />
+        </div>
+      </aside>;
+    })()}
     </>}
   </div>;
 }
@@ -1760,6 +1809,7 @@ function ProductionToolView({ block, inspect }: ToolCallViewProps) {
 
 /** Register only official DSH surfaces; the split bridge never replaces Chat. */
 export function apply(context: ClientContext): void {
+  registerClientFeatures();
   context.slots.inject("shell.overlay", () => {
     const disposeSeat = context.slots.register({
       name: "shell.overlay",

@@ -13,7 +13,8 @@ export default tseslint.config(
       "docs/blueprint/**",
       "packages/knowledge/oh-story/**",
       "packages/knowledge/novel-to-game/**",
-      "release/**"
+      "release/**",
+      "参考项目/**"
     ]
   },
   {
