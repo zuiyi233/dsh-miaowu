@@ -8,7 +8,7 @@ import type {} from "@deepseek-ai/dsh-client-ui-renderer/client";
 import type {} from "@deepseek-ai/dsh-client-ui-session/client";
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from "@deepseek-ai/dsh-client-ui-slots";
 import type { ToolCallViewProps } from "@deepseek-ai/dsh-client-ui-tool/client";
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import {
   creativeRelativePath,
@@ -58,7 +58,8 @@ import {
 import { endpoint, handleTabKey, isLayoutRecord, readFeatureEnabled } from "./workbench-ui.js";
 import styles from "./plugin.css?inline";
 import { registerClientFeatures } from "./features/index.js";
-import { workbenchFeatures } from "./features/registry.js";
+import { getFileViewersSnapshot, matchFileViewer, subscribeFileViewers, workbenchFeatures } from "./features/registry.js";
+import type { FileViewerDescriptor } from "./features/registry.js";
 import { SplitPaneView } from "./layout/split-pane.js";
 import { clampFloatGeometry, defaultFloatGeometry, FreeWindow, type FloatGeometry, type PartialFloatGeometry } from "./layout/free-window.js";
 import {
@@ -129,7 +130,7 @@ interface FileBuffer {
 interface WorkbenchMemory {
   buffers: Record<string, FileBuffer>;
   workbenchPreference: WorkbenchPreference | undefined;
-  editorMode: "preview" | "source" | "production";
+  editorMode: "preview" | "source" | "production" | "view";
   expanded: Record<string, boolean>;
   selected: string | undefined;
   workbench: WorkbenchMode;
@@ -651,6 +652,18 @@ function GameStudio({  sessionId,
   </main>;
 }
 
+/** Render the registered file viewer for the selected text file (D1 「视图」tab). */
+function FileViewerHost({ viewer, sessionId, path, content, onClose }: {
+  readonly viewer: FileViewerDescriptor;
+  readonly sessionId: string;
+  readonly path: string;
+  readonly content: string;
+  readonly onClose: () => void;
+}) {
+  const Viewer = viewer.component;
+  return <Viewer sessionId={sessionId} path={path} content={content} onClose={onClose} />;
+}
+
 function CreativeWorkbench({
   sessionId,
   runningCalls,
@@ -765,6 +778,13 @@ function CreativeWorkbench({
   const episodeDirectory = episodeDirectoryForPath(selected);
   const productionAvailable = selected !== undefined && isCreatorDocumentPath(selected) && episodeDirectory !== undefined;
   const editorModes = productionAvailable ? EDITOR_MODES : EDITOR_MODES.filter((mode) => mode !== "production");
+  // File-viewer registry (D1): the snapshot re-renders the editor when viewers register/unregister.
+  const fileViewerRevision = useSyncExternalStore(subscribeFileViewers, getFileViewersSnapshot);
+  const selectedViewer = useMemo(
+    () => selected === undefined || selectedMedia ? undefined : matchFileViewer(selected, "text"),
+    [fileViewerRevision, selected, selectedMedia]
+  );
+  const visibleEditorModes = selectedViewer === undefined ? editorModes : [...editorModes, "view" as const];
   const episodeDocumentPaths = useMemo(
     () => episodeDirectory === undefined ? [] : creatorDocumentPaths(workspace?.files.filter((file) => file.kind === "text") ?? [], episodeDirectory),
     [episodeDirectory, workspace?.files]
@@ -1092,6 +1112,11 @@ function CreativeWorkbench({
     modeSelection.current = selected;
     setEditorMode(selected !== undefined && activityPaths.has(selected) ? "source" : selectedMedia || previewable ? "preview" : "source");
   }, [activityPaths, previewable, selected, selectedMedia]);
+
+  // A newly selected file may match a different viewer; never strand the editor on "view".
+  useEffect(() => {
+    if (selectedViewer === undefined && editorMode === "view") setEditorMode("preview");
+  }, [editorMode, selectedViewer]);
 
   useEffect(() => {
     if (workspaceLoading) return;
@@ -1638,16 +1663,16 @@ function CreativeWorkbench({
       <header>
         <span className="oh-story-editor-path" title={selected}><span>{selectedLabel}</span><strong>{selectedBasename}</strong></span>
         <div className="oh-story-editor-actions">
-          {(previewable || productionAvailable) && !selectedMedia && <div className="oh-story-editor-tabs" role="tablist" aria-label={productionAvailable ? "短剧文档查看方式" : markdown ? "Markdown 查看方式" : "JSONL 查看方式"}>
-            {editorModes.map((mode) => <button
+          {(previewable || productionAvailable || selectedViewer !== undefined) && !selectedMedia && <div className="oh-story-editor-tabs" role="tablist" aria-label={productionAvailable ? "短剧文档查看方式" : markdown ? "Markdown 查看方式" : "JSONL 查看方式"}>
+            {visibleEditorModes.map((mode) => <button
               type="button"
               role="tab"
               key={mode}
               tabIndex={editorMode === mode ? 0 : -1}
               aria-selected={editorMode === mode}
-              onKeyDown={(event) => { handleTabKey(event, editorModes, editorMode, selectEditorMode); }}
+              onKeyDown={(event) => { handleTabKey(event, visibleEditorModes, editorMode, selectEditorMode); }}
               onClick={() => { selectEditorMode(mode); }}
-            >{mode === "preview" ? "预览" : mode === "source" ? "源码" : "生产"}</button>)}
+            >{mode === "preview" ? "预览" : mode === "source" ? "源码" : mode === "production" ? "生产" : selectedViewer === undefined ? "视图" : selectedViewer.label}</button>)}
           </div>}
           {(dirty || saving) && selected !== undefined && <button className="oh-story-save" type="button" disabled={saving || buffer?.missing === true} onClick={() => { void savePath(selected); }}>
             {saving ? "保存中…" : "保存"}
@@ -1714,6 +1739,8 @@ function CreativeWorkbench({
               onRemoveQueued={removeQueuedProduction}
               onRefresh={reload}
             />
+        : editorMode === "view" && selectedViewer !== undefined && selected !== undefined
+          ? <FileViewerHost viewer={selectedViewer} sessionId={sessionId} path={selected} content={buffer.content} onClose={() => { setEditorMode("preview"); }} />
         : previewable && editorMode === "preview"
           ? markdown
             ? <MarkdownPreview content={buffer.content} label={selected} />

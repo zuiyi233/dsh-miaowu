@@ -109,3 +109,48 @@ DEEPSEEK_API_KEY_FILE=/path/to/key pnpm test:dsh:real
 DEEPSEEK_API_KEY=... pnpm demo
 pnpm pack:release
 ```
+
+## Issue classification (P0/P1/P2)
+
+Every workbench defect found during review or native smoke is filed with one of
+three severities; the class decides whether a release or PR can proceed:
+
+| Class | Definition | Gate |
+| --- | --- | --- |
+| **P0** | Data loss or corruption: a save path silently drops the creator's text, a rollback/restore returns wrong content, version preconditions are bypassed, a backup restores into an existing path, or `.oh-story/` state is written outside the workspace containment boundary. Also any path that breaks the editor's atomic `replaceIfVersion` guarantee or lets a request escape `fs.contains`. | Blocks release; must be fixed and covered by a deterministic unit test before the change merges. |
+| **P1** | Functional regression of a shipped contract: search line/offset jumps point at the wrong line, history diff shows wrong content, candidate confirm/apply loses confirmed products, resume returns the wrong checkpoint, an AI-written file no longer hands the layout over, compact 500px clipping, or a knowledge manifest hash mismatch. | Must be fixed in the same phase; a regression test is required when the contract is deterministic. |
+| **P2** | Polish and maintenance debt: index.tsx exceeding the 900-line guidance, hard-coded values that should be named constants, a duplicated state table that could drift from the server, missing docs for a new route, or an unexercised native-smoke assertion. | Tracked in the backlog; does not block the phase, but must be listed in the phase summary. |
+
+The taxonomy is applied during the phase verification pass (`pnpm verify` plus
+the workbench chain checklist below). A green `pnpm verify` is necessary but not
+sufficient: any checklist item with no deterministic evidence is filed as at
+least P1 unless explicitly deferred with a reason.
+
+## Workbench chain checklist
+
+Each phase extends this checklist; every row must be answered with real evidence
+(a test name, a command output, or an explicit deferral with reason) before the
+phase commit. Rows marked 🔒 are enforced by `pnpm verify`.
+
+| Chain | Check | Evidence |
+| --- | --- | --- |
+| Editor save | PUT /oh-story/file accepts only a matching baseVersion; stale writes fail 412 🔒 | `workspace-seam.test.ts` (mapFsError), native smoke 20-writer CAS race |
+| Version history | Save appends a deduped snapshot (≤50/file); history list/version content accurate 🔒 | `history.test.ts` (save→snapshot→list, trim) |
+| Rollback | Restore uses CAS on the current version; stale baseVersion → 412; rollback re-snapshots and audits 🔒 | `history.test.ts` (rollback success/412/404) |
+| Audit | Every accepted editor save and every rollback appends to `.oh-story/audit.jsonl`; agent-direct writes are out of scope (documented) 🔒 | `history.test.ts` (audit entries) |
+| Annotations | Create/delete/re-anchor; quote moved → `moved`, removed → `stale`; invalid line range → 400 🔒 | `history.test.ts` (reanchor moved/stale) |
+| Search | Line-level index under `.oh-story/index/`; lazy version refresh; hits carry 1-based line + char offset; CJK + pinyin channels; 100k chars < 2s 🔒 | `search.test.ts` (15 cases incl. pinyin + perf smoke) |
+| Analysis | 拆文库 → structured sidecar (entities/relations/timeline/foreshadows/scenes) with exact evidence line numbers; export/query; idempotent parse 🔒 | `analysis.test.ts` (11 cases incl. hand-counted lines) |
+| Worldbuilding | `worldbuilding` skill listed/invocable; Phase 2 `设定/` output paths and story-architect contract pinned by parity 🔒 | `check-dsh-miaowu-parity.ts`, `skill-provider.test.ts` |
+| Candidate staging | propose → confirm → apply(file committer CAS) / reject / amend; unconfirmed apply → 409; idempotent replays; confirmed products survive run failure 🔒 | `tasks.test.ts` |
+| Run/step/resume | Run/step legal transitions; checkpoint store/read; resume returns most recent paused/failed run with checkpoint 🔒 | `tasks.test.ts` |
+| Backup | bundle/snapshot/full with hash/counts; restore-as-new never overwrites; offline import; backup→tamper→restore regression 🔒 | `backup.test.ts` (15 cases) |
+| Foreshadow loop | planned→planted→resolved state machine; reminders by chapter; snooze suppression; A3 sidecar import idempotent 🔒 | `foreshadows.test.ts` (11 cases) |
+| Bookshelf | Scan discovers novel/drama/game/video roots; archive/restore; 30-day recycle + purge-expired; content never touched 🔒 | `bookshelf.test.ts` (18 cases) |
+| View registry | registerFileViewer/match priority/detect/catch-all; editor 「视图」 tab only when a viewer matches 🔒 | `workbench-viewer.test.ts` |
+| Layout | Split state machine (clamp/sanitize/serialize); float geometry clamped; session-isolated persistence sanitized 🔒 | `workbench-layout.test.tsx` |
+| Vault | Off by default; enable gate; AES-GCM roundtrip; tamper detection; rotate invalidates old ciphertext 🔒 | `vault.test.ts` (19 cases) |
+| Knowledge parity | All five manifests hash-matched; new self-owned skills update `manifest.json` and pass `assets:check` 🔒 | `pnpm assets:check` |
+| Release size | Browser bundle stays inside the 400 KB budget 🔒 | `pnpm build` (client.js size guard) |
+| Native smoke | Chrome: 500px non-clipping, float/dock, layout persistence across Sessions, workbench claim rule | `pnpm test:dsh` (CI) |
+

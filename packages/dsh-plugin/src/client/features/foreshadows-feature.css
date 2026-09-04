@@ -1,0 +1,36 @@
+.oh-foreshadow-panel { display: flex; flex-direction: column; gap: 8px; min-height: 0; height: 100%; color: var(--dsw-alias-label-primary); font-size: 12px; overflow: auto; padding-bottom: 12px; }
+.oh-foreshadow-filters, .oh-foreshadow-create, .oh-foreshadow-import { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.oh-foreshadow-label { color: var(--dsw-alias-label-secondary); }
+.oh-foreshadow-input, .oh-foreshadow-select { padding: 6px 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); }
+.oh-foreshadow-input { flex: 1 1 140px; min-width: 0; }
+.oh-foreshadow-input:focus-visible, .oh-foreshadow-select:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
+.oh-foreshadow-reload { padding: 6px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-button-ghost-active-fill); cursor: pointer; }
+.oh-foreshadow-reload:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oh-foreshadow-status { min-height: 16px; color: var(--dsw-alias-label-secondary); }
+.oh-foreshadow-error { color: var(--dsw-alias-state-danger-primary, #d33); }
+.oh-foreshadow-message { color: var(--dsw-alias-label-primary); }
+.oh-foreshadow-section-title { margin: 4px 0; font-size: 12px; }
+.oh-foreshadow-reminders { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px dashed var(--dsw-alias-border-l2); border-radius: 8px; }
+.oh-foreshadow-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.oh-foreshadow-tab, .oh-foreshadow-tab-active { padding: 6px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-button-ghost-active-fill); color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.oh-foreshadow-tab-active { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); font-weight: 600; }
+.oh-foreshadow-empty { color: var(--dsw-alias-label-secondary); margin: 4px 0; }
+.oh-foreshadow-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.oh-foreshadow-card { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-base); }
+.oh-foreshadow-card-reminder { border-style: dashed; }
+.oh-foreshadow-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.oh-foreshadow-title { font-size: 12px; }
+.oh-foreshadow-badge { flex: none; font-size: 11px; color: var(--dsw-alias-label-secondary); }
+.oh-foreshadow-badge-planted { color: var(--dsw-alias-state-business-primary); }
+.oh-foreshadow-badge-resolved { color: var(--dsw-alias-label-primary); font-weight: 600; }
+.oh-foreshadow-meta { color: var(--dsw-alias-label-secondary); font-size: 11px; }
+.oh-foreshadow-desc { margin: 0; color: var(--dsw-alias-label-secondary); }
+.oh-foreshadow-evidence-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.oh-foreshadow-evidence { padding: 2px 6px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 11px; cursor: pointer; }
+.oh-foreshadow-evidence:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oh-foreshadow-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.oh-foreshadow-button { padding: 5px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; color: var(--dsw-alias-label-primary); background: transparent; cursor: pointer; }
+.oh-foreshadow-button:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oh-foreshadow-button-primary { padding: 5px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-button-ghost-active-fill); cursor: pointer; font-weight: 600; }
+.oh-foreshadow-button-primary:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oh-foreshadow-button:focus-visible, .oh-foreshadow-button-primary:focus-visible, .oh-foreshadow-evidence:focus-visible, .oh-foreshadow-tab:focus-visible, .oh-foreshadow-tab-active:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
