@@ -4,6 +4,8 @@
 import "./history.js";
 import "./search.js";
 import "./analysis.js";
+import "./tasks.js";
+import "./backup.js";
 
 export function registerWorkspaceServices(): void {
   // Feature modules above register themselves on import; nothing else to mount here.

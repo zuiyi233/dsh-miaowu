@@ -31,7 +31,7 @@
     "assets:sync:drama": "tsx scripts/sync-drama-assets.ts",
     "assets:sync:game": "tsx scripts/sync-novel-to-game-assets.ts",
     "assets:sync:video": "tsx scripts/sync-video-recap-assets.ts",
-    "assets:check": "tsx scripts/check-upstream-parity.ts && tsx scripts/check-drama-parity.ts && tsx scripts/check-novel-to-game-parity.ts && tsx scripts/check-video-recap-parity.ts",
+    "assets:check": "tsx scripts/check-upstream-parity.ts && tsx scripts/check-drama-parity.ts && tsx scripts/check-novel-to-game-parity.ts && tsx scripts/check-video-recap-parity.ts && tsx scripts/check-dsh-miaowu-parity.ts",
     "dsh:boundary": "tsx scripts/check-dsh-boundary.ts",
     "verify": "pnpm lint && pnpm typecheck && pnpm assets:check && pnpm dsh:boundary && pnpm test:unit && pnpm build",
     "verify:portable": "pnpm typecheck && pnpm assets:check && pnpm test:unit && pnpm build",

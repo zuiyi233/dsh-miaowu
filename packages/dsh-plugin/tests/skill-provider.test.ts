@@ -2,12 +2,13 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { renderSkillContent } from "@deepseek-ai/dsh-skill";
 import { describe, expect, it } from "vitest";
-import { createDramaSkillProvider, createNovelToGameSkillProvider, createOhStorySkillProvider, createVideoRecapSkillProvider, parseBundledSkill } from "../src/skill-provider.js";
+import { createDramaSkillProvider, createDshMiaowuSkillProvider, createNovelToGameSkillProvider, createOhStorySkillProvider, createVideoRecapSkillProvider, parseBundledSkill } from "../src/skill-provider.js";
 
 const skillRoot = resolve(import.meta.dirname, "../../knowledge/oh-story/skills");
 const dramaRoot = resolve(import.meta.dirname, "../../knowledge/drama/skills");
 const gameRoot = resolve(import.meta.dirname, "../../knowledge/novel-to-game/skills");
 const videoRoot = resolve(import.meta.dirname, "../../knowledge/video-recap/skills");
+const dshMiaowuRoot = resolve(import.meta.dirname, "../../knowledge/dsh-miaowu/skills");
 
 describe("Oh Story bundled skill provider", () => {
   it("publishes the complete upstream capability catalog with a DSH bridge", async () => {
@@ -157,6 +158,23 @@ describe("NovelToGame bundled provider", () => {
     for (const check of ["launch", "render", "input", "coreLoop", "outcome", "restart"]) {
       expect(qa?.content).toContain(check);
     }
+  });
+});
+
+describe("dsh-miaowu bundled provider", () => {
+  it("publishes the self-owned worldbuilding skill with a DSH bridge", async () => {
+    const provider = createDshMiaowuSkillProvider(dshMiaowuRoot);
+    const listed = await provider.list({});
+    if (!Array.isArray(listed)) throw new Error("Expected a dsh-miaowu catalog.");
+    const candidate = listed.find((entry) => entry.name === "worldbuilding");
+    expect(candidate).toBeDefined();
+    expect(candidate?.description).toMatch(/\S/u);
+    expect(candidate?.invocation.userInvocable).toBe(true);
+    const skill = await provider.get(candidate!, {});
+    expect(skill?.content).toContain("<dsh-miaowu-integration>");
+    expect(skill?.content).toContain("oh_story_role");
+    expect(skill?.content).toContain("story-architect");
+    expect(skill?.resourceBase).toEqual({ kind: "directory", path: resolve(dshMiaowuRoot, "worldbuilding") });
   });
 });
 

@@ -310,3 +310,29 @@ export function dshVideoRecapSkillContent(_name: string, content: string): strin
 export function createVideoRecapSkillProvider(skillRoot = defaultVideoRecapSkillRoot()): SkillProvider {
   return createBundledSkillProvider(VIDEO_PROVIDER_NAME, skillRoot, dshVideoRecapSkillContent);
 }
+
+const DSH_MIAOWU_PROVIDER_NAME = "dsh-miaowu";
+const DSH_MIAOWU_BRIDGE = [
+  "<dsh-miaowu-integration>",
+  "This Skill is a native DSH contribution owned by dsh-miaowu.",
+  "DSH owns the workspace, model, preset, permissions, Session Log, tools, subagents, cancellation, resume, and Agent UI.",
+  "Never start another Agent runtime, session transport, Dashboard, SSE stream, polling loop, or model configuration.",
+  "Invoke story-architect with oh_story_role and a self-contained prompt when architecture or character design help is needed; merge Role output back into the project 设定/ directory.",
+  "Use only DSH-visible tools. DSH sandbox and permission policy remain authoritative.",
+  "</dsh-miaowu-integration>"
+].join("\n");
+
+export function dshMiaowuSkillContent(_name: string, content: string): string {
+  return `${DSH_MIAOWU_BRIDGE}\n\n${content}`;
+}
+
+export function defaultDshMiaowuSkillRoot(): string {
+  const current = dirname(fileURLToPath(import.meta.url));
+  return basename(current) === "src"
+    ? resolve(current, "../../knowledge/dsh-miaowu/skills")
+    : resolve(current, "dsh-miaowu/skills");
+}
+
+export function createDshMiaowuSkillProvider(skillRoot = defaultDshMiaowuSkillRoot()): SkillProvider {
+  return createBundledSkillProvider(DSH_MIAOWU_PROVIDER_NAME, skillRoot, dshMiaowuSkillContent);
+}

@@ -9,6 +9,7 @@ const ohStoryRoot = resolve(root, "packages/knowledge/oh-story");
 const dramaRoot = resolve(root, "packages/knowledge/drama");
 const novelToGameRoot = resolve(root, "packages/knowledge/novel-to-game");
 const videoRecapRoot = resolve(root, "packages/knowledge/video-recap");
+const dshMiaowuRoot = resolve(root, "packages/knowledge/dsh-miaowu");
 const platformGlue = [
   "skills/story/assets/",
   "skills/story/scripts/dashboard-server.mjs",
@@ -116,6 +117,16 @@ await cp(novelToGameRoot, resolve(outputRoot, "novel-to-game"), {
 });
 
 await cp(videoRecapRoot, resolve(outputRoot, "video-recap"), {
+  recursive: true,
+  filter: (source) => {
+    return !source.includes("/__pycache__/")
+      && !source.endsWith("/__pycache__")
+      && !source.endsWith(".pyc")
+      && !source.endsWith("/.DS_Store");
+  }
+});
+
+await cp(dshMiaowuRoot, resolve(outputRoot, "dsh-miaowu"), {
   recursive: true,
   filter: (source) => {
     return !source.includes("/__pycache__/")

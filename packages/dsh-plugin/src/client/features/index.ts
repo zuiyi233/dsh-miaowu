@@ -4,6 +4,8 @@
 import "./history-feature.js";
 import "./search-feature.js";
 import "./analysis-feature.js";
+import "./tasks-feature.js";
+import "./backup-feature.js";
 
 export function registerClientFeatures(): void {
   // Feature modules above register themselves on import; nothing else to mount here.
