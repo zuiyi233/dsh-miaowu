@@ -3,6 +3,7 @@
 // evaluation is explicit even under tree shaking.
 import "./history-feature.js";
 import "./search-feature.js";
+import "./analysis-feature.js";
 
 export function registerClientFeatures(): void {
   // Feature modules above register themselves on import; nothing else to mount here.

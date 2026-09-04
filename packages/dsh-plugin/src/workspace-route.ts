@@ -16,7 +16,7 @@ import { type GameVerificationBinding, WorkspaceVerificationTracker } from "./ga
 import { defaultNovelToGameSkillRoot } from "./skill-provider.js";
 import { skipVideoDirectory, summarizeVideoProject, VIDEO_DIRECTORY, videoProjectRoot, visibleVideoPath, type VideoProjectSummary } from "./video-project.js";
 import { isTrustedPreviewNavigation, isTrustedWorkspaceRequest } from "./workspace-request-trust.js";
-import { workspaceExtensions } from "./services/registry.js";
+import { workspaceExtensions, notifyWorkspaceWrite } from "./services/registry.js";
 
 const STORY_DIRECTORIES = ["正文", "大纲", "设定", "追踪", "对标", "参考资料"] as const;
 const DRAMA_DIRECTORIES = ["输入", "项目开发", "设定集", "剧集", "交付", "创作者决策", "审查"] as const;
@@ -780,6 +780,7 @@ async function handle(context: Context, request: IncomingMessage, response: Serv
         realm.sandboxPolicy.resolve({ session: realm.agent.session })
       );
       send(response, 200, { path, content: outcome.after, bytes: Buffer.byteLength(outcome.after), version: outcome.version });
+      notifyWorkspaceWrite({ realm, path, content: outcome.after, bytes: Buffer.byteLength(outcome.after), version: outcome.version });
       return;
     }
     // Feature extensions registered through the services seam handle everything the core

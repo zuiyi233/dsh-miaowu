@@ -1,6 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { WorkspaceRouteOptions } from "../workspace-route.js";
+import type { WorkspaceRealm, WorkspaceRouteOptions } from "../workspace-route.js";
 
 /**
  * Host-side extension seam for the session workspace API. Feature modules register
@@ -30,4 +30,25 @@ export function registerWorkspaceExtension(extension: WorkspaceExtension): void 
 
 export function workspaceExtensions(): readonly WorkspaceExtension[] {
   return extensions;
+}
+
+/** A file save the core editor route accepted. */
+export interface WorkspaceWriteEvent {
+  readonly path: string;
+  readonly content: string;
+  readonly bytes: number;
+  readonly version: string;
+  readonly realm: WorkspaceRealm;
+}
+
+const writeListeners: Array<(event: WorkspaceWriteEvent) => void> = [];
+
+export function onWorkspaceWrite(listener: (event: WorkspaceWriteEvent) => void): void {
+  writeListeners.push(listener);
+}
+
+export function notifyWorkspaceWrite(event: WorkspaceWriteEvent): void {
+  for (const listener of writeListeners) {
+    try { listener(event); } catch { /* audit/index listeners never fail the save */ }
+  }
 }
