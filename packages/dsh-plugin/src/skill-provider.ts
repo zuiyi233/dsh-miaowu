@@ -13,14 +13,14 @@ const DRAMA_PROVIDER_NAME = "short-drama";
 const GAME_PROVIDER_NAME = "novel-to-game";
 const VIDEO_PROVIDER_NAME = "video-recap";
 const DSH_SKILL_BRIDGE = [
-  "<oh-story-dsh-integration>",
+  "<dsh-miaowu-integration>",
   "This Skill is a native contribution to the current DeepSeek Harness session.",
   "DSH owns the workspace, model, preset, permissions, Session Log, tools, subagents, cancellation, resume, and Agent UI.",
   "Never start another Agent runtime, session transport, Dashboard, SSE stream, polling loop, or model configuration.",
   "All seven upstream Oh Story specialist Roles are bundled. Invoke one with oh_story_role and a self-contained prompt.",
   "Never inspect .claude/agents, .codex/agents, .opencode/agents, .agents/agents, .zcode, or .story-deployed to decide whether a Role is available, and never call invoke_subagent with a TypeName.",
   "Use only DSH-visible tools. DSH sandbox and permission policy remain authoritative.",
-  "</oh-story-dsh-integration>"
+  "</dsh-miaowu-integration>"
 ].join("\n");
 const DSH_SKILL_OVERRIDES: Readonly<Partial<Record<string, string>>> = {
   story: "The 小说 workspace is an official DSH conversation view. Never start or open a second web application.",

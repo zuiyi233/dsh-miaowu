@@ -1,10 +1,10 @@
-# @oh-story/dsh
+# @dsh-miaowu/dsh
 
-[GitHub](https://github.com/zenstory-ai/oh-story-dsh) · [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) · [MIT](LICENSE)
+[GitHub](https://github.com/zuiyi233/dsh-miaowu) · [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) · [MIT](LICENSE)
 
-![小说工作台](https://raw.githubusercontent.com/zenstory-ai/oh-story-dsh/main/docs/images/story-workbench-demo.gif)
+![小说工作台](https://raw.githubusercontent.com/zuiyi233/dsh-miaowu/main/docs/images/story-workbench-demo.gif)
 
-`oh-story-dsh` 是基于 DeepSeek Harness（DSH）构建的社区小说、短剧、互动游戏与视频解说创作插件，提供：
+`dsh-miaowu` 是基于 DeepSeek Harness（DSH）构建的社区小说、短剧、互动游戏与视频解说创作插件，提供：
 
 - 13 个 Oh Story 小说 Skills 与 7 个专业 Roles；
 - 10 个 Drama Skills 0.6.4 短剧流程，每集按请求维护最多五份 creator-first Markdown；
@@ -21,14 +21,14 @@
 ## 安装
 
 ```bash
-npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile web add @oh-story/dsh@0.1.6
+npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile web add @dsh-miaowu/dsh@0.1.6
 npx -y @deepseek-ai/dsh@0.1.2-alpha.3 web
 ```
 
 也可以直接安装 GitHub Release 中的预构建包：
 
 ```bash
-npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile web add https://github.com/zenstory-ai/oh-story-dsh/releases/download/v0.1.6/oh-story-dsh-0.1.6.tgz
+npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.6/dsh-miaowu-0.1.6.tgz
 npx -y @deepseek-ai/dsh@0.1.2-alpha.3 web
 ```
 
@@ -38,19 +38,19 @@ npx -y @deepseek-ai/dsh@0.1.2-alpha.3 web
 
 ## 短剧工作台
 
-![短剧工作台](https://raw.githubusercontent.com/zenstory-ai/oh-story-dsh/main/docs/images/drama-workbench-demo.gif)
+![短剧工作台](https://raw.githubusercontent.com/zuiyi233/dsh-miaowu/main/docs/images/drama-workbench-demo.gif)
 
 选择某集的 creator-first 文档后可切换到「生产」，查看镜头板、素材板、任务、成片顺序与关系画布；图片与视频按钮先准备完整生产预检，创作者在 Chat 明确确认同一任务后才会运行。
 
 ## 游戏工作台
 
-![游戏工作台](https://raw.githubusercontent.com/zenstory-ai/oh-story-dsh/main/docs/images/game-workbench-demo.gif)
+![游戏工作台](https://raw.githubusercontent.com/zuiyi233/dsh-miaowu/main/docs/images/game-workbench-demo.gif)
 
 游戏产物写入 `game-adaptations/<project>`；`build/app/index.html` 就绪后即可在左侧隔离预览中实时试玩，切换项目文件或窄屏对话不会卸载当前运行时，新构建也只在用户主动选择后载入。`/game-qa` 与 `qa/verification.json` 保留为 Agent/自动化质量契约，不在制作面板展示独立 QA UI。
 
 ## 视频工作台
 
-![视频工作台](https://raw.githubusercontent.com/zenstory-ai/oh-story-dsh/main/docs/images/video-workbench-demo.gif)
+![视频工作台](https://raw.githubusercontent.com/zuiyi233/dsh-miaowu/main/docs/images/video-workbench-demo.gif)
 
 视频项目写入 `video-recaps/<project>`：`sources/` 保存原片，`work/` 保存流水线权威产物，`outputs/` 保存交付文件。左侧工作台只负责预览原片、剪后片、最终成片和关键计划/字幕/质检文件；Agent 在右侧 Chat 中完成理解、剪辑、写稿、配音与合成，不引入多轨时间线。
 
@@ -67,10 +67,10 @@ Drama Skills 0.6.0 不支持把 v0.5 结构化项目原地升级为 creator-firs
 插件装进哪个 profile，那个 profile 的每个 Session 就都会加载创作 Skills 与三栏工作台。想让原版 `web` 保持干净、只在创作时打开工作台，就装进独立 profile：
 
 ```bash
-npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile story add @oh-story/dsh@0.1.6
+npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile story add @dsh-miaowu/dsh@0.1.6
 ```
 
-新 profile 默认没有界面。编辑 `~/.dsh/profiles/story/package.json`，把 `dsh.profile.bundles` 改成 `["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@oh-story/dsh"]`，顺序照抄，这个包不用另外安装。
+新 profile 默认没有界面。编辑 `~/.dsh/profiles/story/package.json`，把 `dsh.profile.bundles` 改成 `["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsh-miaowu/dsh"]`，顺序照抄，这个包不用另外安装。
 
 ```bash
 npx -y @deepseek-ai/dsh@0.1.2-alpha.3 web                          # 原版 DSH
@@ -81,4 +81,4 @@ npx -y @deepseek-ai/dsh@0.1.2-alpha.3 --profile story --port 3081  # 创作工�
 
 ## License
 
-[Changelog](https://github.com/zenstory-ai/oh-story-dsh/blob/main/CHANGELOG.md) · [MIT](LICENSE)
+[Changelog](https://github.com/zuiyi233/dsh-miaowu/blob/main/CHANGELOG.md) · [MIT](LICENSE)

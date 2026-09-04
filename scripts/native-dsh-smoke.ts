@@ -601,8 +601,8 @@ async function main(): Promise<void> {
       const source = await readFile(path, "utf8");
       await writeFile(path, source.replaceAll("EP001", "EP002").replaceAll("空白账号", "百万倒计时"));
     }));
-    runPnpm(["--filter", "@oh-story/dsh", "build"]);
-    runPnpm(["--filter", "@oh-story/dsh", "pack", "--pack-destination", packDirectory]);
+    runPnpm(["--filter", "@dsh-miaowu/dsh", "build"]);
+    runPnpm(["--filter", "@dsh-miaowu/dsh", "pack", "--pack-destination", packDirectory]);
     await mkdir(installation, { recursive: true });
     await writeFile(join(installation, "package.json"), `${JSON.stringify({ private: true, dependencies: { "@deepseek-ai/dsh": dshVersion } }, null, 2)}\n`);
     await writeFile(join(installation, "pnpm-workspace.yaml"), [
@@ -959,13 +959,13 @@ async function main(): Promise<void> {
     // so the plugin's own registration is sliced back out of the shared response.
     const index = await (await dshFetch(origin)).text();
     const preloadPath = index.match(/\/plugins\/\?\?[^"']+/u)?.[0].replaceAll("&amp;", "&");
-    if (preloadPath === undefined || !preloadPath.includes("@oh-story/dsh/client.js")) {
-      throw new Error("DSH did not publish the Oh Story Browser module.");
+    if (preloadPath === undefined || !preloadPath.includes("@dsh-miaowu/dsh/client.js")) {
+      throw new Error("DSH did not publish the dsh-miaowu Browser module.");
     }
     const bundle = await (await dshFetch(new URL(preloadPath, origin))).text();
     const registration = 'window.__ModuleLoader__.load({id:"';
-    const start = bundle.indexOf(`${registration}@oh-story/dsh"`);
-    if (start < 0) throw new Error("DSH did not serve the Oh Story Browser module.");
+    const start = bundle.indexOf(`${registration}@dsh-miaowu/dsh"`);
+    if (start < 0) throw new Error("DSH did not serve the dsh-miaowu Browser module.");
     const next = bundle.indexOf(registration, start + registration.length);
     const client = next < 0 ? bundle.slice(start) : bundle.slice(start, next);
     for (const slot of ["shell.overlay", "tool.call.toolview"]) {

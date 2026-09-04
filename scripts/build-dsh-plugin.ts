@@ -78,7 +78,7 @@ await build({
   minifySyntax: true,
   external: ["@deepseek-ai/*", "react", "react/jsx-runtime", "react-dom", "react-dom/client"],
   plugins: [inlineCss],
-  banner: { js: "window.__ModuleLoader__.load({id:\"@oh-story/dsh\",factory:(require)=>{var module={exports:{}};var exports=module.exports;" },
+  banner: { js: "window.__ModuleLoader__.load({id:\"@dsh-miaowu/dsh\",factory:(require)=>{var module={exports:{}};var exports=module.exports;" },
   footer: { js: ";return module.exports;}});" }
 });
 

@@ -1,6 +1,6 @@
 <div align="center">
 
-# oh-story-dsh
+# dsh-miaowu
 
 **小说、短剧、互动游戏与视频解说创作工作台**
 
@@ -8,7 +8,7 @@
 
 </div>
 
-`oh-story-dsh` 是基于 DeepSeek Harness（DSH）构建的社区插件，把小说、短剧、互动游戏与视频解说四条创作流水线带进 DSH。DSH 管理 Agent、会话、模型、权限和 Chat；插件提供创作 Skills、专业 Roles、项目协议与对应工作台。
+`dsh-miaowu` 是基于 DeepSeek Harness（DSH）构建的社区插件，把小说、短剧、互动游戏与视频解说四条创作流水线带进 DSH。DSH 管理 Agent、会话、模型、权限和 Chat；插件提供创作 Skills、专业 Roles、项目协议与对应工作台。
 
 > 本项目与 DeepSeek 官方无隶属、合作或背书关系；DeepSeek Harness 名称与品牌素材归其权利人所有。
 
@@ -70,14 +70,14 @@
 **1. 安装插件并启动 DSH Web**
 
 ```bash
-npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile web add @oh-story/dsh@0.1.6
+npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile web add @dsh-miaowu/dsh@0.1.6
 npx -y @deepseek-ai/dsh@0.1.2-alpha.3 web
 ```
 
 也可以直接安装 GitHub Release 中经过同一套测试的预构建包：
 
 ```bash
-npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile web add https://github.com/zenstory-ai/oh-story-dsh/releases/download/v0.1.6/oh-story-dsh-0.1.6.tgz
+npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.6/dsh-miaowu-0.1.6.tgz
 npx -y @deepseek-ai/dsh@0.1.2-alpha.3 web
 ```
 
@@ -98,7 +98,7 @@ npx -y @deepseek-ai/dsh@0.1.2-alpha.3 web
 **1. 装进独立 profile**
 
 ```bash
-npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile story add @oh-story/dsh@0.1.6
+npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile story add @dsh-miaowu/dsh@0.1.6
 ```
 
 **2. 补上界面**
@@ -109,7 +109,7 @@ npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile story add @oh-story/dsh@0
 "bundles": [
   "@deepseek-ai/dsh-base",
   "@deepseek-ai/dsh-web-app",
-  "@oh-story/dsh"
+  "@dsh-miaowu/dsh"
 ]
 ```
 

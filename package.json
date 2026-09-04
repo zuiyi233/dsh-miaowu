@@ -1,5 +1,5 @@
 {
-  "name": "oh-story-dsh",
+  "name": "dsh-miaowu",
   "version": "0.1.6",
   "private": true,
   "description": "A DSH plugin for fiction, short-drama, playable game, and video-recap production",
@@ -11,7 +11,7 @@
   },
   "scripts": {
     "dev": "pnpm build:dsh-plugin",
-    "build:dsh-plugin": "pnpm --filter @oh-story/dsh build",
+    "build:dsh-plugin": "pnpm --filter @dsh-miaowu/dsh build",
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint . --max-warnings=0",
@@ -36,7 +36,7 @@
     "verify": "pnpm lint && pnpm typecheck && pnpm assets:check && pnpm dsh:boundary && pnpm test:unit && pnpm build",
     "verify:portable": "pnpm typecheck && pnpm assets:check && pnpm test:unit && pnpm build",
     "verify:release": "pnpm verify && pnpm test:dsh",
-    "pack:release": "pnpm --filter @oh-story/dsh pack --pack-destination release"
+    "pack:release": "pnpm --filter @dsh-miaowu/dsh pack --pack-destination release"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -20,7 +20,7 @@ export { bundledReferenceGuard, createOhStoryReferenceTool, OH_STORY_REFERENCE_T
 export { registerWorkspaceRoute } from "./workspace-route.js";
 export { registerOhStoryHooks } from "./native-hooks.js";
 
-export const name = "oh-story";
+export const name = "dsh-miaowu";
 export const inject = ["skills", "subagents", "tools", "typert", "webServer"];
 
 /** DSH owns models, providers, presets, permissions, roots, runs, and sessions. */

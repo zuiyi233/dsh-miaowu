@@ -67,7 +67,7 @@ interface HistoryRecord { readonly type: string; readonly event: HistoryEvent }
  * a single `args` field, so the wire method must equal the endpoint path.
  */
 async function rpc<T>(origin: string, endpoint: string, args: object): Promise<T> {
-  const rpcId = `oh-story-real-${crypto.randomUUID()}`;
+  const rpcId = `dsh-miaowu-real-${crypto.randomUUID()}`;
   const deadline = Date.now() + 15_000;
   while (true) {
     const response = await dshFetch(`${origin}/api/${endpoint}`, {
@@ -190,7 +190,7 @@ async function waitForCompletedTurn(origin: string, sessionId: string): Promise<
 
 async function main(): Promise<void> {
   const apiKey = await readApiKey();
-  const temporaryRoot = await mkdtemp(join(tmpdir(), "oh-story-native-dsh-real-"));
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "dsh-miaowu-native-dsh-real-"));
   const packDirectory = join(temporaryRoot, "pack");
   const installation = join(temporaryRoot, "dsh");
   const dshHome = join(temporaryRoot, "home");
@@ -225,8 +225,8 @@ async function main(): Promise<void> {
       writeFile(join(projectRoot, "剧集", "EP001", "视频提示词.md"), "# EP001 视频提示词\n\n## MOTION-EP001-001 · 车票滑出\n- 分镜：SHOT-EP001-001\n- 时长：4s\n- 终点：湿车票滑到人物面前。\n\n### 可复制提示词\n> The ticket booth light switches on and a wet ticket slides through the slot.\n")
     ]);
     const before = await treeDigest(projectRoot);
-    run("pnpm", ["--filter", "@oh-story/dsh", "build"]);
-    run("pnpm", ["--filter", "@oh-story/dsh", "pack", "--pack-destination", packDirectory]);
+    run("pnpm", ["--filter", "@dsh-miaowu/dsh", "build"]);
+    run("pnpm", ["--filter", "@dsh-miaowu/dsh", "pack", "--pack-destination", packDirectory]);
     await mkdir(installation, { recursive: true });
     await writeFile(join(installation, "package.json"), `${JSON.stringify({ private: true, dependencies: { "@deepseek-ai/dsh": dshVersion } }, null, 2)}\n`);
     await writeFile(join(installation, "pnpm-workspace.yaml"), [

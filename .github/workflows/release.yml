@@ -40,14 +40,14 @@ jobs:
         run: |
           PACKAGE_VERSION="$(node -p "require('./packages/dsh-plugin/package.json').version")"
           test "$RELEASE_TAG" = "v$PACKAGE_VERSION" || {
-            echo "Tag $RELEASE_TAG does not match @oh-story/dsh@$PACKAGE_VERSION" >&2
+            echo "Tag $RELEASE_TAG does not match @dsh-miaowu/dsh@$PACKAGE_VERSION" >&2
             exit 1
           }
       - name: Generate checksums
         run: cd release && sha256sum *.tgz > SHA256SUMS
       - uses: actions/upload-artifact@v7
         with:
-          name: oh-story-dsh-${{ github.ref_name }}
+          name: dsh-miaowu-${{ github.ref_name }}
           path: |
             release/*.tgz
             release/SHA256SUMS
@@ -63,7 +63,7 @@ jobs:
             gh release create "$GITHUB_REF_NAME" release/*.tgz release/SHA256SUMS \
               --verify-tag \
               --generate-notes \
-              --title "oh-story-dsh $GITHUB_REF_NAME"
+              --title "dsh-miaowu $GITHUB_REF_NAME"
           fi
       - name: Publish npm package
         if: startsWith(github.ref, 'refs/tags/')
@@ -71,8 +71,8 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           PACKAGE_VERSION="$(node -p "require('./packages/dsh-plugin/package.json').version")"
-          if npm view "@oh-story/dsh@$PACKAGE_VERSION" version >/dev/null 2>&1; then
-            echo "@oh-story/dsh@$PACKAGE_VERSION is already published"
+          if npm view "@dsh-miaowu/dsh@$PACKAGE_VERSION" version >/dev/null 2>&1; then
+            echo "@dsh-miaowu/dsh@$PACKAGE_VERSION is already published"
           else
-            npm publish "./release/oh-story-dsh-$PACKAGE_VERSION.tgz" --access public --provenance
+            npm publish "./release/dsh-miaowu-$PACKAGE_VERSION.tgz" --access public --provenance
           fi

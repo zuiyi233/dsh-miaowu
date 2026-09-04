@@ -1,6 +1,6 @@
 # Architecture
 
-oh-story-dsh is a Cordis plugin loaded into DeepSeek Harness. The repository ships one product package, `@oh-story/dsh`, with Host and Browser entries.
+dsh-miaowu is a Cordis plugin loaded into DeepSeek Harness. The repository ships one product package, `@dsh-miaowu/dsh`, with Host and Browser entries.
 
 ## Ownership
 
@@ -14,7 +14,7 @@ oh-story-dsh is a Cordis plugin loaded into DeepSeek Harness. The repository shi
 | Short-drama workflow and project contracts | Pinned Drama Skills |
 | Interactive-game workflow and artifact contracts | Pinned NovelToGame Skills |
 | Video-recap workflow and artifact contracts | Pinned video-recap Skills |
-| Creative file tree, editor, production projection, game/video preview and file following | `@oh-story/dsh` Browser contribution |
+| Creative file tree, editor, production projection, game/video preview and file following | `@dsh-miaowu/dsh` Browser contribution |
 
 ## Host entry
 

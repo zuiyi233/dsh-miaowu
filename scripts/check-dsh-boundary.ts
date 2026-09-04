@@ -20,4 +20,4 @@ async function walk(directory: string): Promise<void> {
 await walk(resolve(root, 'apps'));
 await walk(resolve(root, 'packages'));
 if (violations.length > 0) throw new Error(`DeepSeek Harness imports escaped the native plugin boundary: ${violations.join(', ')}`);
-process.stdout.write('DSH boundary OK: all @deepseek-ai imports stay in the native @oh-story/dsh plugin.\n');
+process.stdout.write('DSH boundary OK: all @deepseek-ai imports stay in the native @dsh-miaowu/dsh plugin.\n');

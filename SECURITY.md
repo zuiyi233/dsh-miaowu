@@ -2,12 +2,12 @@
 
 ## Supported versions
 
-Security fixes land on the latest published `@oh-story/dsh` release. Report issues against `main`.
+Security fixes land on the latest published `@dsh-miaowu/dsh` release. Report issues against `main`.
 
 ## Reporting a vulnerability
 
 Please do not open a public issue for a suspected vulnerability. Use GitHub's private
-[Report a vulnerability](https://github.com/zenstory-ai/oh-story-dsh/security/advisories/new)
+[Report a vulnerability](https://github.com/zuiyi233/dsh-miaowu/security/advisories/new)
 form instead. Include the DSH version, the plugin version, and a reproduction. We aim to
 acknowledge within 72 hours.
 
@@ -16,7 +16,7 @@ Vulnerabilities in DeepSeek Harness itself belong to the
 
 ## Trust boundary
 
-`@oh-story/dsh` is a Cordis plugin inside a DSH process. DSH owns the model, credentials,
+`@dsh-miaowu/dsh` is a Cordis plugin inside a DSH process. DSH owns the model, credentials,
 sandbox, tool permissions, and approvals; this plugin never reads credentials, opens a
 network listener of its own, or starts a second agent runtime.
 

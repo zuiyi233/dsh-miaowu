@@ -35,7 +35,7 @@ if (!useMock && process.env.DEEPSEEK_API_KEY === undefined) {
   throw new Error("Rendering demos calls the real provider: set DEEPSEEK_API_KEY, or OH_STORY_DEMO_MOCK=1 for fixture output.");
 }
 
-const frames = await mkdtemp(join(tmpdir(), `oh-story-dsh-${requested}-demo-`));
+const frames = await mkdtemp(join(tmpdir(), `dsh-miaowu-${requested}-demo-`));
 
 function run(command: string, args: readonly string[], env = process.env): void {
   const result = spawnSync(command, args, { cwd: repositoryRoot, env, encoding: "utf8", stdio: "inherit" });

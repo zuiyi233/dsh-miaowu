@@ -1,18 +1,18 @@
 # Release process
 
-`@oh-story/dsh` is distributed as the same prebuilt tarball through npm and
+`@dsh-miaowu/dsh` is distributed as the same prebuilt tarball through npm and
 GitHub Releases. A release is created only from a `v<package-version>` tag.
 
 ## One-time npm setup
 
 The npm account used for the first publication must be allowed to publish the
-public `@oh-story/dsh` package. Store a granular publish token as the repository
+public `@dsh-miaowu/dsh` package. Store a granular publish token as the repository
 secret `NPM_TOKEN`; never commit it or put it in an issue, workflow file, or
 release note.
 
 After the first publication, configure npm Trusted Publishing for:
 
-- repository: `zenstory-ai/oh-story-dsh`
+- repository: `zuiyi233/dsh-miaowu`
 - workflow: `release.yml`
 
 The workflow requests an OpenID Connect identity and publishes with provenance.
@@ -44,12 +44,12 @@ Do not announce a release until the registry reports the exact version:
 
 ```bash
 VERSION=0.1.6
-npm view "@oh-story/dsh@$VERSION" version dist.integrity
-npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile web add "@oh-story/dsh@$VERSION"
+npm view "@dsh-miaowu/dsh@$VERSION" version dist.integrity
+npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile web add "@dsh-miaowu/dsh@$VERSION"
 ```
 
 The GitHub Release tarball remains a registry-independent installation path:
 
 ```bash
-npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile web add "https://github.com/zenstory-ai/oh-story-dsh/releases/download/v$VERSION/oh-story-dsh-$VERSION.tgz"
+npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile web add "https://github.com/zuiyi233/dsh-miaowu/releases/download/v$VERSION/dsh-miaowu-$VERSION.tgz"
 ```

@@ -1,4 +1,4 @@
-# Contributing to oh-story-dsh
+# Contributing to dsh-miaowu
 
 ## 环境
 
