@@ -11,12 +11,19 @@
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-09-04
+
 ### Changed
 
 - 工作台不再接管每一次会话（[#29](https://github.com/zenstory-ai/oh-story-dsh/issues/29)）。DSH 是通用 Harness，而此前只要装上插件，任何 Session 都会被改成三栏（游戏/视频为两栏）布局，官方 Chat 被压到右侧且无法关闭，写代码或普通对话时同样如此。现在只有当前 workspace 真的存在小说、短剧、游戏或视频项目时才接管布局；随包的《金瓶梅》示例不算作 workspace 创作项目。没有创作项目时插件在界面上完全不出现，会话由 DSH 原样渲染，`Ctrl/Cmd+S` 与 Chat 里的文件名点击也不再被工作台接管。Agent 写出第一个创作文件（例如 `/story-setup`）后，工作台会在同一次会话里自动出现。
+- 固定的 DeepSeek Harness 从 `0.1.2-alpha.3` 升到 `0.1.2-rc.1`（上游 `a66e470204`，npm `next`）。插件源码不需要改动：上游这四个版本把 Session 序号改成品牌类型（`SessionSeq` / `SessionLogOffset`），fork 元数据 `seedLength` 改为 `isSeeded` 加 `inheritedEventCount`，Chat 改为按节点键订阅（`useChatNode` / `useChatNodeProcess`），Composer 的 `overlay` / `leftItems` / `rightItems` / `footer` 改由 InputBar 自己渲染 Slot，Chat 滚动几何改为每 500 ms 采样一次并以 `scrollend` 收尾；工作台依赖的 `conversation.session` Slot、`data-conversation-scroll` / `data-composer-seat` / `data-chat-flow` 锚点与 `useChat` 快照里的 `timeline` / `legacy.runningCalls` 都保持不变。`pnpm verify` 与 `pnpm test:dsh` 在 rc.1 上全部通过；README、npm 包 README、发布文档、两条原生测试脚本以及 `pnpm-workspace.yaml` 的 `overrides` / `minimumReleaseAgeExclude` 的 `@deepseek-ai/dsh` 版本同步更新——后者才决定真正装进来的版本，只改 `package.json` 时 typecheck 与单测仍在旧版本上跑。
+- 同步 [Drama Skills 0.6.5](https://github.com/zenstory-ai/drama-skills/releases/tag/v0.6.5)（`4cd5846`，上游 #100 / #101）。两处收紧既有项目要补字段，目录不变：《分镜.md》每镜「来源」必须以《剧本.md》真实存在的场景 ID（形如 `EP001-SC001`）开头，跨场次用 `、` 连写，剧本每一场都要被某镜认领或写进正文开头的 `- 未拍场次：<场景 ID>（理由：……）`；《剧本.md》场景标题收紧为 `## <场景 ID> 内|外|内外 · 地点 · 时间/天气`。可复制正文里四字以上的中文引文必须逐字来自《剧本.md》《视觉设定.md》或《分镜.md》（VID-25）。新增 `PLAN-...` 槽位：语法与 `REF-...` 相同，但定位符写 `IMG-...` 或 `SHOT-...`，表示图片由创作者在生成时自行挂载；这类镜头照常产出图生视频提示词，但不能交给 `short-drama-produce` 投产。没有参考图时技能会一次给出三条路（放进项目绑 `REF-...`、自己出图写 `PLAN-...`、明确改文生视频）。
+- 「生产」视图按新契约解析「来源」：从字段里提取全部场景 ID 逐个对照《剧本.md》，带短引文或 `、` 连写多场的来源不再整条报「在剧本中不存在」，导航按场景 ID 定位；未写场景 ID 的旧写法仍按整段标题匹配。
 
 ### Added
 
+- 短剧「生产」视图顶部新增「生成环境」条，说明 DeepSeek 只写提示词、图片/视频/音乐由供应商 API 生成，并逐个显示 GPT Image 2、Seedance、MiniMax H3、MiniMax Music 是否已在宿主机环境里配置、缺哪个变量；只报告变量是否存在，从不读取或展示 Key 的值。此前这些 API 有哪些、Key 配在哪里既没写进文档也没出现在界面上，生产任务会在 adapter 之前莫名停下。
+- 插件启动时把四个内置 adapter 登记到一份不含凭据的 adapter 配置（默认在系统临时目录下仅当前用户可读写的 `oh-story-dsh-<uid>/` 里，按插件安装位置区分，原子写入，「生成环境」条会显示完整路径），并把该路径与每个 adapter 的必需环境变量写进 `short-drama-produce` 的 DSH 覆盖层：Agent 运行 `production_tool.py run` 时直接引用它，缺变量时先告诉创作者要导出什么，而不是在 run 里失败。自定义 adapter 时用 `OH_STORY_DRAMA_ADAPTER_CONFIG` 指向自己的文件。README 新增「配置媒体生成 API」一节。
 - 工作台可随时收起。四个工作台的标题栏都有「收起创作工作台」；收起后会话立即回到 DSH 原生布局，只在会话区角落留一个「创作工作台」按钮用于恢复。DSH 的 Session Store 不持久化，因此该选择按 workspace 记在浏览器本地存储里：同一 workspace 的新会话和重启后的会话都保持上次的选择，显式选择始终优先于自动判断。
 
 ## [0.1.6] - 2026-09-02
@@ -166,7 +173,8 @@
 - 提供 13 个 Oh Story 小说 Skills、7 个专业 Roles 与 10 个 Drama Skills。
 - 提供文件树、Markdown/JSONL 编辑预览与官方 DSH Chat 同屏的三栏工作台。
 
-[Unreleased]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.3...v0.1.4

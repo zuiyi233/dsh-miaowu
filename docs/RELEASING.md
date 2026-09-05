@@ -45,11 +45,11 @@ Do not announce a release until the registry reports the exact version:
 ```bash
 VERSION=0.1.6
 npm view "@dsh-miaowu/dsh@$VERSION" version dist.integrity
-npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile web add "@dsh-miaowu/dsh@$VERSION"
+npx -y @deepseek-ai/dsh@0.1.2-rc.1 plugin --profile web add "@dsh-miaowu/dsh@$VERSION"
 ```
 
 The GitHub Release tarball remains a registry-independent installation path:
 
 ```bash
-npx -y @deepseek-ai/dsh@0.1.2-alpha.3 plugin --profile web add "https://github.com/zuiyi233/dsh-miaowu/releases/download/v$VERSION/dsh-miaowu-$VERSION.tgz"
+npx -y @deepseek-ai/dsh@0.1.2-rc.1 plugin --profile web add "https://github.com/zuiyi233/dsh-miaowu/releases/download/v$VERSION/dsh-miaowu-$VERSION.tgz"
 ```
