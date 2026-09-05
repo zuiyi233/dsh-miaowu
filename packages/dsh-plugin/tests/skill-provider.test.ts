@@ -191,18 +191,18 @@ describe("dsh-miaowu bundled provider", () => {
     expect(skill?.resourceBase).toEqual({ kind: "directory", path: resolve(dshMiaowuRoot, "publishing") });
   });
 
-  it("publishes the self-owned story-completion skill with a DSH bridge", async () => {
+  it("publishes the self-owned finalize skill with a DSH bridge", async () => {
     const provider = createDshMiaowuSkillProvider(dshMiaowuRoot);
     const listed = await provider.list({});
     if (!Array.isArray(listed)) throw new Error("Expected a dsh-miaowu catalog.");
-    const candidate = listed.find((entry) => entry.name === "story-completion");
+    const candidate = listed.find((entry) => entry.name === "finalize");
     expect(candidate).toBeDefined();
     expect(candidate?.description).toMatch(/\S/u);
     expect(candidate?.invocation.userInvocable).toBe(true);
     const skill = await provider.get(candidate!, {});
     expect(skill?.content).toContain("<dsh-miaowu-integration>");
     expect(skill?.content).toContain("oh_story_role");
-    expect(skill?.resourceBase).toEqual({ kind: "directory", path: resolve(dshMiaowuRoot, "story-completion") });
+    expect(skill?.resourceBase).toEqual({ kind: "directory", path: resolve(dshMiaowuRoot, "finalize") });
   });
 });
 

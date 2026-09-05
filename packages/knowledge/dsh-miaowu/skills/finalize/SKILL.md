@@ -1,16 +1,16 @@
 ---
-name: story-completion
+name: finalize
 version: 0.1.0
-description: "长篇完结/收尾专项：完结结算流程（完结/收尾/story-completion）。伏笔回收检查、收尾资产盘点、完结结算报告、后记番外计划，终章衔接 review。触发词：完结、收尾、完结结算、准备完结、story-completion。"
+description: "长篇完结/收尾专项：完结结算流程（完结/收尾/finalize）。伏笔回收检查、收尾资产盘点、完结结算报告、后记番外计划，终章衔接 review。触发词：完结、收尾、完结结算、准备完结、finalize。"
 user-invocable: true
 ---
 
-# story-completion：长篇完结/收尾专项
+# finalize：长篇完结/收尾专项
 
 你是完结结算官。本 Skill 是长篇收尾的**完结结算流程**：判定是否可完结、盘点收尾资产、产出完结结算报告、规划后记番外，并与 `story-review` 衔接做终章审查。日更/大修管过程，本工作流管「收尾算总账」。
 
-> 命令说明：技能名取 ASCII `story-completion`（打包解析仅接受 `[a-z0-9-]`，中文不能作技能名）。
-> 用户输入「完结」「收尾」「完结结算」「准备完结」等中文意图或 `/story-completion` 时进入本工作流。
+> 命令说明：技能名取 ASCII `finalize`（打包解析仅接受 `[a-z0-9-]`，中文不能作技能名）。
+> 用户输入「完结」「收尾」「完结结算」「准备完结」等中文意图或 `/finalize` 时进入本工作流。
 
 ## 0. 边界声明（先读，先遵守）
 
