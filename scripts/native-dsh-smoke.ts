@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { gunzipSync } from "node:zlib";
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer, request as httpRequest, type Server as HttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
@@ -6,6 +7,33 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Locator, type Page } from "@playwright/test";
+
+/** List a .tgz's entry paths without invoking tar (Git Bash tar cannot read a
+ *  drive-letter path like "E:\..."; it misreads the drive as a remote host). */
+export function listTarEntries(bytes: Uint8Array): string[] {
+  const entries: string[] = [];
+  const text = (region: Uint8Array): string => new TextDecoder("utf-8", { fatal: false }).decode(region).replace(/\0.*$/u, "");
+  const sizeOf = (header: Uint8Array): number => Number.parseInt(text(header.subarray(124, 136)).trim() || "0", 8);
+  let offset = 0;
+  while (offset + 512 <= bytes.byteLength) {
+    const header = bytes.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const size = sizeOf(header);
+    const typeflag = String.fromCharCode(header[156] ?? 0);
+    let pendingName: string | undefined;
+    if (typeflag === "x" || typeflag === "g") {
+      const body = text(bytes.subarray(offset + 512, offset + 512 + size));
+      for (const record of body.split("\n")) {
+        const match = /^\d+ (?:path|linkpath)=(.*)$/u.exec(record);
+        if (match?.[1] !== undefined) pendingName = match[1];
+      }
+    } else if (typeflag === "0" || typeflag === "7" || typeflag === "5" || typeflag === "") {
+      entries.push(pendingName ?? text(header.subarray(0, 100)));
+    }
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  return entries;
+}
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dshVersion = "0.1.2-alpha.3";
@@ -155,7 +183,7 @@ async function startMockDeepSeek(): Promise<MockDeepSeek> {
       const mutationTurn = currentTurn.includes(agentMutationPrompt) || gameUpdateTurn || plainWriteTurn;
       const todoLayoutTurn = currentTurn.includes(todoLayoutPrompt);
       const longReplyTurn = currentTurn.includes(longReplyPrompt);
-      const productionTurn = currentTurn.includes("/short-drama-produce");
+      const productionTurn = currentTurn.includes("/short-drama-produce") || currentTurn.includes("short-drama-produce");
       const roleParentTurn = currentTurn.includes(roleSmokePrompt);
       const productionIntentTurn = currentTurn.includes(productionIntentSmokePrompt);
       const roleChildTurn = serialized.includes(roleChildPrompt) && !serialized.includes(roleSmokePrompt);
@@ -252,10 +280,13 @@ async function startMockDeepSeek(): Promise<MockDeepSeek> {
       });
       response.flushHeaders();
       response.socket?.setNoDelay(true);
+      // Hold the production turn open once (not per chunk) so the smoke's queue
+      // choreography can observe a later shot's prompt sitting in the DSH queue.
+      if (productionTurn) await new Promise((accept) => setTimeout(accept, 2_500));
       for (const event of events) {
         response.write(`data: ${event}\n\n`);
-        if (productionTurn || todoLayoutTurn || (mutationTurn && !hasToolResult)) {
-          await new Promise((accept) => setTimeout(accept, productionTurn ? 750 : todoLayoutTurn ? 500 : 180));
+        if (todoLayoutTurn || (mutationTurn && !hasToolResult)) {
+          await new Promise((accept) => setTimeout(accept, todoLayoutTurn ? 500 : 180));
         }
       }
       response.end();
@@ -616,9 +647,7 @@ async function main(): Promise<void> {
     const tarball = (await readdir(packDirectory)).find((entry) => entry.endsWith(".tgz"));
     if (tarball === undefined) throw new Error("Plugin pack did not create a tarball.");
     const archivePath = join(packDirectory, tarball);
-    const archive = spawnSync("tar", ["-tzf", archivePath], { cwd: repositoryRoot, encoding: "utf8", stdio: "pipe" });
-    if (archive.status !== 0) throw new Error(`Could not inspect plugin tarball:\n${archive.stderr}`);
-    const entries = new Set(archive.stdout.split(/\r?\n/u).filter((entry) => entry !== ""));
+    const entries = new Set(listTarEntries(gunzipSync(await readFile(archivePath))));
     for (const required of [
       "package/LICENSE", "package/README.md", "package/cordis.patch.yml", "package/package.json",
       "package/lib/index.js", "package/lib/client.js", "package/lib/oh-story/manifest.json", "package/lib/drama/manifest.json",
@@ -1183,6 +1212,42 @@ async function main(): Promise<void> {
         } catch {
           throw new Error("Agent write did not automatically select its file in the tree.");
         }
+        const chapterButton = page.locator(`button[data-file-path=${JSON.stringify(chapterPath)}]`);
+        await chapterButton.waitFor({ state: "visible", timeout: 10_000 });
+        // Keep the probe's browser callback free of local function bindings:
+        // the tsx keepNames transform inlines `__name()` calls that the browser
+        // context cannot resolve, so every measurement is inline expression.
+        const chapterProbe = await chapterButton.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          const x = rect.x + rect.width / 2;
+          const y = rect.y + rect.height / 2;
+          const top = document.elementFromPoint(x, y);
+          const topBox = top === null ? null : top.getBoundingClientRect();
+          const scroller = document.querySelector("[data-conversation-scroll]");
+          const tree = (() => { const node = document.querySelector(".oh-story-tree"); const b = node?.getBoundingClientRect(); return node === null || b === undefined ? null : { x: b.x, y: b.y, width: b.width, height: b.height }; })();
+          const editor = (() => { const node = document.querySelector(".oh-story-editor"); const b = node?.getBoundingClientRect(); return node === null || b === undefined ? null : { x: b.x, y: b.y, width: b.width, height: b.height }; })();
+          const treeCell = (() => { const node = document.querySelector('.oh-split-cell[data-leaf="tree"]'); const b = node?.getBoundingClientRect(); return node === null || b === undefined ? null : { x: b.x, y: b.y, width: b.width, height: b.height }; })();
+          const editorCell = (() => { const node = document.querySelector('.oh-split-cell[data-leaf="editor"]'); const b = node?.getBoundingClientRect(); return node === null || b === undefined ? null : { x: b.x, y: b.y, width: b.width, height: b.height }; })();
+          const pane = (() => { const node = document.querySelector(".oh-split-pane"); const b = node?.getBoundingClientRect(); return node === null || b === undefined ? null : { x: b.x, y: b.y, width: b.width, height: b.height }; })();
+          return {
+            button: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            center: { x, y },
+            top: top === null || topBox === undefined ? null : { tag: top.tagName, className: typeof top.className === "string" ? top.className : null, x: topBox.x, y: topBox.y, width: topBox.width, height: topBox.height },
+            topIsButton: top === element || element.contains(top),
+            tree,
+            editor,
+            treeCell,
+            editorCell,
+            pane,
+            layout: scroller?.getAttribute("data-oh-story-layout") ?? null,
+            grid: scroller === null ? null : getComputedStyle(scroller).gridTemplateColumns
+          };
+        });
+        if (chapterProbe.topIsButton !== true
+          && chapterProbe.center.y >= 0 && chapterProbe.center.y <= 900
+          && chapterProbe.center.x >= 0 && chapterProbe.center.x <= 1_440) {
+          throw new Error(`Chapter tree button is covered at click time: ${JSON.stringify(chapterProbe)}`);
+        }
         await selectFile(page, chapterPath);
         const agentFolder = page.locator(".oh-story-file-folder > summary").filter({ hasText: /^角色\d+$/u }).first();
         await agentFolder.click();
@@ -1190,14 +1255,49 @@ async function main(): Promise<void> {
           const button = document.querySelector(`button[data-file-path=${JSON.stringify(path)}]`);
           return button === null || !button.checkVisibility();
         }, agentMutationPath);
-        const officialWriteFile = page.locator('[data-slot="conversation.session"] button').filter({ hasText: new RegExp(`^${agentMutationPath}$`, "u") }).first();
+        const officialWriteFile = page.locator('[data-slot="conversation.session"] > :not(.oh-story-split-surface) button').filter({ hasText: new RegExp(`^${agentMutationPath}$`, "u") }).first();
         // DSH 0.1.2 keeps off-screen Chat flow items at zero height, so bring the row in before reading it.
         await expandTurnProcesses(page);
         await officialWriteFile.waitFor({ state: "visible", timeout: 10_000 });
-        await officialWriteFile.click();
+        const clickProbe = await officialWriteFile.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          const x = rect.x + rect.width / 2;
+          const y = rect.y + rect.height / 2;
+          const top = document.elementFromPoint(x, y);
+          const topBox = top === null ? null : top.getBoundingClientRect();
+          const editor = document.querySelector('.oh-split-cell[data-leaf="editor"] .oh-story-editor');
+          const editorBox = editor === null ? null : editor.getBoundingClientRect();
+          const scroller = document.querySelector("[data-conversation-scroll]");
+          const editorCellNode = document.querySelector('.oh-split-cell[data-leaf="editor"]');
+          const editorCellBox = editorCellNode === null ? null : editorCellNode.getBoundingClientRect();
+          const chatFlowNode = document.querySelector('[data-slot="conversation.session"] > :not(.oh-story-split-surface)');
+          const chatFlowBox = chatFlowNode === null ? null : chatFlowNode.getBoundingClientRect();
+          return {
+            buttonText: element.textContent,
+            buttonRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            center: { x, y },
+            top: top === null || topBox === undefined ? null : { tag: top.tagName, className: typeof top.className === "string" ? top.className : null, ariaLabel: top.getAttribute("aria-label"), dataLeaf: top.closest("[data-leaf]")?.getAttribute("data-leaf") ?? null, x: topBox.x, y: topBox.y, width: topBox.width, height: topBox.height },
+            topIsButton: top === element || element.contains(top),
+            editor: editor === null || editorBox === undefined ? null : { x: editorBox.x, y: editorBox.y, width: editorBox.width, height: editorBox.height },
+            editorCell: editorCellNode === null || editorCellBox === undefined ? null : { x: editorCellBox.x, y: editorCellBox.y, width: editorCellBox.width, height: editorCellBox.height },
+            chatFlow: chatFlowNode === null || chatFlowBox === undefined ? null : { x: chatFlowBox.x, y: chatFlowBox.y, width: chatFlowBox.width, height: chatFlowBox.height },
+            layout: scroller?.getAttribute("data-oh-story-layout") ?? null,
+            grid: scroller === null ? null : getComputedStyle(scroller).gridTemplateColumns
+          };
+        });
+        if (clickProbe.topIsButton !== true
+          && clickProbe.center.y >= 0 && clickProbe.center.y <= 900
+          && clickProbe.center.x >= 0 && clickProbe.center.x <= 1_440) {
+          throw new Error(`Official Chat tool file button is covered by another element: ${JSON.stringify(clickProbe)}`);
+        }
+        // elementFromPoint() has the button on top, yet Playwright's actionability
+        // hit-test still reports DSH's sticky workbench cell as intercepting the
+        // same point (layered resize strips / sticky header). The DOM is correct,
+        // so dispatch directly; the tree re-selection below verifies the click
+        // semantically instead of trusting the hit-test artifact.
+        await officialWriteFile.click({ force: true });
         await agentTreeFile.waitFor({ state: "visible", timeout: 10_000 });
         if (await agentTreeFile.getAttribute("aria-current") !== "page") throw new Error("Official Chat tool file did not expand and locate the Agent-written file.");
-
         await selectFile(page, chapterPath);
         await page.getByRole("tab", { name: "源码", exact: true }).click();
         const protectedEditor = page.getByRole("textbox", { name: chapterPath });
@@ -1537,9 +1637,24 @@ async function main(): Promise<void> {
       await gameFrame.getByText("第一日 · 正堂", { exact: true }).waitFor({ state: "visible", timeout: 10_000 });
       if (!useRealDeepSeek) {
         await projectSelect.selectOption(`workspace:${generatedGameId}`);
-        await generatedFrame.getByRole("button", { name: "试玩成功", exact: true }).waitFor({ state: "visible", timeout: 10_000 });
-        await generatedFrame.getByRole("button", { name: "试玩成功", exact: true }).click();
-        await generatedFrame.getByRole("button", { name: "输入已验证", exact: true }).waitFor({ state: "visible", timeout: 10_000 });
+        await generatedFrame.getByRole("button", { name: "试玩成功", exact: true }).waitFor({ state: "visible", timeout: 20_000 });
+        // Project switch can re-mount the preview iframe once after its content
+        // loads; clicking into a reload resets the button. Retry until the
+        // verified-input state settles instead of trusting one click.
+        let gameVerifyTries = 0;
+        while (true) {
+          const playButton = generatedFrame.getByRole("button", { name: "试玩成功", exact: true });
+          try {
+            await playButton.waitFor({ state: "visible", timeout: 5_000 });
+            await playButton.click();
+          } catch { /* mid-reload; the verified-input probe below decides */ }
+          try {
+            await generatedFrame.getByRole("button", { name: "输入已验证", exact: true }).waitFor({ state: "visible", timeout: 5_000 });
+            break;
+          } catch { /* reload reset the fixture; click again */ }
+          gameVerifyTries += 1;
+          if (gameVerifyTries >= 8) throw new Error("Generated game preview did not settle into the verified-input state.");
+        }
         await generatedIframe.evaluate((element) => { element.setAttribute("data-e2e-instance", "new-build-preserved"); });
         const beforeGameUpdate = (await sessionEvents(origin, gameSession.sessionId)).at(-1)?.seq ?? -1;
         await rpc(origin, "session/prompt", {
@@ -2073,7 +2188,10 @@ async function main(): Promise<void> {
       ]);
       if (compactBoxes.some((box) => box === null)) throw new Error("Compact three-column layout lost a required column.");
       const [compactTree, compactEditor, compactChat, compactComposer, compactModel, compactSend] = compactBoxes as Exclude<(typeof compactBoxes)[number], null>[];
-      const compactOrdered = compactTree.x + compactTree.width <= compactEditor.x + 1
+      // Compact stacks the workbench panes (tree above editor) beside the Chat
+      // column instead of keeping them side by side.
+      const compactOrdered = compactTree.y + compactTree.height <= compactEditor.y + 1
+        && compactTree.x + compactTree.width <= compactChat.x + 1
         && compactEditor.x + compactEditor.width <= compactChat.x + 1;
       const compactVisible = [compactTree, compactEditor, compactChat, compactComposer, compactModel, compactSend]
         .every((box) => box.x >= -1 && box.x + box.width <= 501);
@@ -2114,6 +2232,63 @@ async function main(): Promise<void> {
         || compactHeaderControls.save.right > compactHeaderControls.editor.right + 1) {
         throw new Error(`500px dirty editor controls overlapped or escaped the editor: ${JSON.stringify(compactHeaderControls)}`);
       }
+      // Phase C free windows: float a feature panel out, keep it inside the
+      // viewport, prove the split+floats layout persists per session across a
+      // reload, then dock it back and confirm the payload forgets it.
+      await page.setViewportSize({ width: 1_440, height: 900 });
+      await page.waitForTimeout(120);
+      const layoutStorageKey = `oh-story.layout.v1.${dramaSession.sessionId}`;
+      const featureToggle = page.locator(".oh-story-brand-actions button[aria-pressed]").first();
+      const featureLabel = await featureToggle.getAttribute("aria-label");
+      if (featureLabel === null || featureLabel === "") throw new Error("Feature drawer toggle lost its label.");
+      await featureToggle.click();
+      const featureDrawer = page.locator(`.oh-feature-drawer[role="complementary"]`);
+      await featureDrawer.waitFor({ state: "visible", timeout: 10_000 });
+      await page.getByRole("button", { name: `将${featureLabel}拖出为浮窗`, exact: true }).click();
+      const floatWindow = page.locator(".oh-float-window[data-oh-float]");
+      await floatWindow.waitFor({ state: "visible", timeout: 10_000 });
+      const floated = await floatWindow.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return { id: element.getAttribute("data-oh-float"), x: box.x, y: box.y, width: box.width, height: box.height };
+      });
+      if (floated.id === null || floated.x < -1 || floated.y < -1
+        || floated.x + floated.width > 1_441 || floated.y + floated.height > 901
+        || floated.width < 280 || floated.height < 200) {
+        throw new Error(`Floated panel escaped the viewport or undersized: ${JSON.stringify(floated)}`);
+      }
+      if (await featureDrawer.count() !== 0) throw new Error("Floating a feature left the docked drawer mounted.");
+      await page.waitForTimeout(300);
+      const persistedLayout = await page.evaluate((key) => localStorage.getItem(key), layoutStorageKey);
+      if (persistedLayout === null) throw new Error(`No persisted layout for ${layoutStorageKey}.`);
+      const layoutPayload = JSON.parse(persistedLayout) as { readonly split?: unknown; readonly floats?: Record<string, unknown> };
+      if (layoutPayload.split === undefined || layoutPayload.floats?.[floated.id ?? ""] === undefined) {
+        throw new Error(`Persisted layout missed split/floats: ${JSON.stringify({ key: layoutStorageKey, layoutPayload })}`);
+      }
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await selectSession(page, dramaWorkspace.workspace.title, dramaSessionTitle);
+      await page.locator('.oh-story-split-surface[data-open="true"]').waitFor({ state: "visible", timeout: 10_000 });
+      // The pane starts closed after a reload; the persisted float geometry
+      // applies when the creator reopens the feature (never force-opens panels).
+      const restoredToggle = page.locator(".oh-story-brand-actions button[aria-pressed]").first();
+      await restoredToggle.click();
+      const restoredFloat = page.locator(`.oh-float-window[data-oh-float=${JSON.stringify(floated.id)}]`);
+      await restoredFloat.waitFor({ state: "visible", timeout: 10_000 });
+      const restored = await restoredFloat.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) };
+      });
+      if (restored.width !== Math.round(floated.width) || restored.height !== Math.round(floated.height)) {
+        throw new Error(`Floated panel geometry did not restore across reload: ${JSON.stringify({ floated, restored })}`);
+      }
+      await page.getByRole("button", { name: `将${featureLabel}放回工作台`, exact: true }).click();
+      await floatWindow.waitFor({ state: "detached", timeout: 10_000 });
+      await featureDrawer.waitFor({ state: "visible", timeout: 10_000 });
+      await page.waitForTimeout(300);
+      const afterDock = await page.evaluate((key) => localStorage.getItem(key), layoutStorageKey);
+      if (afterDock !== null) {
+        const dockedPayload = JSON.parse(afterDock) as { readonly floats?: Record<string, unknown> };
+        if (dockedPayload.floats?.[floated.id ?? ""] !== undefined) throw new Error("Docking a panel left it in the persisted floats.");
+      }
       if (pageErrors.length > 0) throw new Error(`Browser module raised errors: ${pageErrors.join("; ")}`);
       } finally {
         await browser.close();
@@ -2150,7 +2325,9 @@ async function main(): Promise<void> {
       agentWriteStreaming: !useRealDeepSeek,
       roleToolE2e: !useRealDeepSeek,
       atomicCasWriters: candidates.length,
-      compactViewport: 500
+      compactViewport: 500,
+      workbenchFloat: "clamped-in-viewport",
+      layoutPersistence: "per-session-localStorage"
     })}\n`);
   } catch (error) {
     const apiKey = process.env.DEEPSEEK_API_KEY;

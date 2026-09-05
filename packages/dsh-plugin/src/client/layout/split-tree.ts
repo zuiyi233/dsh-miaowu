@@ -10,8 +10,10 @@
 export const SPLIT_FRACTION_MIN = 0.08;
 /** Divider clamp upper bound (better-sidebar split-pane Divider). */
 export const SPLIT_FRACTION_MAX = 0.92;
-/** Story workbench default: tree column share of the tree|editor pair. */
-export const DEFAULT_TREE_FRACTION = 0.22;
+/** Story workbench default: tree column share of the tree|editor pair. The
+ *  top-level pane spans the fixed tree track plus the fluid editor track, so
+ *  the share is relative to that combined width. */
+export const DEFAULT_TREE_FRACTION = 0.32;
 /** Leaf id of the story/drama file tree column. */
 export const TREE_LEAF_ID = "tree";
 /** Leaf id of the story/drama editor column. */
