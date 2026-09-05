@@ -180,7 +180,12 @@ async function waitForCompletedTurn(origin: string, sessionId: string): Promise<
     const end = [...events].reverse().find((event) => event.type === "turn/end");
     if (end !== undefined) {
       const reason = (end.data as { readonly reason?: { readonly kind?: string } }).reason?.kind;
-      if (reason !== "completed") throw new Error(`DSH Agent turn ended with ${String(reason)}.`);
+      if (reason !== "completed") {
+        const tail = events.slice(-8).map((event) => {
+          return `${event.type}::${JSON.stringify(event.data).slice(0, 220)}`;
+        }).join(" | ");
+        throw new Error(`DSH Agent turn ended with ${String(reason)}. ${tail}`);
+      }
       return events;
     }
     await new Promise((accept) => setTimeout(accept, 750));
@@ -189,7 +194,10 @@ async function waitForCompletedTurn(origin: string, sessionId: string): Promise<
 }
 
 async function main(): Promise<void> {
-  const apiKey = await readApiKey();
+  // Real-profile mode (DSH_MIAOWU_REAL_PROFILE=1): boot the machine's installed
+  // DSH with its real profile and credential store; skip build/pack/install.
+  const realProfile = process.env.DSH_MIAOWU_REAL_PROFILE === "1";
+  const apiKey = realProfile ? undefined : await readApiKey();
   const temporaryRoot = await mkdtemp(join(tmpdir(), "dsh-miaowu-native-dsh-real-"));
   const packDirectory = join(temporaryRoot, "pack");
   const installation = join(temporaryRoot, "dsh");
@@ -197,7 +205,7 @@ async function main(): Promise<void> {
   const projectRoot = join(temporaryRoot, "novel");
   const origin = `http://127.0.0.1:${String(await freePort())}`;
   const logs: string[] = [];
-  const redact = (value: string): string => value.replaceAll(apiKey, "[REDACTED]");
+  const redact = (value: string): string => apiKey === undefined ? value : value.replaceAll(apiKey, "[REDACTED]");
   let child: ChildProcess | undefined;
   try {
     await Promise.all([
@@ -225,25 +233,35 @@ async function main(): Promise<void> {
       writeFile(join(projectRoot, "剧集", "EP001", "视频提示词.md"), "# EP001 视频提示词\n\n## MOTION-EP001-001 · 车票滑出\n- 分镜：SHOT-EP001-001\n- 时长：4s\n- 终点：湿车票滑到人物面前。\n\n### 可复制提示词\n> The ticket booth light switches on and a wet ticket slides through the slot.\n")
     ]);
     const before = await treeDigest(projectRoot);
-    run("pnpm", ["--filter", "@dsh-miaowu/dsh", "build"]);
-    run("pnpm", ["--filter", "@dsh-miaowu/dsh", "pack", "--pack-destination", packDirectory]);
-    await mkdir(installation, { recursive: true });
-    await writeFile(join(installation, "package.json"), `${JSON.stringify({ private: true, dependencies: { "@deepseek-ai/dsh": dshVersion } }, null, 2)}\n`);
-    await writeFile(join(installation, "pnpm-workspace.yaml"), [
-      "packages:", "  - .", "nodeLinker: hoisted", "allowBuilds:",
-      "  '@deepseek-ai/dsh-subprocess-local': true", "  '@google/genai': false", "  koffi: true",
-      "  node-addon-require-builtin: false", "  node-pty: true", "  protobufjs: false", ""
-    ].join("\n"));
-    try { run("pnpm", ["--dir", installation, "install", "--offline"]); }
-    catch { run("pnpm", ["--dir", installation, "install"]); }
-    const dshBin = join(installation, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
-    const tarball = (await readdir(packDirectory)).find((entry) => entry.endsWith(".tgz"));
-    if (tarball === undefined) throw new Error("Plugin pack did not create a tarball.");
-    const env = { ...process.env, DEEPSEEK_API_KEY: apiKey, DSH_HOME: dshHome, DSH_TELEMETRY_DISABLED: "1" };
-    run(process.execPath, [dshBin, "plugin", "--profile", "web", "add", join(packDirectory, tarball)], env);
-    child = spawn(process.execPath, [dshBin, "web", "--no-open", "--port", new URL(origin).port], {
-      cwd: repositoryRoot, env, stdio: ["ignore", "pipe", "pipe"]
-    });
+    let env: NodeJS.ProcessEnv;
+    if (realProfile) {
+      const dshBin = process.env.DSH_MIAOWU_REAL_DSH_BIN;
+      if (dshBin === undefined) throw new Error("Real-profile smoke needs DSH_MIAOWU_REAL_DSH_BIN (path to the installed @deepseek-ai/dsh lib/bin.js).");
+      env = { ...process.env, DSH_TELEMETRY_DISABLED: "1" };
+      child = spawn(process.execPath, [dshBin, "web", "--no-open", "--port", new URL(origin).port], {
+        cwd: repositoryRoot, env, stdio: ["ignore", "pipe", "pipe"]
+      });
+    } else {
+      run("pnpm", ["--filter", "@dsh-miaowu/dsh", "build"]);
+      run("pnpm", ["--filter", "@dsh-miaowu/dsh", "pack", "--pack-destination", packDirectory]);
+      await mkdir(installation, { recursive: true });
+      await writeFile(join(installation, "package.json"), `${JSON.stringify({ private: true, dependencies: { "@deepseek-ai/dsh": dshVersion } }, null, 2)}\n`);
+      await writeFile(join(installation, "pnpm-workspace.yaml"), [
+        "packages:", "  - .", "nodeLinker: hoisted", "allowBuilds:",
+        "  '@deepseek-ai/dsh-subprocess-local': true", "  '@google/genai': false", "  koffi: true",
+        "  node-addon-require-builtin: false", "  node-pty: true", "  protobufjs: false", ""
+      ].join("\n"));
+      try { run("pnpm", ["--dir", installation, "install", "--offline"]); }
+      catch { run("pnpm", ["--dir", installation, "install"]); }
+      const dshBin = join(installation, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
+      const tarball = (await readdir(packDirectory)).find((entry) => entry.endsWith(".tgz"));
+      if (tarball === undefined) throw new Error("Plugin pack did not create a tarball.");
+      env = { ...process.env, DEEPSEEK_API_KEY: apiKey, DSH_HOME: dshHome, DSH_TELEMETRY_DISABLED: "1" };
+      run(process.execPath, [dshBin, "plugin", "--profile", "web", "add", join(packDirectory, tarball)], env);
+      child = spawn(process.execPath, [dshBin, "web", "--no-open", "--port", new URL(origin).port], {
+        cwd: repositoryRoot, env, stdio: ["ignore", "pipe", "pipe"]
+      });
+    }
     child.stdout?.on("data", (chunk: Buffer) => logs.push(chunk.toString("utf8")));
     child.stderr?.on("data", (chunk: Buffer) => logs.push(chunk.toString("utf8")));
     await authorizeDsh(origin, logs);
@@ -304,12 +322,15 @@ async function main(): Promise<void> {
     if (!dramaEvents.some((event) => event.type === "assistant/message")) throw new Error("Short-drama review Session has no durable assistant result.");
     const after = await treeDigest(projectRoot);
     if (after !== before) throw new Error("Read-only release flows unexpectedly modified the project.");
-    const remainingKey = logs.join("").includes(apiKey);
-    if (remainingKey) throw new Error("DSH logs exposed the API key.");
+    if (apiKey !== undefined) {
+      const remainingKey = logs.join("").includes(apiKey);
+      if (remainingKey) throw new Error("DSH logs exposed the API key.");
+    }
 
     process.stdout.write(`${JSON.stringify({
       ok: true,
       dshVersion,
+      realProfile,
       provider: deepseek.id,
       model: selectedModel,
       skills: ["story-review", "short-drama-review"],
