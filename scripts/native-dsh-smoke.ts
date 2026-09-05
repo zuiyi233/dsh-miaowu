@@ -71,6 +71,8 @@ const plainWritePrompt = "PLAIN_WRITE_SMOKE：请使用 write 工具在这个 wo
 const plainWritePath = "正文/第001章_通用会话.md";
 const plainWriteContent = "# 通用会话中的第一章\n\n创作文件出现后，工作台才接管这次对话的布局。\n";
 const plainWriteReply = "正文文件已创建。";
+const bookProjectName = "齐天道君";
+const bookChapterPath = `${bookProjectName}/正文/第001章_开篇.md`;
 const gameUpdatePrompt = "GAME_BUILD_UPDATE_SMOKE：请使用 write 工具写入游戏构建版本标记。";
 const gameUpdatePath = `game-adaptations/${generatedGameId}/build/app/version.txt`;
 const gameUpdateContent = "game-build-update-smoke\n";
@@ -588,6 +590,23 @@ async function main(): Promise<void> {
       writeFile(join(plainRoot, "README.md"), "# Plain DSH workspace\n\n没有小说、短剧、游戏或视频项目。\n"),
       writeFile(join(plainRoot, "src", "main.ts"), "export const main = (): string => \"plain\";\n")
     ]);
+    // Book-directory discovery: a whole novel project nested one level under a
+    // book-name directory (正文+追踪 markers) must light the workbench with no
+    // root-level marker — the cold-start shape story-long-write really produces.
+    // The session cwd is the PARENT folder (what the user picks in DSH); the
+    // project lives in its first-level 齐天道君/ subdirectory.
+    const bookShelfRoot = join(projectsRoot, "book-shelf");
+    const bookRoot = join(bookShelfRoot, bookProjectName);
+    await Promise.all([
+      mkdir(join(bookRoot, "正文"), { recursive: true }),
+      mkdir(join(bookRoot, "大纲"), { recursive: true }),
+      mkdir(join(bookRoot, "追踪"), { recursive: true })
+    ]);
+    await Promise.all([
+      writeFile(join(bookRoot, "正文", "第001章_开篇.md"), "# 第一章 开篇\n\n书名目录嵌套的正文。\n"),
+      writeFile(join(bookRoot, "大纲", "大纲.md"), "# 大纲\n\n书名目录嵌套的大纲。\n"),
+      writeFile(join(bookRoot, "追踪", "_tracking-state.json"), `${JSON.stringify({ last_committed_chapter: 0, state_revision: 0 }, null, 2)}\n`)
+    ]);
     const generatedGameRoot = join(storyRoot, "game-adaptations", generatedGameId);
     await Promise.all([
       mkdir(join(generatedGameRoot, "build", "app"), { recursive: true }),
@@ -710,6 +729,8 @@ async function main(): Promise<void> {
       : await rpc<{ readonly sessionId: string }>(origin, "session/create", { request: { workspaceId: storyWorkspace.workspace.workspaceId } });
     const dramaSession = await rpc<{ readonly sessionId: string }>(origin, "session/create", { request: { workspaceId: dramaWorkspace.workspace.workspaceId } });
     const plainSession = await rpc<{ readonly sessionId: string }>(origin, "session/create", { request: { workspaceId: plainWorkspace.workspace.workspaceId } });
+    const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: string; readonly title: string } }>(origin, "workspace/create", { request: { path: bookShelfRoot } });
+    const bookSession = await rpc<{ readonly sessionId: string }>(origin, "session/create", { request: { workspaceId: bookWorkspace.workspace.workspaceId } });
     const catalog = await rpc<{ readonly skills: readonly { readonly name: string }[] }>(origin, "skills/list", { request: { sessionId: storySession.sessionId } });
     const ohStorySkills = catalog.skills.filter((skill) => skill.name === "story" || skill.name.startsWith("story-") || skill.name === "browser-cdp");
     const dramaSkills = catalog.skills.filter((skill) => skill.name === "short-drama" || skill.name.startsWith("short-drama-"));
@@ -846,6 +867,30 @@ async function main(): Promise<void> {
       || plainWorkspacePayload.games?.some((game) => game.source === "workspace") !== false) {
       throw new Error(`Plain workspace was not reported free of creative projects: ${JSON.stringify(plainWorkspacePayload)}`);
     }
+    const bookWorkspaceResponse = await dshFetch(`${origin}/oh-story/workspace?sessionId=${encodeURIComponent(bookSession.sessionId)}`);
+    const bookWorkspacePayload = await bookWorkspaceResponse.json() as {
+      readonly bookDirectories?: readonly string[];
+      readonly files?: readonly { readonly path: string }[];
+    };
+    const bookPaths = bookWorkspacePayload.files?.map((file) => file.path) ?? [];
+    if (!bookWorkspaceResponse.ok || bookWorkspacePayload.bookDirectories?.includes(bookProjectName) !== true
+      || ![bookChapterPath, `${bookProjectName}/大纲/大纲.md`, `${bookProjectName}/追踪/_tracking-state.json`].every((path) => bookPaths.includes(path))) {
+      throw new Error(`Book-directory project was not discovered: ${JSON.stringify(bookWorkspacePayload)}`);
+    }
+    const bookChapterUrl = `${origin}/oh-story/file?sessionId=${encodeURIComponent(bookSession.sessionId)}&path=${encodeURIComponent(bookChapterPath)}`;
+    const bookChapter = await (await dshFetch(bookChapterUrl)).json() as { readonly content?: string; readonly version?: string };
+    const bookWrite = await dshFetch(bookChapterUrl, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: `${bookChapter.content}\n\n（冒烟追加）\n`, baseVersion: bookChapter.version })
+    });
+    if (!bookWrite.ok) throw new Error(`Book-directory two-segment write was rejected: ${String(bookWrite.status)}.`);
+    const unknownBookWrite = await dshFetch(`${origin}/oh-story/file?sessionId=${encodeURIComponent(bookSession.sessionId)}&path=${encodeURIComponent("不存在的书/正文/第001章.md")}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "x", baseVersion: "v0" })
+    });
+    if (unknownBookWrite.status !== 403) throw new Error(`Workspace route accepted an unknown book directory: ${String(unknownBookWrite.status)}.`);
     const dramaWorkspaceResponse = await dshFetch(`${origin}/oh-story/workspace?sessionId=${encodeURIComponent(dramaSession.sessionId)}`);
     const dramaWorkspacePayload = await dramaWorkspaceResponse.json() as { readonly mode?: string; readonly cwd?: string; readonly files?: readonly { readonly path: string; readonly kind?: string; readonly mimeType?: string }[]; readonly shortDrama?: unknown };
     const dramaPaths = dramaWorkspacePayload.files?.map((file) => file.path).sort() ?? [];
@@ -1059,6 +1104,8 @@ async function main(): Promise<void> {
       };
       await selectSession(page, plainWorkspace.workspace.title, plainSessionTitle);
       await page.getByText(plainPrompt, { exact: true }).waitFor({ state: "visible", timeout: 20_000 });
+      // 无工程的会话出现空态入口浮层，但官方布局保持、工作台面不渲染（#29 + onboarding）。
+      await page.getByText("尚未检测到创作工程").waitFor({ state: "visible", timeout: 10_000 });
       const plainChatWidth = await chatWidth();
       if (await page.locator(".oh-story-split-surface").count() !== 0
         || await page.getByRole("button", { name: "打开创作工作台" }).count() !== 0

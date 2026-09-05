@@ -56,6 +56,7 @@ import {
   type WorkbenchPreference
 } from "./workbench-presence.js";
 import { endpoint, handleTabKey, isLayoutRecord, readFeatureEnabled } from "./workbench-ui.js";
+import { EmptyStateOnboarding } from "./empty-state-onboarding.js";
 import styles from "./plugin.css?inline";
 import { registerClientFeatures } from "./features/index.js";
 import { getFileViewersSnapshot, matchFileViewer, subscribeFileViewers, workbenchFeatures } from "./features/registry.js";
@@ -91,6 +92,7 @@ interface WorkspaceFile {
 interface WorkspacePayload {
   readonly cwd: string;
   readonly files: readonly WorkspaceFile[];
+  readonly bookDirectories?: readonly string[] | undefined;
   readonly games: readonly GameProject[];
   readonly videos: readonly VideoProject[];
   readonly shortDrama: Record<string, unknown> | null;
@@ -703,9 +705,9 @@ function CreativeWorkbench({
     [partial, runningCalls]
   );
   const normalizedActivities = useMemo(() => activities.flatMap((activity) => {
-    const path = creativeRelativePath(activity.path, workspace?.cwd);
+    const path = creativeRelativePath(activity.path, workspace?.cwd, workspace?.bookDirectories);
     return path === undefined ? [] : [{ activity, path }];
-  }), [activities, workspace?.cwd]);
+  }), [activities, workspace?.cwd, workspace?.bookDirectories]);
   const primaryActivity = normalizedActivities.at(-1);
   const activityPaths = useMemo(() => new Set(normalizedActivities.map((value) => value.path)), [normalizedActivities]);
   const activity = primaryActivity?.activity;
@@ -991,12 +993,12 @@ function CreativeWorkbench({
 
   const revealPath = useCallback((path: string): void => {
     rememberEditorPosition();
-    const nextWorkbench = workbenchModeForPath(path) ?? "story";
+    const nextWorkbench = workbenchModeForPath(path, workspace?.bookDirectories) ?? "story";
     setWorkbench(nextWorkbench);
     if (nextWorkbench === "game" && !path.includes("/build/app/")) setGameTab("design");
     setSelected(path);
     expandPath(path);
-  }, [expandPath, rememberEditorPosition]);
+  }, [expandPath, rememberEditorPosition, workspace?.bookDirectories]);
 
   // Feature panels (search, history, ...) ask for a file to be opened at a line and
   // character offset. The editor applies the remembered position once the buffer loads.
@@ -1124,8 +1126,8 @@ function CreativeWorkbench({
     if (selected !== undefined && (
       (workspace?.files.some((file) => file.path === selected) ?? false)
       || buffers[selected] !== undefined
-    ) && workbenchModeForPath(selected) === workbench) return;
-    setSelected(workspace === undefined ? undefined : preferredWorkbenchFile(workspace.files, workbench));
+    ) && workbenchModeForPath(selected, workspace?.bookDirectories) === workbench) return;
+    setSelected(workspace === undefined ? undefined : preferredWorkbenchFile(workspace.files, workbench, workspace.bookDirectories));
   }, [activityPath, buffers, selected, workbench, workspace, workspaceLoading]);
 
   useEffect(() => {
@@ -1289,10 +1291,10 @@ function CreativeWorkbench({
     // never selected. Wait for cwd instead of dropping the follow.
     if (workspace?.cwd === undefined) return;
     previousSettledMutation.current = settledMutation;
-    const path = creativeRelativePath(settledMutation.slice(settledMutation.indexOf("\0") + 1), workspace.cwd);
+    const path = creativeRelativePath(settledMutation.slice(settledMutation.indexOf("\0") + 1), workspace.cwd, workspace.bookDirectories);
     if (path !== undefined) followAgentPath(path);
     reload();
-  }, [followAgentPath, reload, settledMutation, workspace?.cwd]);
+  }, [followAgentPath, reload, settledMutation, workspace?.cwd, workspace?.bookDirectories]);
 
   useEffect(() => {
     if (selected === undefined) return;
@@ -1316,7 +1318,7 @@ function CreativeWorkbench({
       if (control === null || control.closest(".oh-story-split-surface") !== null) return;
       const candidates = [control.title, control.getAttribute("aria-label"), control.textContent];
       for (const candidate of candidates) {
-        const path = creativeRelativePath(candidate?.trim().replace(/^(?:Open|打开)\s+/u, ""), workspace.cwd);
+        const path = creativeRelativePath(candidate?.trim().replace(/^(?:Open|打开)\s+/u, ""), workspace.cwd, workspace.bookDirectories);
         if (path === undefined || !knownPaths.has(path)) continue;
         event.preventDefault();
         event.stopPropagation();
@@ -1438,7 +1440,7 @@ function CreativeWorkbench({
 
   const groups = useMemo(() => {
     const value = new Map<string, WorkspaceFile[]>();
-    const all = [...(workspace?.files ?? [])].filter((file) => workbenchModeForPath(file.path) === workbench);
+    const all = [...(workspace?.files ?? [])].filter((file) => workbenchModeForPath(file.path, workspace?.bookDirectories) === workbench);
     if (activityPath !== undefined && !all.some((file) => file.path === activityPath)) all.push({ path: activityPath, bytes: 0, version: "", kind: "text" });
     all.sort((left, right) => left.path.localeCompare(right.path, "zh-Hans-CN"));
     for (const file of all) {
@@ -1464,7 +1466,7 @@ function CreativeWorkbench({
       setSelected(undefined);
       return;
     }
-    const target = workspace === undefined ? undefined : preferredWorkbenchFile(workspace.files, next);
+    const target = workspace === undefined ? undefined : preferredWorkbenchFile(workspace.files, next, workspace.bookDirectories);
     if (target === undefined) setSelected(undefined);
     else revealPath(target);
   };
@@ -1504,9 +1506,18 @@ function CreativeWorkbench({
   };
 
   if (!open) {
-    // Without creative work there is nothing to reveal, so the plugin leaves the
-    // official conversation exactly as DSH renders it. A failed workspace request
-    // still offers the way in, because that error is only readable inside the workbench.
+    // Without creative work there is nothing to reveal, so a failed workspace
+    // request still offers the way in (that error is only readable inside the
+    // workbench), an unloaded workspace stays untouched, and a confirmed-empty
+    // workspace gets a lightweight onboarding panel. Loading and error behavior
+    // are unchanged: null while loading, launcher when the request failed.
+    if (!creativeProject && error === undefined && !workspaceLoading) {
+      // 不是工作台面：无工程的会话必须保持官方布局（#29），空态入口只是浮层。
+      return <div ref={surfaceRef} className="oh-story-empty-host" data-open="false">
+        <style>{styles}</style>
+        <EmptyStateOnboarding onCreate={sendProductionPrompt} />
+      </div>;
+    }
     if (!creativeProject && error === undefined) return null;
     return <div ref={surfaceRef} className="oh-story-split-surface" data-open="false">
       <style>{styles}</style>
@@ -1707,7 +1718,7 @@ function CreativeWorkbench({
               delete next[selected];
               return next;
             });
-            setSelected(workspace === undefined ? undefined : preferredWorkbenchFile(workspace.files, workbench));
+            setSelected(workspace === undefined ? undefined : preferredWorkbenchFile(workspace.files, workbench, workspace.bookDirectories));
           }}>放弃本地草稿</button></div>
         : editorMode === "production" && productionAvailable && episodeProduction !== undefined
           ? <DramaProductionView

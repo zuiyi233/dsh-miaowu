@@ -29,6 +29,49 @@
 .oh-story-launcher:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
 .oh-story-launcher:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
 
+/* Empty-state onboarding: rendered instead of nothing when the workspace holds
+   no creative project. Uses the same DSW tokens as the launcher. */
+.oh-story-empty {
+  box-sizing: border-box;
+  position: fixed;
+  z-index: 9;
+  top: calc(var(--oh-story-seam-top, 0px) + 10px);
+  right: calc(var(--oh-story-seam-right, 0px) + 14px);
+  width: 280px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-base);
+  padding: 12px 14px;
+  font-family: var(--dsw-font-family);
+  font-size: 12px;
+  line-height: 20px;
+}
+.oh-story-empty-title { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.oh-story-empty-desc { margin: 0 0 10px; }
+.oh-story-empty-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.oh-story-empty-entry:last-child { grid-column: 1 / -1; }
+.oh-story-empty-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.oh-story-empty-entry b { font-weight: 500; color: var(--dsw-alias-label-primary); }
+.oh-story-empty-entry span { opacity: 0.75; font-size: 11px; }
+.oh-story-empty-entry:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
+.oh-story-empty-entry:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
+.oh-story-empty-entry:disabled { opacity: 0.6; cursor: default; }
+.oh-story-empty-notice { margin: 10px 0 0; }
+
 /* DSH documents every [data-slot] wrapper as a stable addressable styling
    seam. The official Session body and composer stay mounted; this only turns
    their scroll host into a three-column writing surface. */

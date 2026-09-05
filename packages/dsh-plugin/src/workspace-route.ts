@@ -25,6 +25,12 @@ const GAME_DIRECTORY = "game-adaptations";
 // prose workspace can consume the shared listing budget.
 const CREATIVE_DIRECTORIES = [VIDEO_DIRECTORY, GAME_DIRECTORY, ...STORY_DIRECTORIES, ...DRAMA_DIRECTORIES] as const;
 const ROOT_FILES = new Set(["short-drama.json"]);
+/**
+ * 书名目录标记:一级子目录直接包含 正文/ 或 追踪/ 子目录者即小说工程根
+ * (对齐上游 oh-story 定义)。只做一层 stat 探测,不深递归。
+ */
+const BOOK_MARKER_DIRECTORIES = ["正文", "追踪"] as const;
+const BOOK_NAME_MAX_LENGTH = 128;
 const EDITABLE_EXTENSIONS = new Set([".md", ".txt", ".json", ".jsonl"]);
 const GAME_EDITABLE_EXTENSIONS = new Set([...EDITABLE_EXTENSIONS, ".html", ".css", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"]);
 const VIDEO_EDITABLE_EXTENSIONS = new Set([...EDITABLE_EXTENSIONS, ".srt", ".ass"]);
@@ -299,9 +305,53 @@ export function assertCreativePath(path: string, kind: "text" | "media"): void {
     throw new WorkspaceHttpError(403, "文件路径不在创作工作台中。");
   }
   const root = path.split("/", 1)[0];
-  if (!CREATIVE_DIRECTORIES.some((directory) => directory === root) && !ROOT_FILES.has(path)) {
+  if (!CREATIVE_DIRECTORIES.some((directory) => directory === root) && !ROOT_FILES.has(path) && !isBookNestedStoryPath(path)) {
     throw new WorkspaceHttpError(403, "文件路径不在创作工作台中。");
   }
+}
+
+/** 书名目录候选:单段非隐藏名,不与根白名单目录重名,长度设上限防异常输入。 */
+function isBookName(value: string | undefined): boolean {
+  return value !== undefined
+    && value !== ""
+    && value !== "."
+    && value !== ".."
+    && !value.startsWith(".")
+    && value.length <= BOOK_NAME_MAX_LENGTH
+    && !CREATIVE_DIRECTORIES.some((directory) => directory === value);
+}
+
+/**
+ * 两段书名路径的结构判定:`<书名目录>/<STORY_DIRECTORIES>/...`。
+ * 只做形状检查,书名目录的真实存在性由 creativeTarget / discoverBookDirectories 再校验。
+ */
+export function isBookNestedStoryPath(path: string): boolean {
+  const parts = path.split("/");
+  return parts.length >= 2 && isBookName(parts[0]) && STORY_DIRECTORIES.some((directory) => directory === parts[1]);
+}
+
+/** 书名目录存在性:一级子目录且直接包含 正文/ 或 追踪/ 子目录(各一次 stat,不深递归)。 */
+async function isBookDirectory(realm: WorkspaceRealm, name: string): Promise<boolean> {
+  for (const marker of BOOK_MARKER_DIRECTORIES) {
+    const target = await realm.fs.resolve(`${name}/${marker}`, { cwd: realm.cwd });
+    if (!realm.fs.contains(realm.root, target)) continue;
+    if ((await realm.fs.stat(target).catch(() => undefined))?.type === "directory") return true;
+  }
+  return false;
+}
+
+/**
+ * 书名目录发现:只枚举 cwd 一级子目录,根白名单目录与点文件除外;
+ * 单个候选探测失败只跳过该候选,不中断整轮发现。
+ */
+export async function discoverBookDirectories(realm: WorkspaceRealm): Promise<string[]> {
+  const books: string[] = [];
+  for (const entry of await realm.fs.listDir(realm.root)) {
+    if (entry.type !== "directory" || !isBookName(entry.name)) continue;
+    if (!realm.fs.contains(realm.root, entry.target)) continue;
+    if (await isBookDirectory(realm, entry.name).catch(() => false)) books.push(entry.name);
+  }
+  return books.sort((left, right) => left.localeCompare(right, "zh-Hans-CN"));
 }
 
 export function mediaMimeTypeForPath(path: string): string | undefined {
@@ -338,6 +388,14 @@ export async function workspaceRealm(context: Context, url: URL): Promise<Worksp
 
 export async function creativeTarget(realm: WorkspaceRealm, path: string, kind: "text" | "media" = "text"): Promise<FsTarget> {
   assertCreativePath(path, kind);
+  // 书名嵌套路径的结构已在 assertCreativePath 放行,这里再校验书名目录真实存在
+  // (assertCreativePath 是同步的,做不了 stat;直接调用它的 media 预览走同一条 creativeTarget)。
+  if (isBookNestedStoryPath(path)) {
+    const book = path.split("/", 1)[0] ?? "";
+    if (!await isBookDirectory(realm, book).catch(() => false)) {
+      throw new WorkspaceHttpError(403, "文件路径不在创作工作台中。");
+    }
+  }
   const target = await realm.fs.resolve(path, { cwd: realm.cwd });
   if (!realm.fs.contains(realm.root, target)) throw new WorkspaceHttpError(403, "文件路径离开了 DSH 工作目录。");
   return target;
@@ -368,10 +426,10 @@ export async function readVersionedFile(fs: FileSystem, target: FsTarget, maxByt
   throw new WorkspaceHttpError(409, "文件正在被修改，请重试。");
 }
 
-async function listFiles(realm: WorkspaceRealm): Promise<WorkspaceFile[]> {
+/** 工作区创意文件清单:根白名单 + 书名目录下 STORY_DIRECTORIES,供测试与路由共用。 */
+export async function listFiles(realm: WorkspaceRealm): Promise<WorkspaceFile[]> {
   const files: WorkspaceFile[] = [];
-  const walk = async (path: string, directory: FsTarget): Promise<void> => {
-    for (const entry of await realm.fs.listDir(directory)) {
+  const walk = async (path: string, directory: FsTarget): Promise<void> => {    for (const entry of await realm.fs.listDir(directory)) {
       if (entry.name.startsWith(".") || !realm.fs.contains(realm.root, entry.target)) continue;
       const childPath = `${path}/${entry.name}`;
       if (entry.type === "directory") {
@@ -393,6 +451,18 @@ async function listFiles(realm: WorkspaceRealm): Promise<WorkspaceFile[]> {
     if (!realm.fs.contains(realm.root, target)) continue;
     const info = await realm.fs.stat(target);
     if (info?.type === "directory") await walk(directory, target);
+    if (files.length >= FILE_LIMIT) break;
+  }
+  // 书名目录:每个工程根下的 STORY_DIRECTORIES 按自然两段路径纳入(如 齐天道君/正文/...)。
+  // 根白名单行为不变;多书并存都要发现;发现失败降级为只返回根白名单结果。
+  for (const book of await discoverBookDirectories(realm).catch(() => [] as string[])) {
+    for (const directory of STORY_DIRECTORIES) {
+      const target = await realm.fs.resolve(`${book}/${directory}`, { cwd: realm.cwd });
+      if (!realm.fs.contains(realm.root, target)) continue;
+      const info = await realm.fs.stat(target);
+      if (info?.type === "directory") await walk(`${book}/${directory}`, target);
+      if (files.length >= FILE_LIMIT) break;
+    }
     if (files.length >= FILE_LIMIT) break;
   }
   for (const path of ROOT_FILES) {
@@ -738,6 +808,8 @@ async function handle(context: Context, request: IncomingMessage, response: Serv
     if (url.pathname === "/oh-story/workspace" && request.method === "GET") {
       const realm = await workspaceRealm(context, url);
       const files = await listFiles(realm);
+      // 前端无法 stat 磁盘:书名目录名单随 payload 下发,供 creativeRelativePath 做两段判定。
+      const bookDirectories = await discoverBookDirectories(realm).catch(() => [] as string[]);
       const tracking = await metadata(realm, files, "追踪/_tracking-state.json", options.maxBytes);
       const shortDrama = await metadata(realm, files, "short-drama.json", options.maxBytes);
       const metadataErrors = [tracking.error, shortDrama.error].filter((value): value is string => value !== undefined);
@@ -748,7 +820,7 @@ async function handle(context: Context, request: IncomingMessage, response: Serv
         await bundledGameExample()
       ];
       const videos = await workspaceVideoProjects(realm, files, options.maxBytes);
-      send(response, 200, { cwd: realm.cwd, files, games, videos, tracking: tracking.value, shortDrama: shortDrama.value, metadataErrors, mode: "dsh-session" });
+      send(response, 200, { cwd: realm.cwd, files, games, videos, tracking: tracking.value, shortDrama: shortDrama.value, metadataErrors, mode: "dsh-session", bookDirectories });
       return;
     }
     if (url.pathname === "/oh-story/video-preflight" && request.method === "GET") {

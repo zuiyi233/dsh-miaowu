@@ -11,6 +11,8 @@ export interface WorkbenchWorkspace {
   readonly files: readonly unknown[];
   readonly games: readonly { readonly source: "workspace" | "example" }[];
   readonly videos: readonly unknown[];
+  /** 服务端发现的书名目录名单(一级子目录且含 正文/ 或 追踪/),缺失时前端不做两段判定。 */
+  readonly bookDirectories?: readonly string[] | undefined;
 }
 
 export interface WorkbenchPreferenceStorage {

@@ -70,6 +70,9 @@
   "scripts": {
     "build": "tsx ../../scripts/build-dsh-plugin.ts && tsc -p tsconfig.build.json",
     "prepack": "pnpm build",
+    "preset:install": "node ../../scripts/install-preset.mjs",
+    "preset:remove": "node ../../scripts/install-preset.mjs --remove",
+    "preset:dry-run": "node ../../scripts/install-preset.mjs --dry-run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:contract": "vitest run contract"

@@ -644,8 +644,8 @@
     },
     {
       "path": "skills/story-long-write/references/workflow-setup.md",
-      "sha256": "f677e4961fc0d9e7627a8b67e574dcff407016de96bb2999b86c2b38df4e2d8f",
-      "bytes": 30096
+      "sha256": "c9f5678eb4bf3fdc2273a8403228400943ce382375e61b7d215d9dd2a9dc1e31",
+      "bytes": 30389
     },
     {
       "path": "skills/story-long-write/references/writing-craft.md",
@@ -794,8 +794,8 @@
     },
     {
       "path": "skills/story-setup/SKILL.md",
-      "sha256": "a5abd4092ee917bb80684cbd5ca3a2d7fd637084ea4a7c821771dbb4988b5cac",
-      "bytes": 61902
+      "sha256": "bcfa30dd92a28d70b04278a693577d1d1caf3e4e18d1a12b34cd9b77113c84bf",
+      "bytes": 61922
     },
     {
       "path": "skills/story-setup/references/agent-references/agent-quality.md",

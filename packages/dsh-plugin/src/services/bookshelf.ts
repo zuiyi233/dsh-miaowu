@@ -2,6 +2,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { FsTarget } from "@deepseek-ai/dsh-fs";
 import {
+  discoverBookDirectories,
   mapFsError,
   send,
   workspaceRealm,
@@ -240,6 +241,19 @@ async function discoverNovels(realm: WorkspaceRealm): Promise<DiscoveredWork[]> 
   return children.map((child) => ({ kind: "novel" as const, name: child.name, path: `${NOVEL_BASE}/${child.name}` }));
 }
 
+/**
+ * 书名目录小说:`<书名>/正文/` 下的子目录即小说,作品名取子目录名。
+ * 口径与 workspace-route 的 discoverBookDirectories 共用同一实现,不另起探测。
+ */
+async function discoverBookNovels(realm: WorkspaceRealm): Promise<DiscoveredWork[]> {
+  const books = await discoverBookDirectories(realm).catch(() => [] as string[]);
+  const groups = await Promise.all(books.map(async (book) => {
+    const children = await childDirectories(realm, `${book}/${NOVEL_BASE}`).catch(() => []);
+    return children.map((child) => ({ kind: "novel" as const, name: child.name, path: `${book}/${NOVEL_BASE}/${child.name}` }));
+  }));
+  return groups.flat();
+}
+
 async function discoverDramas(realm: WorkspaceRealm): Promise<DiscoveredWork[]> {
   const root = await realm.fs.resolve(DRAMA_BASE, { cwd: realm.cwd });
   if (!realm.fs.contains(realm.root, root)) return [];
@@ -266,13 +280,14 @@ async function discoverAdaptations(
 
 /** 作品发现:遍历创作目录识别作品根,单目录失败只降级该类,不中断整轮扫描. */
 export async function discoverWorks(realm: WorkspaceRealm): Promise<DiscoveredWork[]> {
-  const [novels, dramas, games, videos] = await Promise.all([
+  const [novels, bookNovels, dramas, games, videos] = await Promise.all([
     discoverNovels(realm).catch(() => []),
+    discoverBookNovels(realm).catch(() => []),
     discoverDramas(realm).catch(() => []),
     discoverAdaptations(realm, GAME_BASE, "game").catch(() => []),
     discoverAdaptations(realm, VIDEO_BASE, "video").catch(() => []),
   ]);
-  return [...novels, ...dramas, ...games, ...videos];
+  return [...novels, ...bookNovels, ...dramas, ...games, ...videos];
 }
 
 export async function scanWorkspace(

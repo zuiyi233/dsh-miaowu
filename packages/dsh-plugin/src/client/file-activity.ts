@@ -223,23 +223,39 @@ export function latestSettledMutation(chat: ChatSnapshot): string | undefined {
 }
 
 /** Convert a DSH tool path to the creative-relative path accepted by the narrow route. */
-export function creativeRelativePath(path: string | undefined, cwd: string | undefined): string | undefined {
+export function creativeRelativePath(
+  path: string | undefined,
+  cwd: string | undefined,
+  bookDirectories: readonly string[] | undefined = undefined
+): string | undefined {
   if (path === undefined || path === "") return undefined;
   const normalized = path.replaceAll("\\", "/");
   const root = cwd?.replaceAll("\\", "/").replace(/\/$/u, "");
   const insideRoot = root !== undefined && normalized.startsWith(`${root}/`);
   if ((normalized.startsWith("/") || /^[a-z]:\//iu.test(normalized) || normalized.startsWith("file:")) && !insideRoot) return undefined;
   const relative = insideRoot ? normalized.slice(root.length + 1) : normalized.replace(/^\.\//u, "");
-  const [directory] = relative.split("/", 1);
+  const parts = relative.split("/");
+  const [directory] = parts;
+  const books = bookDirectories !== undefined ? new Set(bookDirectories) : undefined;
+  // 两段书名路径:首段是服务端发现的书名目录、第二段是 STORY_DIRECTORIES。
+  // 前端无法 stat 磁盘,只认 payload 下发的名单,不自行猜测(名单缺失即不认)。
+  const bookNested = parts.length >= 2
+    && directory !== undefined
+    && books?.has(directory) === true
+    && (parts[1] !== undefined && STORY_DIRECTORIES.has(parts[1]));
   const creative = directory !== undefined && (STORY_DIRECTORIES.has(directory) || DRAMA_DIRECTORIES.has(directory) || directory === GAME_DIRECTORY || directory === VIDEO_DIRECTORY);
-  if ((!creative && relative !== "short-drama.json") || !EDITABLE_EXTENSION.test(relative)) return undefined;
+  if (((!creative && !bookNested) && relative !== "short-drama.json") || !EDITABLE_EXTENSION.test(relative)) return undefined;
   if (relative.split("/").some((part) => part === ".." || part === "." || part === "")) return undefined;
   return relative;
 }
 
-export function workbenchModeForPath(path: string | undefined): WorkbenchMode | undefined {
+export function workbenchModeForPath(path: string | undefined, bookDirectories: readonly string[] | undefined = undefined): WorkbenchMode | undefined {
   if (path === "short-drama.json") return "drama";
-  const directory = path?.split("/", 1)[0];
+  const parts = path?.split("/") ?? [];
+  const [directory, second] = parts;
+  // 两段书名路径一律归小说工作台(书名目录下只发现 STORY_DIRECTORIES)。
+  if (parts.length >= 2 && directory !== undefined && second !== undefined
+    && bookDirectories?.includes(directory) === true && STORY_DIRECTORIES.has(second)) return "story";
   if (directory !== undefined && STORY_DIRECTORIES.has(directory)) return "story";
   if (directory !== undefined && DRAMA_DIRECTORIES.has(directory)) return "drama";
   if (directory === GAME_DIRECTORY) return "game";
@@ -250,11 +266,17 @@ export function workbenchModeForPath(path: string | undefined): WorkbenchMode | 
 /** Choose the first useful document when a creative workbench opens. */
 export function preferredWorkbenchFile(
   files: readonly WorkspaceFilePath[],
-  mode: WorkbenchMode
+  mode: WorkbenchMode,
+  bookDirectories: readonly string[] | undefined = undefined
 ): string | undefined {
-  const matching = files.filter((file) => workbenchModeForPath(file.path) === mode);
+  const matching = files.filter((file) => workbenchModeForPath(file.path, bookDirectories) === mode);
+  const bookPrefix = bookDirectories !== undefined && bookDirectories.length > 0
+    ? `(?:${bookDirectories.map((name) => name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("|")})/`
+    : undefined;
+  const storyText = bookPrefix !== undefined ? `(?:${bookPrefix})?正文/.*\\.md` : "^正文/.*\\.md";
+  const storyOutline = bookPrefix !== undefined ? `(?:${bookPrefix})?大纲/.*\\.md` : "^大纲/.*\\.md";
   const preferences = mode === "story"
-    ? [/^正文\/.*\.md$/u, /^大纲\/.*\.md$/u, /\.md$/u]
+    ? [new RegExp(`${storyText}$`, "u"), new RegExp(`${storyOutline}$`, "u"), /\.md$/u]
     : mode === "drama" ? [
         /^剧集\/EP0*1\/剧本\.md$/u,
         /^剧集\/.*\/剧本\.md$/u,
