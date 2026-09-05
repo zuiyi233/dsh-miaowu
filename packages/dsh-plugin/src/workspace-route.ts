@@ -120,7 +120,12 @@ interface DramaPreflightSummary {
   readonly python: { readonly ok: boolean; readonly version?: string | undefined };
   readonly adapterConfig: { readonly path: string; readonly generated: boolean; readonly ok: boolean };
   readonly adapters: readonly DramaAdapterStatus[];
-  readonly comfyui: ComfyuiPreflightSummary;
+  /**
+   * runnerReady mirrors the already-probed python.ok: false means the host has
+   * no usable interpreter, so the ComfyUI runner cannot execute even when the
+   * service is online. The client uses it to warn instead of showing "已配置".
+   */
+  readonly comfyui: ComfyuiPreflightSummary & { readonly runnerReady: boolean };
 }
 
 let dramaPreflightInFlight: Promise<DramaPreflightSummary> | undefined;
@@ -143,7 +148,7 @@ async function dramaPreflight(): Promise<DramaPreflightSummary> {
         python: python.probe,
         adapterConfig,
         adapters: dramaAdapterStatuses(),
-        comfyui: { ...probe, workflow: comfyuiWorkflowStatus(process.env) }
+        comfyui: { ...probe, workflow: comfyuiWorkflowStatus(process.env), runnerReady: python.probe.ok }
       };
       dramaPreflightCache = { expires: Date.now() + 30_000, value };
       return value;
@@ -644,12 +649,13 @@ async function workspaceVideoProjects(realm: WorkspaceRealm, files: readonly Wor
       try { return JSON.parse(content) as unknown; }
       catch { return undefined; }
     };
-    const [project, runManifest, assembly] = await Promise.all([
+    const [project, runManifest, assembly, ttsMeta] = await Promise.all([
       readJson("project.json"),
       readJson("recap_run_manifest.json"),
-      readJson("assembly_manifest.json")
+      readJson("assembly_manifest.json"),
+      readJson("tts_meta.json")
     ]);
-    return summarizeVideoProject(root, files, { project, runManifest, assembly });
+    return summarizeVideoProject(root, files, { project, runManifest, assembly, ttsMeta });
   }));
 }
 

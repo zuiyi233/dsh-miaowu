@@ -9,9 +9,13 @@ describe("video recap project projection", () => {
   it("keeps the Studio manifest-driven and hides high-volume working files", () => {
     expect(visibleVideoPath("video-recaps/demo/work/recap_run_manifest.json")).toBe(true);
     expect(visibleVideoPath("video-recaps/demo/work/frames/frame-00001.jpg")).toBe(false);
-    expect(visibleVideoPath("video-recaps/demo/work/tts_segments/segment-001.wav")).toBe(false);
+    expect(visibleVideoPath("video-recaps/demo/work/tts_segments/narr_001.wav")).toBe(true);
+    expect(visibleVideoPath("video-recaps/demo/work/tts_segments/narr_001.mp3")).toBe(true);
+    expect(visibleVideoPath("video-recaps/demo/work/tts_segments/notes.txt")).toBe(false);
+    expect(visibleVideoPath("video-recaps/demo/work/frames/frame-00001.mp4")).toBe(false);
     expect(visibleVideoPath("video-recaps/demo/sources/input.mp4")).toBe(true);
     expect(skipVideoDirectory("video-recaps/demo/work/frames")).toBe(true);
+    expect(skipVideoDirectory("video-recaps/demo/work/tts_segments")).toBe(false);
   });
 
   it("summarizes authoritative artifacts without creating a second lifecycle truth", () => {
@@ -49,5 +53,49 @@ describe("video recap project projection", () => {
     expect(videoProjectRoot("video-recaps/我的项目/work/timeline.json")).toBe("video-recaps/我的项目");
     expect(videoProjectRoot("video-recaps/.hidden/work/timeline.json")).toBeUndefined();
     expect(videoProjectRoot("正文/demo.md")).toBeUndefined();
+  });
+
+  it("lists tts_meta.json as a manifest artifact", () => {
+    const root = "video-recaps/voice";
+    const summary = summarizeVideoProject(root, [file(`${root}/work/tts_meta.json`)], {});
+    expect(summary.artifacts).toEqual([{ label: "配音元数据", kind: "manifest", path: `${root}/work/tts_meta.json`, version: `v:${root}/work/tts_meta.json` }]);
+  });
+
+  it("reads engine/partial/failures from ttsMeta without demoting state", () => {
+    const root = "video-recaps/voice";
+    const files = [
+      file(`${root}/sources/source.mp4`, "media", "video/mp4"),
+      file(`${root}/work/narration.json`),
+      file(`${root}/work/tts_meta.json`)
+    ];
+    const healthy = summarizeVideoProject(root, files, {
+      runManifest: { source_video: `${root}/sources/source.mp4` },
+      ttsMeta: { engine: "comfyui-local", partial: false, failures: [], segments: [{ index: 1 }] }
+    });
+    expect(healthy).toMatchObject({ state: "working", stage: "assemble", stageLabel: "正在合成", voiceEngine: "comfyui-local" });
+    const bad = summarizeVideoProject(root, files, {
+      runManifest: { source_video: `${root}/sources/source.mp4` },
+      ttsMeta: { engine: "comfyui-local", partial: true, failures: [{ index: 2 }, { index: 5 }] }
+    });
+    expect(bad.state).toBe("working");
+    expect(bad.stage).toBe("assemble");
+    expect(bad.stageLabel).toBe("正在合成 · 配音不完整（partial） · 2 段失败");
+    expect(bad.voiceEngine).toBe("comfyui-local");
+  });
+
+  it("leaves legacy projects without ttsMeta untouched", () => {
+    const root = "video-recaps/legacy";
+    const files = [
+      file(`${root}/sources/source.mp4`, "media", "video/mp4"),
+      file(`${root}/work/recap_run_manifest.json`),
+      file(`${root}/work/narration.json`),
+      file(`${root}/work/tts_meta.json`)
+    ];
+    const metadata = { runManifest: { source_video: `${root}/sources/source.mp4` } };
+    const withAbsent = summarizeVideoProject(root, files, metadata);
+    const withUndefinedFields = summarizeVideoProject(root, files, { ...metadata, ttsMeta: undefined });
+    expect(withUndefinedFields).toEqual(withAbsent);
+    expect(withAbsent.voiceEngine).toBeUndefined();
+    expect(withAbsent).toMatchObject({ state: "working", stage: "assemble", stageLabel: "正在合成" });
   });
 });

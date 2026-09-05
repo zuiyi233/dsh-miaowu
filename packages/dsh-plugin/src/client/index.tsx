@@ -23,6 +23,7 @@ import {
   type WorkbenchMode
 } from "./file-activity.js";
 import { buildFileTree, type FileTreeNode } from "./file-tree.js";
+import { isGameArtImage } from "./game-art.js";
 import { JsonlPreview } from "./jsonl-preview.js";
 import { MarkdownPreview } from "./markdown-preview.js";
 import {
@@ -509,15 +510,17 @@ function GameDesign({
   const documents = useMemo(() => files.filter((file) => file.path.startsWith(`${project.root}/`) && (
     /\.(?:md|txt|json|jsonl|html|css|[cm]?js|tsx?|jsx)$/iu.test(file.path)
   )), [files, project.root]);
-  const preferred = selected !== undefined && documents.some((file) => file.path === selected)
+  const artworks = useMemo(() => files.filter((file) => isGameArtImage(file.path, project.root)), [files, project.root]);
+  const preferred = selected !== undefined && (documents.some((file) => file.path === selected) || artworks.some((file) => file.path === selected))
     ? selected
-    : documents.find((file) => file.path === `${project.root}/PRODUCT_BRIEF.md`)?.path ?? documents[0]?.path;
+    : documents.find((file) => file.path === `${project.root}/PRODUCT_BRIEF.md`)?.path ?? documents[0]?.path ?? artworks[0]?.path;
   const [path, setPath] = useState(preferred);
   const [content, setContent] = useState<string>();
   const [error, setError] = useState<string>();
   useEffect(() => { setPath(preferred); }, [preferred, project.id]);
+  const artwork = path === undefined ? undefined : artworks.find((file) => file.path === path);
   useEffect(() => {
-    if (path === undefined || project.source === "example") { setContent(undefined); return; }
+    if (path === undefined || artwork !== undefined || project.source === "example") { setContent(undefined); return; }
     const controller = new AbortController();
     setContent(undefined);
     setError(undefined);
@@ -526,20 +529,21 @@ function GameDesign({
       .then((file) => { setContent(file.content); })
       .catch((reason: unknown) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason)); });
     return () => { controller.abort(); };
-  }, [path, project.source, sessionId]);
+  }, [artwork, path, project.source, sessionId]);
   if (project.source === "example") return <div className="oh-game-design-empty">
     <strong>内置完整示例</strong>
     <p>《金瓶梅 · 风月总账》的完整可玩构建与 QA 校验结果随插件打包，可直接在左侧试玩。上游的产品简报、分析、概念、设计与源小说不随包分发，可在 novel-to-game 仓库查看完整创作过程。</p>
     <code>novel-to-game/examples/jin-ping-mei</code>
   </div>;
-  if (documents.length === 0 || path === undefined) return <div className="oh-game-design-empty">当前项目还没有可检查的设计或源文件。</div>;
+  if ((documents.length === 0 && artworks.length === 0) || path === undefined) return <div className="oh-game-design-empty">当前项目还没有可检查的设计或源文件。</div>;
   const markdown = path.toLocaleLowerCase().endsWith(".md");
   return <div className="oh-game-design">
     <label>项目文件<select value={path} onChange={(event) => {
       setPath(event.target.value);
       onSelect(event.target.value);
-    }}>{documents.map((file) => <option value={file.path} key={file.path}>{file.path.slice(project.root.length + 1)}</option>)}</select></label>
-    {error !== undefined ? <div className="oh-story-error">{error}</div>
+    }}>{documents.map((file) => <option value={file.path} key={file.path}>{file.path.slice(project.root.length + 1)}</option>)}{artworks.length > 0 && <optgroup label="美术">{artworks.map((file) => <option value={file.path} key={file.path}>{file.path.slice(project.root.length + 1)}</option>)}</optgroup>}</select></label>
+    {artwork !== undefined ? <div className="oh-story-media-document"><img src={endpoint("media", sessionId, artwork.path)} alt={artwork.path} loading="lazy" /></div>
+      : error !== undefined ? <div className="oh-story-error">{error}</div>
       : content === undefined ? <div className="oh-game-design-empty">正在载入文件…</div>
         : markdown ? <MarkdownPreview content={content} label={path} />
           : <pre className="oh-game-source" aria-label={`${path} 源码`}>{content}</pre>}

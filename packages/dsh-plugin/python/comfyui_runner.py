@@ -57,6 +57,20 @@ NUMERIC_PLACEHOLDERS = {
 INPUT_IMAGE_PLACEHOLDER = "__INPUT_IMAGE__"
 INPUT_IMAGE_KEY = "input_image"
 DRAMA_MODALITIES = {"image", "video", "music"}
+# Parameters consumed by drama mode (_drama_values + workflow lookup in
+# _normalize_drama). Anything else with a non-empty value is ignored with a
+# stderr warning, never silently.
+DRAMA_KNOWN_PARAMETERS = frozenset({
+    "negative", "width", "height", "steps", "cfg", "fps",
+    "duration_seconds", "duration", "seed", INPUT_IMAGE_KEY, "workflow",
+})
+# Top-level fields consumed by tool mode (_normalize_tool). Unknown non-empty
+# fields are reported in the stdout "warnings" array (plus a stderr line).
+TOOL_KNOWN_FIELDS = frozenset({
+    "prompt", "negative", "workflow", "count", "output_dir", "filename_prefix",
+    "seed", "width", "height", "steps", "cfg", "fps", "duration_seconds",
+    "timeout_seconds", INPUT_IMAGE_KEY,
+})
 
 
 class ComfyFailure(RuntimeError):
@@ -417,6 +431,22 @@ def _normalize_drama(document: Any) -> dict[str, Any]:
             "workflow": workflow}
 
 
+def _is_empty_value(value: Any) -> bool:
+    """Values that carry no information: never counted as ignored."""
+    return value is None or (isinstance(value, str) and value == "")
+
+
+def _ignored_names(document: dict[str, Any], known: frozenset[str]) -> list[str]:
+    return sorted(key for key, value in document.items()
+                  if key not in known and not _is_empty_value(value))
+
+
+def _warn_ignored(names: list[str]) -> None:
+    if names:
+        print(f"comfyui-runner: ignored parameters: {', '.join(names)}",
+              file=sys.stderr)
+
+
 def _drama_values(prompt: str, parameters: dict[str, Any]) -> dict[str, Any]:
     values: dict[str, Any] = {"prompt": prompt}
     for key in ("negative", "width", "height", "steps", "cfg", "fps"):
@@ -447,6 +477,7 @@ def _generate(base: str, template: dict[str, Any], values: dict[str, Any],
 
 def _run_drama(document: Any) -> dict[str, Any]:
     job = _normalize_drama(document)
+    _warn_ignored(_ignored_names(job["parameters"], DRAMA_KNOWN_PARAMETERS))
     timeout = _env_timeout_seconds()
     deadline = time.monotonic() + timeout
     base = _base_url()
@@ -499,7 +530,8 @@ def _normalize_tool(document: Any) -> dict[str, Any]:
     except ValueError as exc:
         raise ValueError("output_dir escapes the working directory") from exc
     prefix = document.get("filename_prefix", "comfyui")
-    if not isinstance(prefix, str) or not prefix or prefix != Path(prefix).name:
+    if (not isinstance(prefix, str) or not prefix or prefix != Path(prefix).name
+            or prefix.startswith(".")):
         raise ValueError("filename_prefix must be a plain file name")
     seed = document.get("seed")
     input_image = document.get(INPUT_IMAGE_KEY)
@@ -517,7 +549,8 @@ def _normalize_tool(document: Any) -> dict[str, Any]:
             "count": count, "output_dir": output_dir, "filename_prefix": prefix,
             "timeout_seconds": _timeout_seconds(document.get("timeout_seconds"),
                                                 default=DEFAULT_TIMEOUT_SECONDS),
-            "input_image": input_image}
+            "input_image": input_image,
+            "warnings": _ignored_names(document, TOOL_KNOWN_FIELDS)}
 
 
 def _run_tool(document: Any) -> dict[str, Any]:
@@ -535,6 +568,7 @@ def _run_tool(document: Any) -> dict[str, Any]:
     files: list[dict[str, Any]] = []
     prompt_ids: list[str] = []
     sequence = 0
+    _warn_ignored(job["warnings"])
     for index in range(job["count"]):
         values = dict(job["values"])
         values["seed"] = base_seed + index  # count>1: seeds step by 1
@@ -557,7 +591,8 @@ def _run_tool(document: Any) -> dict[str, Any]:
                 handle.write(content)
             files.append({"path": str(destination), "bytes": len(content)})
     return {"files": files, "prompt_ids": prompt_ids,
-            "duration_ms": int((time.monotonic() - started) * 1000)}
+            "duration_ms": int((time.monotonic() - started) * 1000),
+            "warnings": job["warnings"]}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -769,6 +804,17 @@ class SelfTests(unittest.TestCase):
                         _run_drama(self._drama_job(out_root))
                 self.assertEqual(ctx.exception.public()["code"], "comfyui_timeout")
                 self.assertTrue(ctx.exception.public()["retryable"])
+
+    def test_ignored_parameter_names(self) -> None:
+        self.assertEqual(
+            _ignored_names({"ratio": "9:16", "size": "large", "width": 512,
+                            "mystery": None, "blank": ""}, DRAMA_KNOWN_PARAMETERS),
+            ["ratio", "size"])
+        self.assertEqual(_ignored_names({"prompt": "p", "output_dir": "o"},
+                                        TOOL_KNOWN_FIELDS), [])
+        with self.assertRaises(ValueError):
+            _normalize_tool({"prompt": "p", "output_dir": "outs",
+                             "filename_prefix": ".hidden"})
 
     def test_tool_count_two(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

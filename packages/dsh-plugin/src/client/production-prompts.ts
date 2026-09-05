@@ -2,6 +2,7 @@ import type { DramaEpisodeProduction } from "./drama-production.js";
 import type { ProductionJob, ProductionMediaVersion } from "./production-runtime.js";
 
 const authorityBoundary = "只使用当前 DSH Preset 可见的工具；所有文件、网络、生成和命令操作继续遵守 DSH 权限与审批。";
+const adapterGuidance = "按生成环境条当前已配置的适配器选择：本地 ComfyUI 适配器（comfyui/comfyui-video/comfyui-music）无需凭据但需已配置工作流；云适配器需对应环境变量已导出。适配器能力与凭据状态见预检";
 
 export function nativeProductionPrompt(
   production: DramaEpisodeProduction,
@@ -16,7 +17,7 @@ export function nativeProductionPrompt(
 只准备当前单项生产任务，不运行 Provider。
 - 任务 ID：${job.id}
 - 任务类型：${job.kind === "image" ? "图片/关键帧" : "镜头视频"}
-- 建议 adapter 契约：${job.kind === "image" ? "gpt-image-2" : "seedance"}（实际配置与模型以当前 DSH 运行环境为准）
+- 适配器选择：${adapterGuidance}
 - 投产对象：${job.targetId}
 - 创作文档目录：${production.episodeDirectory}
 - 参考素材：
@@ -40,7 +41,7 @@ export function nativeBatchPrompt(
 只准备当前批量生产任务，不运行 Provider。
 - 批次任务 ID：${job.id}
 - 任务类型：${job.kind === "image" ? "批量关键帧" : "批量镜头视频"}
-- 建议 adapter 契约：${job.kind === "image" ? "gpt-image-2" : "seedance"}（实际配置与模型以当前 DSH 运行环境为准）
+- 适配器选择：${adapterGuidance}
 - 创作文档目录：${production.episodeDirectory}
 - 输出根目录：${production.episodeDirectory}/制作成果
 - 每个输出文件名必须包含对应镜头 ID 与批次任务 ID ${job.id}。

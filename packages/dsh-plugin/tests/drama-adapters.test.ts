@@ -33,9 +33,13 @@ describe("bundled Drama media adapters", () => {
   it("documents each required environment variable in the pinned upstream provider reference", async () => {
     for (const adapter of DRAMA_ADAPTERS) {
       // ComfyUI adapters are plugin-owned (runner + docs/comfyui.md), not upstream
-      // provider script entries; their reference file is tracked separately.
-      if (adapter.name.startsWith("comfyui")) continue;
-      const reference = await readFile(join(dramaRoot, adapter.reference), "utf8");
+      // provider script entries: they carry no upstream reference document.
+      if (adapter.name.startsWith("comfyui")) {
+        expect(adapter.reference).toBeUndefined();
+        continue;
+      }
+      expect(adapter.reference).toBeDefined();
+      const reference = await readFile(join(dramaRoot, adapter.reference as string), "utf8");
       for (const name of [...adapter.requiredEnv, ...adapter.optionalEnv]) expect(reference, `${adapter.name} ${name}`).toContain(`\`${name}\``);
     }
   });

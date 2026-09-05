@@ -374,8 +374,7 @@ describe("comfyui_runner 端到端（mock server + 真实 python 子进程）", 
     expect(await readdir(outputRoot)).toEqual([]);
   }, 60_000);
 
-  it("超时：history 永远 pending + timeout_seconds=1 → comfyui_timeout", async () => {
-    const mock = await launch({ history: () => ({}) });
+  it("超时：history 永远 pending + timeout_seconds=1 → comfyui_timeout", async () => {    const mock = await launch({ history: () => ({}) });
     const cwd = await makeTemp();
     const result = await runRunner("tool", {
       prompt: "a cat",
@@ -387,5 +386,63 @@ describe("comfyui_runner 端到端（mock server + 真实 python 子进程）", 
     }, runnerEnv({ COMFYUI_BASE_URL: mock.baseUrl, COMFYUI_WORKFLOW: FIXTURE_TXT2IMG }), cwd);
     expect(result.exitCode).toBe(1);
     expect(errorOf(result)).toMatchObject({ category: "timeout", code: "comfyui_timeout" });
+  }, 60_000);
+
+  it("drama 未知参数：ratio/size 成功且 stderr 警告、产物正常", async () => {
+    const mock = await launch();
+    const root = await makeTemp();
+    const outputRoot = join(root, "out");
+    const projectRoot = join(root, "proj");
+    await mkdir(outputRoot, { recursive: true });
+    await mkdir(projectRoot, { recursive: true });
+    const result = await runRunner("drama", {
+      modality: "image",
+      prompt: "雨夜路灯下的橘猫",
+      parameters: { ratio: "9:16", size: "large", width: 512, mystery: null, blank: "" },
+      outputs: ["shot/x.png"],
+      output_root: outputRoot,
+      run_id: "r-warn",
+      project_root: projectRoot
+    }, runnerEnv({ COMFYUI_BASE_URL: mock.baseUrl, COMFYUI_WORKFLOW: FIXTURE_DRAMA }), root);
+    expect(result.exitCode).toBe(0);
+    expect(parseStdout(result.stdout)).toEqual({
+      outputs: [{ target: "shot/x.png", source: join(outputRoot, "result.png") }],
+      provider_job_id: "pid-1"
+    });
+    expect(result.stderr).toContain("comfyui-runner: ignored parameters: ratio, size");
+    expect(Buffer.from(await readFile(join(outputRoot, "result.png"))).equals(PNG_BYTES)).toBe(true);
+  }, 60_000);
+
+  it("tool 前导点 prefix：filename_prefix=.hidden → 退出码 1 + 结构化错误", async () => {
+    const mock = await launch();
+    const cwd = await makeTemp();
+    const result = await runRunner("tool", {
+      prompt: "a cat",
+      output_dir: "cover",
+      filename_prefix: ".hidden"
+    }, runnerEnv({ COMFYUI_BASE_URL: mock.baseUrl, COMFYUI_WORKFLOW: FIXTURE_TXT2IMG }), cwd);
+    expect(result.exitCode).toBe(1);
+    expect(errorOf(result)).toMatchObject({ category: "invalid_request" });
+    expect(mock.state.prompts).toHaveLength(0);
+  }, 60_000);
+
+  it("tool 未知参数：stdout warnings 数组含该项且 stderr 同步警告", async () => {
+    const mock = await launch();
+    const cwd = await makeTemp();
+    const result = await runRunner("tool", {
+      prompt: "a cat",
+      width: 512,
+      height: 512,
+      steps: 10,
+      output_dir: "cover",
+      filename_prefix: "cover",
+      ratio: "9:16"
+    }, runnerEnv({ COMFYUI_BASE_URL: mock.baseUrl, COMFYUI_WORKFLOW: FIXTURE_TXT2IMG }), cwd);
+    expect(result.exitCode).toBe(0);
+    expect(parseStdout(result.stdout)["warnings"]).toEqual(["ratio"]);
+    expect(result.stderr).toContain("comfyui-runner: ignored parameters: ratio");
+    const files = parseStdout(result.stdout)["files"] as Array<Record<string, unknown>>;
+    expect(files).toHaveLength(1);
+    expect(Buffer.from(await readFile(String(files[0]?.["path"]))).equals(PNG_BYTES)).toBe(true);
   }, 60_000);
 });

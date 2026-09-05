@@ -34,12 +34,19 @@ export interface VideoProjectSummary {
   readonly stage: string;
   readonly stageLabel: string;
   readonly nextArtifact?: string | undefined;
+  /** TTS engine recorded in tts_meta.json (e.g. "comfyui-local"); absent when no tts_meta.json was read. */
+  readonly voiceEngine?: string | undefined;
   readonly previews: readonly VideoPreviewAsset[];
   readonly artifacts: readonly VideoArtifactSummary[];
 }
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".mkv", ".webm"]);
-const SKIPPED_DIRECTORIES = new Set(["frames", "tts_segments", "asr_chunks", "chunks", "cache", "tmp", ".subtitle_measure"]);
+/** Audio the video Studio may surface; only tts_segments/ is opened, frames/chunks stay skipped. */
+const TTS_AUDIO_EXTENSIONS = new Set([".wav", ".mp3", ".flac"]);
+const TTS_SEGMENTS_DIRECTORY = "tts_segments";
+// NOTE: tts_segments is deliberately absent here so the workspace walk descends
+// into it; visibleVideoPath still hides every non-audio file inside.
+const SKIPPED_DIRECTORIES = new Set(["frames", "asr_chunks", "chunks", "cache", "tmp", ".subtitle_measure"]);
 const VISIBLE_TEXT_FILES = new Set([
   "project.json",
   "recap_run_manifest.json",
@@ -72,6 +79,7 @@ const ARTIFACT_META: Readonly<Record<string, { readonly label: string; readonly 
   "clip_plan_validated.json": { label: "已校验剪辑计划", kind: "plan" },
   "narration.json": { label: "解说词", kind: "script" },
   "narration_review.md": { label: "解说复核", kind: "quality" },
+  "tts_meta.json": { label: "配音元数据", kind: "manifest" },
   "timeline.json": { label: "成片时间线", kind: "plan" },
   "assembly_manifest.json": { label: "合成清单", kind: "manifest" },
   "assembly_qc.json": { label: "合成质检", kind: "quality" },
@@ -100,6 +108,8 @@ export function visibleVideoPath(path: string): boolean {
   const name = basename(path);
   const extension = extname(name).toLocaleLowerCase();
   if (VISIBLE_TEXT_FILES.has(name)) return true;
+  // tts_segments/ narration audio is audible evidence; other skipped directories stay hidden.
+  if (TTS_AUDIO_EXTENSIONS.has(extension) && path.startsWith(`${root}/`) && path.split("/").includes(TTS_SEGMENTS_DIRECTORY)) return true;
   if (!VIDEO_EXTENSIONS.has(extension)) return false;
   return path.startsWith(`${root}/sources/`)
     || path.startsWith(`${root}/outputs/`)
@@ -138,6 +148,8 @@ export function summarizeVideoProject(
     readonly project?: unknown;
     readonly runManifest?: unknown;
     readonly assembly?: unknown;
+    /** Parsed tts_meta.json content; absent for older projects without that file. */
+    readonly ttsMeta?: unknown;
   } = {}
 ): VideoProjectSummary {
   const id = root.slice(`${VIDEO_DIRECTORY}/`.length);
@@ -146,6 +158,11 @@ export function summarizeVideoProject(
   const manifest = record(metadata.runManifest);
   const settings = record(manifest?.settings);
   const assembly = record(metadata.assembly);
+  const ttsMeta = metadata.ttsMeta === undefined ? undefined : record(metadata.ttsMeta);
+  const voiceEngine = text(ttsMeta?.engine);
+  const ttsPartial = ttsMeta?.partial === true;
+  const rawFailures: unknown = ttsMeta?.failures;
+  const failureCount = Array.isArray(rawFailures) ? rawFailures.length : 0;
   const source = referencedMedia(projectFiles, manifest?.source_video)
     ?? projectFiles.find((file) => file.kind === "media" && file.path.startsWith(`${root}/sources/`) && file.mimeType?.startsWith("video/") === true);
   const edited = projectFiles.find((file) => file.path.split("/").at(-1) === "edited_source.mp4");
@@ -178,6 +195,14 @@ export function summarizeVideoProject(
     stageLabel = cutMode ? "等待剪辑计划" : "等待解说词";
     nextArtifact = cutMode ? "clip_plan.json" : "narration.json";
   }
+  // tts_meta.json integrity never demotes state; it only annotates the label.
+  if (ttsMeta !== undefined && (ttsPartial || failureCount > 0)) {
+    const notes = [
+      ttsPartial ? "配音不完整（partial）" : undefined,
+      failureCount > 0 ? `${String(failureCount)} 段失败` : undefined
+    ].filter((note): note is string => note !== undefined);
+    stageLabel = `${stageLabel} · ${notes.join(" · ")}`;
+  }
   const artifacts = projectFiles.flatMap((file): VideoArtifactSummary[] => {
     const name = file.path.split("/").at(-1) ?? "";
     const meta = ARTIFACT_META[name];
@@ -191,6 +216,7 @@ export function summarizeVideoProject(
     stage,
     stageLabel,
     nextArtifact,
+    ...(voiceEngine === undefined ? {} : { voiceEngine }),
     previews,
     artifacts
   };

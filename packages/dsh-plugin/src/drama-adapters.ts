@@ -24,8 +24,11 @@ export interface DramaAdapterSpec {
   readonly requiredEnv: readonly string[];
   readonly optionalEnv: readonly string[];
   readonly timeoutSeconds: number;
-  /** Provider reference shipped with the Skill, relative to the drama skill root. */
-  readonly reference: string;
+  /**
+   * Provider reference shipped with the Skill, relative to the drama skill root.
+   * Plugin-owned adapters (ComfyUI) have no upstream document and omit it.
+   */
+  readonly reference?: string | undefined;
 }
 
 export interface DramaAdapterStatus {
@@ -103,8 +106,7 @@ export const DRAMA_ADAPTERS: readonly DramaAdapterSpec[] = [
     modality: "image",
     requiredEnv: [],
     optionalEnv: [...COMFYUI_OPTIONAL_ENV],
-    timeoutSeconds: 600,
-    reference: "short-drama-produce/references/providers/comfyui.md"
+    timeoutSeconds: 600
   },
   {
     name: "comfyui-video",
@@ -112,8 +114,7 @@ export const DRAMA_ADAPTERS: readonly DramaAdapterSpec[] = [
     modality: "video",
     requiredEnv: [],
     optionalEnv: [...COMFYUI_OPTIONAL_ENV],
-    timeoutSeconds: 3_600,
-    reference: "short-drama-produce/references/providers/comfyui.md"
+    timeoutSeconds: 3_600
   },
   {
     name: "comfyui-music",
@@ -121,8 +122,7 @@ export const DRAMA_ADAPTERS: readonly DramaAdapterSpec[] = [
     modality: "music",
     requiredEnv: [],
     optionalEnv: [...COMFYUI_OPTIONAL_ENV],
-    timeoutSeconds: 600,
-    reference: "short-drama-produce/references/providers/comfyui.md"
+    timeoutSeconds: 600
   }
 ];
 

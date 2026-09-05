@@ -97,6 +97,68 @@ const roleParentReply = "ROLE_PARENT_RESULT：已收到 narrative-writer 子 Age
 const productionIntentSmokePrompt = "PRODUCTION_INTENT_SMOKE：必须调用 oh_story_production，聚焦 EP001 的 SHOT-EP001-008 生产目标。";
 const productionIntentReply = "PRODUCTION_INTENT_RESULT：生产目标聚焦意图已发送。";
 const productionIntentArgs = { action: "focus_target", episode: "剧集/EP001", targetId: "SHOT-EP001-008", section: "shots" } as const;
+const comfyuiSmokePrompt = "COMFYUI_SMOKE：必须调用 oh_story_comfyui 生成一张短剧封面，并返回工具结果。";
+const comfyuiSmokeReply = "COMFYUI_RESULT：本地 ComfyUI 已生成短剧封面。";
+const comfyuiSmokeOutputDir = "制作成果/SMOKE-COMFYUI";
+const comfyuiSmokeArgs = {
+  prompt: "复古港风短剧封面，都市夜景霓虹灯",
+  output_dir: comfyuiSmokeOutputDir,
+  width: 512,
+  height: 512,
+  steps: 4
+} as const;
+const comfyuiWorkflowFixture = join(repositoryRoot, "packages", "dsh-plugin", "tests", "fixtures", "comfyui-txt2img.json");
+/** Minimal mock ComfyUI: POST /prompt, GET /history/<id>, GET /view, GET /system_stats. */
+const comfyuiMockPng = Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de0000000c4944415478da6360000000020001e221bc330000000049454e44ae426082", "hex");
+
+interface MockComfyUI {
+  readonly baseURL: string;
+  readonly server: HttpServer;
+}
+
+async function startMockComfyUI(): Promise<MockComfyUI> {
+  const server = createHttpServer((request, response) => {
+    // The mock answers fixed documents; request bodies are drained, never parsed.
+    request.resume();
+    request.on("end", () => {
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      const json = (status: number, document: unknown): void => {
+        response.writeHead(status, { "content-type": "application/json" });
+        response.end(JSON.stringify(document));
+      };
+      if (request.method === "POST" && url.pathname === "/prompt") {
+        json(200, { prompt_id: "smoke-pid-1" });
+        return;
+      }
+      if (request.method === "GET" && url.pathname.startsWith("/history/")) {
+        json(200, {
+          "smoke-pid-1": {
+            status: { status_str: "success", completed: true },
+            outputs: { "9": { images: [{ filename: "ComfyUI_00001_.png", subfolder: "", type: "output" }] } }
+          }
+        });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/view") {
+        response.writeHead(200, { "content-type": "application/octet-stream" });
+        response.end(comfyuiMockPng);
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/system_stats") {
+        json(200, { system: { comfyui_version: "smoke-mock" } });
+        return;
+      }
+      json(404, {});
+    });
+  });
+  await new Promise<void>((accept, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", accept);
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("Could not start the mock ComfyUI server.");
+  return { baseURL: `http://127.0.0.1:${String(address.port)}`, server };
+}
 
 async function captureDemoFrame(page: Page, workbench: "story" | "drama" | "game" | "video", index: number): Promise<void> {
   if (demoFramesDirectory === undefined) return;
@@ -188,6 +250,7 @@ async function startMockDeepSeek(): Promise<MockDeepSeek> {
       const productionTurn = currentTurn.includes("/short-drama-produce") || currentTurn.includes("short-drama-produce");
       const roleParentTurn = currentTurn.includes(roleSmokePrompt);
       const productionIntentTurn = currentTurn.includes(productionIntentSmokePrompt);
+      const comfyuiTurn = currentTurn.includes(comfyuiSmokePrompt);
       const roleChildTurn = serialized.includes(roleChildPrompt) && !serialized.includes(roleSmokePrompt);
       const hasToolResult = messages.slice(lastUserIndex + 1).some((message) => message.role === "tool");
       let events: string[];
@@ -218,11 +281,13 @@ async function startMockDeepSeek(): Promise<MockDeepSeek> {
           JSON.stringify({ choices: [{ delta: { content: "" }, finish_reason: "stop" }], usage: { prompt_tokens: 12, completion_tokens: 20 } }),
           "[DONE]"
         ];
-      } else if ((mutationTurn || todoLayoutTurn || roleParentTurn || productionIntentTurn) && !hasToolResult) {
+      } else if ((mutationTurn || todoLayoutTurn || roleParentTurn || productionIntentTurn || comfyuiTurn) && !hasToolResult) {
         const tool = roleParentTurn
           ? { id: "call_oh_story_role_smoke", name: "oh_story_role", args: { role: "narrative-writer", prompt: roleChildPrompt } }
           : productionIntentTurn
             ? { id: "call_oh_story_production_smoke", name: "oh_story_production", args: productionIntentArgs }
+            : comfyuiTurn
+              ? { id: "call_oh_story_comfyui_smoke", name: "oh_story_comfyui", args: comfyuiSmokeArgs }
           : todoLayoutTurn
             ? { id: "call_todo_layout", name: "todo_write", args: { todos: todoLayoutItems } }
             : gameUpdateTurn
@@ -230,7 +295,7 @@ async function startMockDeepSeek(): Promise<MockDeepSeek> {
             : plainWriteTurn
               ? { id: "call_plain_write_smoke", name: "write", args: { file_path: plainWritePath, content: plainWriteContent } }
               : { id: "call_oh_story_write_smoke", name: "write", args: { file_path: agentMutationPath, content: agentMutationContent } };
-        requests.push(roleParentTurn ? "role-parent-start" : productionIntentTurn ? "production-intent" : todoLayoutTurn ? "todo" : gameUpdateTurn ? "game-write" : plainWriteTurn ? "plain-write" : "write");
+        requests.push(roleParentTurn ? "role-parent-start" : productionIntentTurn ? "production-intent" : comfyuiTurn ? "comfyui-start" : todoLayoutTurn ? "todo" : gameUpdateTurn ? "game-write" : plainWriteTurn ? "plain-write" : "write");
         const argumentsJson = JSON.stringify(tool.args);
         const chunks = argumentsJson.match(/.{1,14}/gu) ?? [argumentsJson];
         events = [
@@ -249,11 +314,18 @@ async function startMockDeepSeek(): Promise<MockDeepSeek> {
           response.writeHead(422, { "content-type": "application/json" }).end('{"error":"role child result was not returned to the parent"}');
           return;
         }
-        requests.push(roleParentTurn ? "role-parent-resume" : productionTurn ? "production" : "other");
+        if (comfyuiTurn && !hasToolResult) {
+          requests.push("comfyui-resume-missing-result");
+          response.writeHead(422, { "content-type": "application/json" }).end('{"error":"comfyui tool result was not returned to the turn"}');
+          return;
+        }
+        requests.push(roleParentTurn ? "role-parent-resume" : comfyuiTurn ? "comfyui-resume" : productionTurn ? "production" : "other");
         const content = longReplyTurn
           ? longReplyContent
           : roleParentTurn
           ? roleParentReply
+          : comfyuiTurn
+            ? comfyuiSmokeReply
           : productionIntentTurn
             ? productionIntentReply
           : mutationTurn
@@ -576,7 +648,12 @@ async function main(): Promise<void> {
   const logs: string[] = [];
   let child: ChildProcess | undefined;
   let mockDeepSeek: MockDeepSeek | undefined;
+  let mockComfyUI: MockComfyUI | undefined;
   try {
+    // ComfyUI workflow fixture: copied beside the projects so the DSH host env
+    // can point COMFYUI_WORKFLOW at a real file without touching the repo.
+    const comfyuiWorkflowPath = join(temporaryRoot, "comfyui-smoke-workflow.json");
+    await cp(comfyuiWorkflowFixture, comfyuiWorkflowPath);
     await Promise.all([
       cp(storyFixture, storyRoot, { recursive: true }),
       cp(dramaFixture, dramaRoot, { recursive: true }),
@@ -679,7 +756,9 @@ async function main(): Promise<void> {
       "package/lib/novel-to-game/examples/jin-ping-mei/build/app/index.html",
       "package/lib/novel-to-game/examples/jin-ping-mei/qa/verification.json",
       "package/lib/video-recap/skills/video-recap/scripts/recap.py",
-      "package/lib/video-recap/skills/video-recap/scripts/recap_inspect.py"
+      "package/lib/video-recap/skills/video-recap/scripts/recap_inspect.py",
+      "package/python/comfyui_runner.py",
+      "package/docs/comfyui.md"
     ]) {
       if (!entries.has(required)) throw new Error(`Plugin tarball is missing ${required}.`);
     }
@@ -699,13 +778,18 @@ async function main(): Promise<void> {
       throw new Error("Real demo capture requires DEEPSEEK_API_KEY.");
     }
     if (!useRealDeepSeek) mockDeepSeek = await startMockDeepSeek();
+    if (!useRealDeepSeek) mockComfyUI = await startMockComfyUI();
     const env = {
       ...process.env,
       COREPACK_ENABLE_PROJECT_SPEC: "0",
       DSH_HOME: dshHome,
       DSH_TELEMETRY_DISABLED: "1",
       DEEPSEEK_API_KEY: realApiKey ?? "oh-story-local-fixture",
-      DEEPSEEK_BASE_URL: mockDeepSeek?.baseURL ?? "https://api.deepseek.com"
+      DEEPSEEK_BASE_URL: mockDeepSeek?.baseURL ?? "https://api.deepseek.com",
+      ...(mockComfyUI === undefined ? {} : {
+        COMFYUI_BASE_URL: mockComfyUI.baseURL,
+        COMFYUI_WORKFLOW: comfyuiWorkflowPath
+      })
     };
     run(process.execPath, [dshBin, "plugin", "--profile", "web", "add", archivePath], env);
     const port = new URL(origin).port;
@@ -814,6 +898,53 @@ async function main(): Promise<void> {
         || !serializedIntentEvents.includes("SHOT-EP001-008")) {
         throw new Error(`Packaged oh_story_production contract failed: ${JSON.stringify({ intentCalls, eventTypes: intentEvents.map((event) => event.type), serializedIntentEvents })}`);
       }
+
+      // oh_story_comfyui end-to-end: the mock model emits the tool call and the
+      // packaged tool must run the real python runner against the mock ComfyUI
+      // server. A successful tool/call here is also the registration proof for
+      // oh_story_comfyui: the host exposes no tools/list remote (only
+      // skills/list), so execution is the only observable registry signal.
+      const comfyuiEventsBefore = await sessionEvents(origin, dramaSession.sessionId);
+      const comfyuiAfterSeq = comfyuiEventsBefore.at(-1)?.seq ?? -1;
+      await rpc(origin, "session/prompt", {
+        request: {
+          requestId: crypto.randomUUID(),
+          sessionId: dramaSession.sessionId,
+          mode: "queue",
+          content: [{ type: "text", text: comfyuiSmokePrompt }]
+        }
+      });
+      const comfyuiEvents = await waitForCompletedTurn(origin, dramaSession.sessionId, comfyuiAfterSeq);
+      const comfyuiCalls = comfyuiEvents.filter((event) => event.type === "tool/call")
+        .map((event) => event.data as { readonly callId?: string; readonly name?: string; readonly arguments?: unknown })
+        .filter((call) => call.name === "oh_story_comfyui");
+      const comfyuiResult = comfyuiEvents.filter((event) => event.type === "tool/result")
+        .flatMap((event) => (event.data as {
+          readonly message?: { readonly content?: readonly { readonly toolCallId?: string; readonly isError?: boolean }[] };
+        }).message?.content ?? [])
+        .find((result) => result.toolCallId === comfyuiCalls[0]?.callId);
+      let comfyuiArguments: unknown;
+      try {
+        const value = comfyuiCalls[0]?.arguments;
+        comfyuiArguments = typeof value === "string" ? JSON.parse(value) as unknown : value;
+      } catch { comfyuiArguments = undefined; }
+      const comfyuiTrace = mockDeepSeek?.requests.filter((kind) => kind.startsWith("comfyui-")) ?? [];
+      const serializedComfyuiEvents = JSON.stringify(comfyuiEvents);
+      if (comfyuiCalls.length !== 1
+        || (comfyuiArguments as { readonly prompt?: unknown } | undefined)?.prompt !== comfyuiSmokeArgs.prompt
+        || (comfyuiArguments as { readonly output_dir?: unknown } | undefined)?.output_dir !== comfyuiSmokeArgs.output_dir
+        || comfyuiResult?.isError !== false
+        || !serializedComfyuiEvents.includes("ComfyUI 生成完成")
+        || !serializedComfyuiEvents.includes("共 1 个文件")
+        || !serializedComfyuiEvents.includes(comfyuiSmokeReply)
+        || JSON.stringify(comfyuiTrace) !== JSON.stringify(["comfyui-start", "comfyui-resume"])) {
+        throw new Error(`Packaged oh_story_comfyui contract failed: ${JSON.stringify({ comfyuiCalls, comfyuiArguments, comfyuiResult, comfyuiTrace, eventTypes: comfyuiEvents.map((event) => event.type) })}`);
+      }
+      const comfyuiArtifact = join(dramaRoot, comfyuiSmokeOutputDir, "comfyui-1.png");
+      const comfyuiBytes = await readFile(comfyuiArtifact);
+      if (!comfyuiBytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))) {
+        throw new Error(`ComfyUI smoke artifact is not a PNG: ${comfyuiArtifact} (${String(comfyuiBytes.byteLength)} bytes).`);
+      }
     }
 
     const storyWorkspaceResponse = await dshFetch(`${origin}/oh-story/workspace?sessionId=${encodeURIComponent(storySession.sessionId)}`);
@@ -837,6 +968,30 @@ async function main(): Promise<void> {
       || generatedVideo?.title !== "DSH Video Recap Smoke" || generatedVideo.state !== "ready"
       || JSON.stringify(generatedVideo.previews.map((preview) => preview.role)) !== JSON.stringify(["source", "edited", "final"])) {
       throw new Error(`Story Session workspace route failed: ${JSON.stringify(storyWorkspacePayload)}`);
+    }
+    const preflightResponse = await dshFetch(`${origin}/oh-story/drama-preflight`);
+    const preflightPayload = await preflightResponse.json() as {
+      readonly comfyui?: {
+        readonly online?: unknown;
+        readonly baseUrl?: unknown;
+        readonly workflow?: { readonly configured?: unknown; readonly source?: unknown };
+      };
+      readonly adapters?: readonly { readonly name?: unknown }[];
+    };
+    const preflightAdapterNames = preflightPayload.adapters?.map((adapter) => adapter.name) ?? [];
+    const preflightWorkflow = preflightPayload.comfyui?.workflow;
+    if (!preflightResponse.ok || typeof preflightPayload.comfyui?.online !== "boolean"
+      || typeof preflightWorkflow?.configured !== "boolean"
+      || (preflightWorkflow.source !== "env-file" && preflightWorkflow.source !== "env-dir" && preflightWorkflow.source !== null)
+      || !["comfyui", "comfyui-video", "comfyui-music"].every((name) => preflightAdapterNames.includes(name))) {
+      throw new Error(`Drama preflight missed the ComfyUI contract: ${JSON.stringify(preflightPayload)}`);
+    }
+    // With the mock server up, the probe must report online and the fixture
+    // workflow file must read as configured; in real-capture mode the service
+    // may be absent, so only the shape above is asserted there.
+    if (!useRealDeepSeek && (preflightPayload.comfyui?.online !== true
+      || preflightWorkflow?.configured !== true || preflightWorkflow.source !== "env-file")) {
+      throw new Error(`Drama preflight did not see the mock ComfyUI service: ${JSON.stringify(preflightPayload.comfyui)}`);
     }
     const recapSourceUrl = `${origin}/oh-story/media?sessionId=${encodeURIComponent(storySession.sessionId)}&path=${encodeURIComponent("video-recaps/smoke-recap/sources/source.mp4")}`;
     const recapRange = await dshFetch(recapSourceUrl, { headers: { range: "bytes=-12" } });
@@ -1839,13 +1994,17 @@ async function main(): Promise<void> {
           if (scroll === undefined) return undefined;
           const pane = scroll.querySelector<HTMLElement>("[data-oh-split-pane]");
           const editor = scroll.querySelector<HTMLElement>(".oh-story-editor");
-          const tops = (): { pane: number | undefined; editor: number | undefined } => ({
+          // Named inner functions get esbuild's __name helper injected, which
+          // does not exist inside page.evaluate — read the tops inline instead.
+          const before = {
             pane: pane?.getBoundingClientRect().top,
             editor: editor?.getBoundingClientRect().top
-          });
-          const before = tops();
+          };
           scroll.scrollTop = Math.max(0, Math.round(scroll.scrollHeight * 0.35));
-          const after = tops();
+          const after = {
+            pane: pane?.getBoundingClientRect().top,
+            editor: editor?.getBoundingClientRect().top
+          };
           return { before, after };
         });
         if (columnAnchor === undefined
@@ -2400,6 +2559,7 @@ async function main(): Promise<void> {
       compactGameViewport: 500,
       agentWriteStreaming: !useRealDeepSeek,
       roleToolE2e: !useRealDeepSeek,
+      comfyuiToolE2e: !useRealDeepSeek,
       atomicCasWriters: candidates.length,
       compactViewport: 500,
       workbenchFloat: "clamped-in-viewport",
@@ -2412,6 +2572,7 @@ async function main(): Promise<void> {
   } finally {
     if (child !== undefined) await stop(child);
     if (mockDeepSeek !== undefined) await closeServer(mockDeepSeek.server);
+    if (mockComfyUI !== undefined) await closeServer(mockComfyUI.server);
     await rm(temporaryRoot, { recursive: true, force: true });
   }
 }

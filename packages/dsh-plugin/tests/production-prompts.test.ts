@@ -27,7 +27,11 @@ describe("DSH-native production prompts", () => {
     expect(prompt).toContain("当前 DSH Preset 可见的工具");
     expect(prompt).toContain("DSH 权限与审批");
     expect(prompt).toContain("只准备当前单项生产任务，不运行 Provider");
-    expect(prompt).toContain("建议 adapter 契约：seedance");
+    expect(prompt).toContain("适配器选择：按生成环境条当前已配置的适配器选择");
+    expect(prompt).toContain("comfyui/comfyui-video/comfyui-music");
+    expect(prompt).toContain("适配器能力与凭据状态见预检");
+    expect(prompt).not.toContain("gpt-image-2");
+    expect(prompt).not.toContain("seedance");
     expect(prompt).toContain("不得 confirm 或 run");
     expect(prompt).toContain("不构成看到预览后的生产确认");
   });
@@ -40,7 +44,10 @@ describe("DSH-native production prompts", () => {
     ]);
     expect(batchPrompt).toContain("对应镜头 ID 与批次任务 ID batch-001");
     expect(batchPrompt).toContain("## SHOT-EP001-002\n第二镜");
-    expect(batchPrompt).toContain("建议 adapter 契约：gpt-image-2");
+    expect(batchPrompt).toContain("适配器选择：按生成环境条当前已配置的适配器选择");
+    expect(batchPrompt).toContain("适配器能力与凭据状态见预检");
+    expect(batchPrompt).not.toContain("gpt-image-2");
+    expect(batchPrompt).not.toContain("seedance");
     expect(batchPrompt).toContain("不得 confirm 或 run");
 
     const composition = createPendingJob({ id: "compose-001", targetId: episodeDirectory, kind: "composition", prompt: "合成" });

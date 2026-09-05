@@ -12,13 +12,13 @@ dsh-miaowu 通过本地 ComfyUI 生成图片（及后续的视频 / 音频），
 - **通用工具**：`oh_story_comfyui`。在对话里让 Agent 调用它，传入提示词与输出目录即可，
   可用于小说封面（`story-cover`）、游戏改编美术资源（`game-adaptations/<project>/art/`）等任何需要本地生图的场景。
 
-工作流机制统一：两个入口都使用同一套“预设 API-format 工作流 + 占位符替换”机制（见下文第 2–3 节）。
+工作流机制统一：两个入口都使用同一套“API-format 工作流 + 占位符替换”机制（见下文第 2–3 节）。
 
 ## 2. 工作流准备
 
 1. 在 ComfyUI 网页界面里搭好工作流，确认能正常出图。
 2. 点击工作流菜单的 **"Save (API Format)"**，导出 JSON（注意不是普通的 Save，API Format 去掉了 UI 布局信息，只保留节点与连线）。
-3. 把导出的 JSON 文件放入工作流目录（默认与 `COMFYUI_WORKFLOW_DIR` 指向的目录，见第 3 节），
+3. 把导出的 JSON 文件放入 `COMFYUI_WORKFLOW_DIR` 指向的目录（见第 3 节），
    并在 `COMFYUI_WORKFLOW` 中指定文件名（或直接用绝对路径）。
 
 ### 占位符表
@@ -28,7 +28,7 @@ dsh-miaowu 通过本地 ComfyUI 生成图片（及后续的视频 / 音频），
 | 占位符 | 类型 | 说明 |
 |---|---|---|
 | `__PROMPT__` | 文本 | 正向提示词 |
-| `__NEGATIVE__` | 文本 | 反向提示词（不提供时用空字符串） |
+| `__NEGATIVE__` | 文本 | 反向提示词：工作流含 `__NEGATIVE__` 时调用必须传 negative，否则显式报错（`missing_placeholder_value`）；不需要反向提示词就把占位符改成固定文本 |
 | `__WIDTH__` | 数字 | 出图宽度（像素） |
 | `__HEIGHT__` | 数字 | 出图高度（像素） |
 | `__SEED__` | 数字 | 随机种子 |
@@ -51,11 +51,13 @@ dsh-miaowu 通过本地 ComfyUI 生成图片（及后续的视频 / 音频），
 | 变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
 | `COMFYUI_BASE_URL` | 否 | `http://127.0.0.1:8188` | ComfyUI 服务地址。ComfyUI 装在局域网另一台机器上时改这里 |
-| `COMFYUI_WORKFLOW` | 条件必填 | — | 预设工作流：文件名（相对 `COMFYUI_WORKFLOW_DIR`）或绝对路径。未配置时任何调用都显式报错（`workflow_not_configured`），不会静默走别的生图通道 |
-| `COMFYUI_WORKFLOW_DIR` | 否 | 预设工作流目录 | `COMFYUI_WORKFLOW` 写文件名时在此目录下查找 |
+| `COMFYUI_WORKFLOW` | 条件必填 | — | 工作流：文件名（在 `COMFYUI_WORKFLOW_DIR` 下查找）或绝对路径。未配置时任何调用都显式报错（`workflow_not_configured`），不会静默走别的生图通道 |
+| `COMFYUI_WORKFLOW_DIR` | 否 | — | bare-name 工作流名的查找目录（无默认文件语义） |
 | `COMFYUI_API_KEY` | 否 | — | 可选。配置后以 `Authorization: Bearer <key>` 访问需要鉴权的 ComfyUI 服务 |
+| `COMFYUI_TIMEOUT_SECONDS` | 否 | `600` | 仅短剧 drama 模式生效：适配器超时秒数，上限 `3600` |
 
-解析优先级：调用参数显式传入的工作流 > `COMFYUI_WORKFLOW` > `COMFYUI_WORKFLOW_DIR` 下的默认工作流。
+解析优先级只有两级：调用参数显式传入的工作流 > `COMFYUI_WORKFLOW` 指定的文件；
+`COMFYUI_WORKFLOW_DIR` 只在按名选用时生效（作为 bare-name 工作流名的查找目录）。
 没有配 `COMFYUI_WORKFLOW` 且调用也没传工作流时，直接报 `workflow_not_configured`，
 Agent 应如实告诉创作者“没有配置 ComfyUI 工作流”，而不是悄悄切换到别的生图方式。
 
@@ -66,8 +68,12 @@ Agent 应如实告诉创作者“没有配置 ComfyUI 工作流”，而不是�
 `short-drama-produce` 的 job 会经 `comfyui` 适配器执行。创作者侧只需要：
 
 1. 按第 2 节准备好 API-format 工作流 JSON 并放好；
-2. 启动 DSH 前 export 第 3 节的环境变量（至少 `COMFYUI_WORKFLOW`，ComfyUI 不在本机时还要 `COMFYUI_BASE_URL`）；
+2. 启动 DSH 前 export 第 3 节的环境变量（至少 `COMFYUI_WORKFLOW`，ComfyUI 不在本机时还要 `COMFYUI_BASE_URL`；只有改超时才需要 `COMFYUI_TIMEOUT_SECONDS`）；
 3. 在对话里按正常流程确认生产任务即可，适配器选择与参数填充由 Agent 完成。
+
+多集多风格需要按任务换工作流时，把 workflow 写进 job 的 parameters
+（`parameters.workflow` = 工作流名或绝对路径），**不要放顶层**
+（顶层 workflow 会被 production_tool 拒绝）；只有环境变量兜底时无需此参数。
 
 ### 通用侧（`oh_story_comfyui` 工具）
 
@@ -85,6 +91,9 @@ Agent 应如实告诉创作者“没有配置 ComfyUI 工作流”，而不是�
 ```
 
 - `output_dir` 为工作区内相对路径（如小说封面写 `covers`，游戏美术写 `game-adaptations/<project>/art/`）。
+- `count`（1–8，默认 1，多张时 seed 递增）、`timeout_seconds`（默认 600，上限 3600）、
+  `filename_prefix`（默认 `"comfyui"`，纯文件名，禁路径分隔与前导点）。
+- 输出为 `files` 数组；可能带 `warnings` 字段（= 被忽略的未知参数）。
 - `width` / `height` / `seed` / `steps` / `cfg` 不传时用工作流 JSON 里的原值（即对应占位符不存在或由服务端默认处理）；
   只有工作流里写了占位符、调用又没给值时才报错。
 - 工具不可见（当前 preset 没配）或没配工作流时，Agent 应明确说明限制，不虚构已出图。
@@ -100,6 +109,10 @@ Agent 应如实告诉创作者“没有配置 ComfyUI 工作流”，而不是�
 | `workflow_not_found` | 指定的工作流文件不存在 | 检查文件名 / 路径、`COMFYUI_WORKFLOW_DIR` 是否正确 |
 | `missing_placeholder_value` | 工作流里的占位符没有对应参数 | 补上调用参数，或把工作流里不需要的参数占位符改回固定值 |
 | `output_invalid_media` | 产物不是有效图片 | 检查工作流输出节点（SaveImage）配置，确认 ComfyUI 侧正常产图后重试 |
+| `adapter_start_failed` | 本机 Python 不可用或版本过低 | 安装 Python 3.10+ 后重启 DSH；若已消费需重新确认后再重试 |
+| `request_timeout` | runner 单次 HTTP 60s 超时 | 检查网络与 ComfyUI 服务是否卡住，稍后重试 |
+| `empty_output` | ComfyUI 跑完但没有输出 | 检查工作流 SaveImage 类输出节点是否正确配置 |
+| `upload_failed` | 参考图上传失败 | 检查输入图片是否存在，以及 ComfyUI 输入目录的写入权限 |
 
 ## 6. 第二版预告
 
@@ -109,7 +122,7 @@ Agent 应如实告诉创作者“没有配置 ComfyUI 工作流”，而不是�
 
 ## 7. 视频解说配音走 ComfyUI（第二版桥接）
 
-上游 `video-recap` 管线的配音脚本只支持 MiMo / Fish 两家（provider 白名单写死，无适配器缝隙），
+上游 `video-recap` 管线的配音脚本只支持 MiMo / Fish 两家（生成服务白名单写死，无适配器缝隙），
 所以本地 ComfyUI 配音（GPT-SoVITS / IndexTTS 等语音工作流）走**桥接约定**，不改上游脚本：
 
 1. 逐段取 `work/narration.json` 的 `narration` 文本，先做与上游 `voiceover.py` 相同的清洗

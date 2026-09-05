@@ -42,13 +42,67 @@ const ASSET_KIND_LABEL = { character: "人物", scene: "场景", prop: "道具",
 const JOB_KIND_LABEL = { image: "图片", video: "视频", composition: "成片" } as const;
 
 /** Mirror of the host `/oh-story/drama-preflight` summary: presence only, never values. */
-interface DramaPreflight {
+export interface DramaPreflight {
   readonly python: { readonly ok: boolean; readonly version?: string };
   readonly adapterConfig: { readonly path: string; readonly generated: boolean; readonly ok: boolean };
   readonly adapters: readonly { readonly name: string; readonly label: string; readonly modality: "image" | "video" | "music"; readonly configured: boolean; readonly missing: readonly string[] }[];
+  /** Local-ComfyUI probe, added after the adapter summary; older hosts omit it: render nothing then. */
+  readonly comfyui?: DramaPreflightComfyui | undefined;
+}
+
+/** Display subset of the host ComfyuiPreflightSummary: online state plus workflow presence. */
+export interface DramaPreflightComfyui {
+  readonly online: boolean;
+  readonly version?: string | undefined;
+  readonly baseUrl: string;
+  readonly error?: string | undefined;
+  readonly workflow: { readonly configured: boolean; readonly source: "env-file" | "env-dir" | null };
+  /**
+   * Server-side python.ok passthrough (agent M adds it): false means the host
+   * found no usable interpreter, so ComfyUI jobs cannot run even when online.
+   * Absent on older hosts: keep the previous rendering unchanged then.
+   */
+  readonly runnerReady?: boolean | undefined;
 }
 
 const MODALITY_LABEL = { image: "图片", video: "视频", music: "音乐" } as const;
+
+function comfyuiWorkflowSourceLabel(source: DramaPreflightComfyui["workflow"]["source"]): string | undefined {
+  if (source === "env-file") return "环境变量文件";
+  if (source === "env-dir") return "工作流目录";
+  return undefined;
+}
+
+/**
+ * Local ComfyUI online state inside the same environment strip. Display only:
+ * no extra requests, no config writes. A missing field (older host or cache)
+ * renders nothing and throws nothing.
+ *
+ * pythonOk mirrors preflight.python.ok for hosts whose comfyui block has no
+ * runnerReady yet. Both absent keeps the previous rendering unchanged.
+ */
+export function ComfyuiEnvironmentStatus({ comfyui, pythonOk }: { readonly comfyui: DramaPreflightComfyui | undefined; readonly pythonOk?: boolean | undefined }) {
+  if (comfyui === undefined || comfyui === null || typeof comfyui !== "object") return null;
+  if (!comfyui.online) {
+    const error = typeof comfyui.error === "string" && comfyui.error.trim() !== "" ? comfyui.error.trim() : undefined;
+    return <>
+      <span title={error ?? "ComfyUI 未连接"}>ComfyUI 未连接{error === undefined ? "" : ` · ${error}`}</span>
+      <span data-warn>检查 ComfyUI 是否启动、COMFYUI_BASE_URL 是否指向正确地址，详见插件 docs/comfyui.md。</span>
+    </>;
+  }
+  const version = typeof comfyui.version === "string" && comfyui.version.trim() !== "" ? `（版本 ${comfyui.version.trim()}）` : "";
+  const address = typeof comfyui.baseUrl === "string" && comfyui.baseUrl !== "" ? ` · ${comfyui.baseUrl}` : "";
+  const workflowConfigured = comfyui.workflow?.configured === true;
+  const sourceLabel = comfyuiWorkflowSourceLabel(comfyui.workflow?.source);
+  const runnerMissing = comfyui.runnerReady === false || (comfyui.runnerReady === undefined && pythonOk === false);
+  return <>
+    <span data-ready title={address === "" ? "ComfyUI 服务在线" : `ComfyUI 服务在线：${comfyui.baseUrl}`}>ComfyUI 已连接{version}{address}</span>
+    {workflowConfigured
+      ? <span data-ready title={sourceLabel === undefined ? "工作流已配置" : `工作流来源：${sourceLabel}`}>工作流已配置{sourceLabel === undefined ? "" : `（${sourceLabel}）`}</span>
+      : <span data-warn title="需设置 COMFYUI_WORKFLOW 或 COMFYUI_WORKFLOW_DIR">未配置工作流——需设置 COMFYUI_WORKFLOW 或 COMFYUI_WORKFLOW_DIR</span>}
+    {runnerMissing && <span data-warn title="需安装 Python 3.10 以上版本后重启 DSH">本机未检测到可用 Python（3.10+），ComfyUI 生成任务将无法执行——请安装后重启 DSH</span>}
+  </>;
+}
 
 /**
  * DeepSeek writes the prompts; the pictures, videos and music come from provider
@@ -79,6 +133,7 @@ function ProductionEnvironment({ sessionId }: { readonly sessionId: string }) {
     {typeof preflight === "object" && <>
       <span data-ready={preflight.python.ok || undefined}>Python {preflight.python.version ?? "未找到"}</span>
       {preflight.adapters.map((adapter) => <span key={adapter.name} data-ready={adapter.configured || undefined} title={adapter.configured ? `${adapter.name} 已配置` : `缺少环境变量 ${adapter.missing.join("、")}`}>{MODALITY_LABEL[adapter.modality]} {adapter.label}{adapter.configured ? "" : ` · 缺 ${adapter.missing.join("、")}`}</span>)}
+      <ComfyuiEnvironmentStatus comfyui={preflight.comfyui} pythonOk={preflight.python.ok} />
       <em>DeepSeek 只负责写提示词；图片、视频、音乐由上面的供应商 API 生成，Key 在启动 DSH 前写入宿主机环境变量。
         {unconfigured.length === preflight.adapters.length && " 当前一个都没配置，生产任务会停在 adapter 之前。"}
         {" "}Adapter 配置{preflight.adapterConfig.generated ? "已自动登记" : "使用自定义文件"}{preflight.adapterConfig.ok ? "" : "（写入失败）"}：<code>{preflight.adapterConfig.path}</code>。详见 README「媒体生成 API」。</em>
@@ -217,7 +272,7 @@ function TaskBoard({ jobs, queue, sessionRunning, onCancel, onRemoveQueued }: {
 }) {
   const activeJobId = activeProductionJobId(jobs, queue, sessionRunning);
   return <section className="oh-story-task-board">
-    <div className="oh-story-projection-note">图片与视频先预检、后确认。内置契约支持 GPT Image 2 / Seedance；实际账号、模型与可用性由当前 DSH 运行环境决定。</div>
+    <div className="oh-story-projection-note">图片与视频先预检、后确认。按生成环境条当前已配置的适配器选择：云图片 / 云视频适配器需对应凭据，本地 ComfyUI 适配器无需凭据但需已配置工作流；实际可用性以预检为准。</div>
     {jobs.length === 0 ? <div className="oh-story-production-empty">还没有生产任务。可从镜头或素材页提交单个或批量任务。</div> : [...jobs].reverse().map((job) => {
       const queued = queuedItemForJob(job.id, queue);
       const displayStatus = queued === undefined ? STATUS_LABELS[job.status] : "DSH Queue";
