@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { access, lstat, mkdir, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * Drama Skills generates no media by itself and neither does DeepSeek: every
@@ -46,6 +47,19 @@ export const DRAMA_ADAPTER_CONFIG_ENV = "OH_STORY_DRAMA_ADAPTER_CONFIG";
 
 const PROVIDER_SCRIPT = "short-drama-produce/scripts/provider_adapters.py";
 
+const COMFYUI_OPTIONAL_ENV = ["COMFYUI_BASE_URL", "COMFYUI_WORKFLOW", "COMFYUI_WORKFLOW_DIR", "COMFYUI_API_KEY"] as const;
+
+/**
+ * Path to the plugin-owned ComfyUI runner. `src/` and compiled `lib/`
+ * (`lib/index.js`, one level below the package root) both resolve here to
+ * `packages/dsh-plugin/python/comfyui_runner.py`.
+ */
+export function comfyuiRunnerPath(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../python/comfyui_runner.py");
+}
+
+const COMFYUI_ADAPTER_NAMES = new Set(["comfyui", "comfyui-video", "comfyui-music"]);
+
 export const DRAMA_ADAPTERS: readonly DramaAdapterSpec[] = [
   {
     name: "gpt-image-2",
@@ -82,6 +96,33 @@ export const DRAMA_ADAPTERS: readonly DramaAdapterSpec[] = [
     optionalEnv: ["MINIMAX_BASE_URL"],
     timeoutSeconds: 600,
     reference: "short-drama-produce/references/providers/minimax-music.md"
+  },
+  {
+    name: "comfyui",
+    label: "ComfyUI",
+    modality: "image",
+    requiredEnv: [],
+    optionalEnv: [...COMFYUI_OPTIONAL_ENV],
+    timeoutSeconds: 600,
+    reference: "short-drama-produce/references/providers/comfyui.md"
+  },
+  {
+    name: "comfyui-video",
+    label: "ComfyUI Video",
+    modality: "video",
+    requiredEnv: [],
+    optionalEnv: [...COMFYUI_OPTIONAL_ENV],
+    timeoutSeconds: 3_600,
+    reference: "short-drama-produce/references/providers/comfyui.md"
+  },
+  {
+    name: "comfyui-music",
+    label: "ComfyUI Music",
+    modality: "music",
+    requiredEnv: [],
+    optionalEnv: [...COMFYUI_OPTIONAL_ENV],
+    timeoutSeconds: 600,
+    reference: "short-drama-produce/references/providers/comfyui.md"
   }
 ];
 
@@ -118,9 +159,12 @@ async function privateDirectory(path: string): Promise<boolean> {
 /** The upstream adapter-config document: argv commands and timeouts only, never credentials. */
 export function dramaAdapterConfigDocument(skillRoot: string, python = "python3"): { readonly adapters: Record<string, { readonly command: readonly string[]; readonly timeout_seconds: number }> } {
   const script = resolve(skillRoot, PROVIDER_SCRIPT);
+  const comfyuiRunner = comfyuiRunnerPath();
   const adapters: Record<string, { readonly command: readonly string[]; readonly timeout_seconds: number }> = {};
   for (const adapter of DRAMA_ADAPTERS) {
-    adapters[adapter.name] = { command: [python, script, adapter.name], timeout_seconds: adapter.timeoutSeconds };
+    adapters[adapter.name] = COMFYUI_ADAPTER_NAMES.has(adapter.name)
+      ? { command: [python, comfyuiRunner, "drama"], timeout_seconds: adapter.timeoutSeconds }
+      : { command: [python, script, adapter.name], timeout_seconds: adapter.timeoutSeconds };
   }
   return { adapters };
 }
@@ -159,7 +203,11 @@ export function dramaAdapterStatuses(env: NodeJS.ProcessEnv = process.env): Dram
   });
 }
 
-/** One line per adapter for Skill text: `gpt-image-2 (image: OPENAI_API_KEY)`. */
+/** One line per adapter for Skill text: `gpt-image-2 (image: OPENAI_API_KEY)`, `comfyui (image: 无需凭据)`. */
 export function dramaAdapterSummary(): string {
-  return DRAMA_ADAPTERS.map((adapter) => `${adapter.name} (${adapter.modality}: ${adapter.requiredEnv.join(" + ")})`).join(", ");
+  return DRAMA_ADAPTERS.map((adapter) =>
+    adapter.requiredEnv.length === 0
+      ? `${adapter.name} (${adapter.modality}: 无需凭据)`
+      : `${adapter.name} (${adapter.modality}: ${adapter.requiredEnv.join(" + ")})`
+  ).join(", ");
 }

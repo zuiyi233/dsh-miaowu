@@ -64,6 +64,8 @@
   "files": [
     "cordis.patch.yml",
     "lib/**/*",
+    "python",
+    "docs",
     "LICENSE",
     "README.md"
   ],

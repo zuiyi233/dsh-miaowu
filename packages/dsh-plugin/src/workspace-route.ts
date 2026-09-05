@@ -11,6 +11,7 @@ import type { SandboxPolicyService } from "@deepseek-ai/dsh-sandbox-policy";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import type {} from "@deepseek-ai/dsh-typert-registry";
 import { type GameVerificationBinding, WorkspaceVerificationTracker } from "./game-verification.js";
+import { comfyuiWorkflowStatus, probeComfyui, type ComfyuiPreflightSummary } from "./comfyui-status.js";
 import { dramaAdapterStatuses, ensureDramaAdapterConfig, type DramaAdapterStatus } from "./drama-adapters.js";
 import { commandOutput, hostPython } from "./host-python.js";
 import { defaultDramaSkillRoot, defaultNovelToGameSkillRoot } from "./skill-provider.js";
@@ -119,6 +120,7 @@ interface DramaPreflightSummary {
   readonly python: { readonly ok: boolean; readonly version?: string | undefined };
   readonly adapterConfig: { readonly path: string; readonly generated: boolean; readonly ok: boolean };
   readonly adapters: readonly DramaAdapterStatus[];
+  readonly comfyui: ComfyuiPreflightSummary;
 }
 
 let dramaPreflightInFlight: Promise<DramaPreflightSummary> | undefined;
@@ -131,7 +133,18 @@ async function dramaPreflight(): Promise<DramaPreflightSummary> {
     try {
       const python = await hostPython();
       const adapterConfig = await ensureDramaAdapterConfig(defaultDramaSkillRoot(), { python: python.command });
-      const value = { python: python.probe, adapterConfig, adapters: dramaAdapterStatuses() };
+      // 探测失败只写 online:false,不影响路由其余部分:这是探测语义本身,不算吞错。
+      const probe = await probeComfyui(process.env).catch((error: unknown) => ({
+        online: false as const,
+        baseUrl: "unknown",
+        error: `探测异常:${error instanceof Error ? error.message : String(error)}`
+      }));
+      const value = {
+        python: python.probe,
+        adapterConfig,
+        adapters: dramaAdapterStatuses(),
+        comfyui: { ...probe, workflow: comfyuiWorkflowStatus(process.env) }
+      };
       dramaPreflightCache = { expires: Date.now() + 30_000, value };
       return value;
     } finally { dramaPreflightInFlight = undefined; }

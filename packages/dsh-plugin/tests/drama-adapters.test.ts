@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DRAMA_ADAPTER_CONFIG_ENV,
   DRAMA_ADAPTERS,
+  comfyuiRunnerPath,
   dramaAdapterConfigDocument,
   dramaAdapterConfigPath,
   dramaAdapterStatuses,
@@ -19,17 +20,44 @@ const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
 
 describe("bundled Drama media adapters", () => {
-  it("names exactly the adapters the pinned upstream provider script accepts", async () => {
+  it("names the upstream provider adapters plus the plugin-owned ComfyUI adapters", async () => {
     const script = await readFile(join(dramaRoot, "short-drama-produce/scripts/provider_adapters.py"), "utf8");
     const choices = /choices=\(([^)]*)\)/u.exec(script)?.[1]?.match(/"([^"]+)"/gu)?.map((entry) => entry.replaceAll('"', ""));
-    expect(choices?.sort()).toEqual(DRAMA_ADAPTERS.map((adapter) => adapter.name).sort());
+    const upstream = DRAMA_ADAPTERS.filter((adapter) => !adapter.name.startsWith("comfyui")).map((adapter) => adapter.name);
+    expect(choices?.sort()).toEqual(upstream.sort());
+    expect(DRAMA_ADAPTERS.filter((adapter) => adapter.name.startsWith("comfyui")).map((adapter) => adapter.name).sort()).toEqual(
+      ["comfyui", "comfyui-music", "comfyui-video"]
+    );
   });
 
   it("documents each required environment variable in the pinned upstream provider reference", async () => {
     for (const adapter of DRAMA_ADAPTERS) {
+      // ComfyUI adapters are plugin-owned (runner + docs/comfyui.md), not upstream
+      // provider script entries; their reference file is tracked separately.
+      if (adapter.name.startsWith("comfyui")) continue;
       const reference = await readFile(join(dramaRoot, adapter.reference), "utf8");
       for (const name of [...adapter.requiredEnv, ...adapter.optionalEnv]) expect(reference, `${adapter.name} ${name}`).toContain(`\`${name}\``);
     }
+  });
+
+  it("registers the ComfyUI adapters with no required credentials and documents their env in the plugin doc", async () => {
+    const comfyui = DRAMA_ADAPTERS.filter((adapter) => adapter.name.startsWith("comfyui"));
+    expect(comfyui.map((adapter) => [adapter.name, adapter.label, adapter.modality, adapter.requiredEnv, adapter.timeoutSeconds])).toEqual([
+      ["comfyui", "ComfyUI", "image", [], 600],
+      ["comfyui-video", "ComfyUI Video", "video", [], 3_600],
+      ["comfyui-music", "ComfyUI Music", "music", [], 600]
+    ]);
+    for (const adapter of comfyui) {
+      expect([...adapter.optionalEnv]).toEqual(["COMFYUI_BASE_URL", "COMFYUI_WORKFLOW", "COMFYUI_WORKFLOW_DIR", "COMFYUI_API_KEY"]);
+    }
+    const doc = await readFile(resolve(import.meta.dirname, "../docs/comfyui.md"), "utf8");
+    for (const name of ["COMFYUI_BASE_URL", "COMFYUI_WORKFLOW", "COMFYUI_WORKFLOW_DIR", "COMFYUI_API_KEY"]) {
+      expect(doc, `comfyui doc ${name}`).toContain(`\`${name}\``);
+    }
+  });
+
+  it("resolves the ComfyUI runner path to the plugin-owned python script", () => {
+    expect(comfyuiRunnerPath()).toBe(resolve(import.meta.dirname, "../python/comfyui_runner.py"));
   });
 
   it("writes an upstream-shaped adapter config that points at the bundled script and carries no credentials", async () => {
@@ -44,6 +72,9 @@ describe("bundled Drama media adapters", () => {
     const written = JSON.parse(await readFile(location.path, "utf8")) as ReturnType<typeof dramaAdapterConfigDocument>;
     expect(written).toEqual(dramaAdapterConfigDocument(dramaRoot, "python"));
     expect(written.adapters["seedance"]).toEqual({ command: ["python", resolve(dramaRoot, "short-drama-produce/scripts/provider_adapters.py"), "seedance"], timeout_seconds: 3_600 });
+    expect(written.adapters["comfyui"]).toEqual({ command: ["python", comfyuiRunnerPath(), "drama"], timeout_seconds: 600 });
+    expect(written.adapters["comfyui-video"]).toEqual({ command: ["python", comfyuiRunnerPath(), "drama"], timeout_seconds: 3_600 });
+    expect(written.adapters["comfyui-music"]).toEqual({ command: ["python", comfyuiRunnerPath(), "drama"], timeout_seconds: 600 });
     expect(JSON.stringify(written)).not.toMatch(/key|token|secret/iu);
   });
 
@@ -61,9 +92,24 @@ describe("bundled Drama media adapters", () => {
       ["gpt-image-2", true, []],
       ["seedance", false, ["SEEDANCE_MODEL"]],
       ["minimax-h3", false, ["MINIMAX_VIDEO_MODEL", "MINIMAX_VIDEO_RESOLUTIONS"]],
-      ["minimax-music", true, []]
+      ["minimax-music", true, []],
+      ["comfyui", true, []],
+      ["comfyui-video", true, []],
+      ["comfyui-music", true, []]
     ]);
     expect(JSON.stringify(statuses)).not.toContain("sk-secret");
+  });
+
+  it("marks adapters with no required env as configured even with an empty environment", () => {
+    const statuses = dramaAdapterStatuses({});
+    for (const status of statuses.filter((candidate) => candidate.name.startsWith("comfyui"))) {
+      expect(status.configured).toBe(true);
+      expect(status.missing).toEqual([]);
+    }
+    expect(dramaAdapterSummary()).toContain("comfyui (image: 无需凭据)");
+    expect(dramaAdapterSummary()).toContain("comfyui-video (video: 无需凭据)");
+    expect(dramaAdapterSummary()).toContain("comfyui-music (music: 无需凭据)");
+    expect(dramaAdapterSummary()).toContain("gpt-image-2 (image: OPENAI_API_KEY)");
   });
 
   it("tells the produce Skill where the adapters are registered and which variables each needs", async () => {

@@ -8,6 +8,7 @@ import { createDramaSkillProvider, createDshMiaowuSkillProvider, createNovelToGa
 import { ensureDramaAdapterConfig } from "./drama-adapters.js";
 import { hostPython } from "./host-python.js";
 import { registerOhStoryHooks } from "./native-hooks.js";
+import { registerOhStoryComfyuiTool } from "./comfyui-tool.js";
 import { registerOhStoryRoleTool } from "./role-tool.js";
 import { registerOhStoryProductionTool } from "./production-tool.js";
 import { registerOhStoryTaskTool } from "./task-tool.js";
@@ -17,6 +18,7 @@ import { assertTrustedWorkspaceAuthority } from "./workspace-request-trust.js";
 
 export { createDramaSkillProvider, createDshMiaowuSkillProvider, createNovelToGameSkillProvider, createOhStorySkillProvider, createVideoRecapSkillProvider, defaultDshMiaowuSkillRoot, dshMiaowuSkillContent, parseBundledSkill } from "./skill-provider.js";
 export { OH_STORY_ROLE_NAMES, loadBundledRole } from "./role-provider.js";
+export { createOhStoryComfyuiTool, OH_STORY_COMFYUI_TOOL_NAME, registerOhStoryComfyuiTool } from "./comfyui-tool.js";
 export { createOhStoryRoleTool, OH_STORY_ROLE_TOOL_NAME, registerOhStoryRoleTool, roleToolFilter, type OhStoryRoleSubagents } from "./role-tool.js";
 export { createOhStoryProductionTool, registerOhStoryProductionTool } from "./production-tool.js";
 export { createOhStoryTaskTool, OH_STORY_TASK_OPS, OH_STORY_TASK_STATUSES, OH_STORY_TASK_TOOL_NAME, registerOhStoryTaskTool } from "./task-tool.js";
@@ -50,6 +52,7 @@ export async function apply(context: Context, config: Config = {}): Promise<void
   context.skills.registerProvider(() => createVideoRecapSkillProvider());
   context.skills.registerProvider(() => createDshMiaowuSkillProvider());
   registerOhStoryHooks(context);
+  registerOhStoryComfyuiTool(context);
   registerOhStoryProductionTool(context);
   registerOhStoryTaskTool(context);
   await registerOhStoryRoleTool(context);

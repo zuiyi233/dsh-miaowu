@@ -51,6 +51,12 @@ describe("Oh Story bundled skill provider", () => {
     expect(route?.content).toContain("scripts/author_memory_commit.py");
     await expect(readFile(resolve(skillRoot, "story/scripts/author_memory_commit.py"), "utf8")).resolves.toMatch(/\S/u);
     expect(route?.content).not.toContain("dashboard-server.mjs");
+    const coverCandidate = candidates.find((candidate) => candidate.name === "story-cover");
+    const cover = await provider.get(coverCandidate!, {});
+    expect(cover?.content).toContain("Never assume a separate Codex or Claude runtime");
+    expect(cover?.content).toContain("When the oh_story_comfyui tool is visible");
+    expect(cover?.content).toContain("docs/comfyui.md");
+    expect(cover?.content).toContain("follow the upstream GPT-Image path and say so instead of silently switching");
     const browserCandidate = candidates.find((candidate) => candidate.name === "browser-cdp");
     const browser = await provider.get(browserCandidate!, {});
     expect(browser?.content).not.toContain("setup-cdp-chrome.js 9222");
@@ -146,6 +152,8 @@ describe("NovelToGame bundled provider", () => {
       const skill = await provider.get(candidate, {});
       expect(skill?.content).toContain("The 游戏 tab is the playable Game Studio");
       expect(skill?.content).toContain("game-adaptations/<project>/");
+      expect(skill?.content).toContain("Visual and art assets may be generated through the oh_story_comfyui tool into game-adaptations/<project>/art/");
+      expect(skill?.content).toContain("state the limitation instead of pretending media was generated");
       expect(skill?.content).toContain("qa/verification.json remains the sole machine QA truth");
       expect(skill?.resourceBase).toEqual({ kind: "directory", path: resolve(gameRoot, candidate.name) });
     }

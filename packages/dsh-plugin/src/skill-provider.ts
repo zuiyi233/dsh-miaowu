@@ -36,7 +36,7 @@ const DSH_SKILL_OVERRIDES: Readonly<Partial<Record<string, string>>> = {
   "story-short-analyze": "Use oh_story_role for specialist analysis. Never inspect platform agent directories or require external Agent deployment.",
   "story-short-write": "All named Roles are provided through oh_story_role. Do not inspect platform agent files; preserve the upstream short-fiction workflow and quality gates.",
   "browser-cdp": "Use only browser or web capabilities visible in the current DSH preset. Do not start a parallel browser host; if no compatible capability is visible, explain the limitation.",
-  "story-cover": "Use only image-generation or HTTP capabilities visible in the current DSH preset. Never assume a separate Codex or Claude runtime."
+  "story-cover": "Use only image-generation or HTTP capabilities visible in the current DSH preset. Never assume a separate Codex or Claude runtime. When the oh_story_comfyui tool is visible, a cover may be produced through the local ComfyUI workflow the creator configured (preset API-format workflow + placeholders, see the plugin docs/comfyui.md); when that tool is absent or no workflow is configured, follow the upstream GPT-Image path and say so instead of silently switching."
 };
 const DSH_DRAMA_BRIDGE = [
   "<short-drama-dsh-integration>",
@@ -64,6 +64,7 @@ const DSH_GAME_BRIDGE = [
   "Keep the complete upstream seven-Skill pipeline and write adaptation artifacts under game-adaptations/<project>/ exactly as the upstream contracts specify.",
   "For a web target, keep the authoritative playable entry at build/app/index.html so Game Studio can preview it. Do not silently replace a requested non-web runtime with a web build.",
   "Use only DSH-visible tools and approvals. qa/verification.json remains the sole machine QA truth and must cover launch, render, input, coreLoop, outcome, and restart with real execution evidence.",
+  "Visual and art assets may be generated through the oh_story_comfyui tool into game-adaptations/<project>/art/ when it is visible and a ComfyUI workflow is configured; when it is not, state the limitation instead of pretending media was generated.",
   "The bundled Jin Ping Mei project is a read-only example, not a template to copy mechanically and not proof that another adaptation passed QA.",
   "</novel-to-game-dsh-integration>"
 ].join("\n");
@@ -75,6 +76,8 @@ const DSH_VIDEO_BRIDGE = [
   "Keep the complete upstream six-Skill pipeline. Put each project under video-recaps/<project>/, copy or import source media under sources/, and use work/ as the upstream work_dir so the Studio can discover authoritative manifests and outputs.",
   "The Video Studio is a preview and artifact surface, not a nonlinear editor. Do not invent a second project-state format, timeline truth, or render queue; recap_run_manifest.json, recap_phase.json, timeline.json, assembly_manifest.json, and the upstream artifacts remain authoritative.",
   "MIMO_API_KEY, FISH_API_KEY, and voice credentials stay in the host environment. Never write secrets into project files, tool arguments shown to the browser, or chat output.",
+  "Narration audio may be produced locally through the oh_story_comfyui tool when the creator configured a ComfyUI voice workflow; upstream voiceover scripts stay untouched.",
+  "ComfyUI narration must follow the upstream consumption contract exactly: cleaned narration.json text, mono 16-bit 44100 Hz WAV near -20 dBFS at tts_segments/narr_<index>.wav, a complete tts_meta.json (per segment index/start/end/narration/spoken_text/audio_path/audio_duration/pause_after_ms/overlaps_speech/tts_rate_offset, engine comfyui-local, partial false), then run the assemble step directly — never the one-shot recap chain, which would regenerate and overwrite that audio. If no workflow is configured, say so instead of pretending narration was produced.",
   "Use only DSH-visible tools and approvals. Run Python and ffmpeg through the current DSH execution world, preserve cancellation, and do not install or upgrade system dependencies without explicit user approval.",
   "When a new edited or final video is ready, tell the user that Video Studio can load it; never interrupt playback by replacing the currently loaded video silently.",
   "</video-recap-dsh-integration>"
