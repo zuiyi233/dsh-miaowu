@@ -1829,6 +1829,30 @@ async function main(): Promise<void> {
             throw new Error(`Long answer lost its tail at ${String(size.width)}x${String(size.height)}: ${JSON.stringify(tail)}`);
           }
         }
+        // The creator columns are separate scroll regions: scrolling the Chat
+        // flow must not drag the tree/editor along. With a tall conversation the
+        // grid row outgrows the viewport, so an unclamped pane would be stretched
+        // to the content height and its leaves' sticky would lose all travel.
+        const columnAnchor = await page.evaluate(() => {
+          const scroll = Array.from(document.querySelectorAll<HTMLElement>("[data-conversation-scroll]"))
+            .find((element) => element.dataset.ohStoryWorkbench === "drama" && element.getBoundingClientRect().width > 0);
+          if (scroll === undefined) return undefined;
+          const pane = scroll.querySelector<HTMLElement>("[data-oh-split-pane]");
+          const editor = scroll.querySelector<HTMLElement>(".oh-story-editor");
+          const tops = (): { pane: number | undefined; editor: number | undefined } => ({
+            pane: pane?.getBoundingClientRect().top,
+            editor: editor?.getBoundingClientRect().top
+          });
+          const before = tops();
+          scroll.scrollTop = Math.max(0, Math.round(scroll.scrollHeight * 0.35));
+          const after = tops();
+          return { before, after };
+        });
+        if (columnAnchor === undefined
+          || Math.abs((columnAnchor.after.pane ?? -9999) - (columnAnchor.before.pane ?? -9998)) > 2
+          || Math.abs((columnAnchor.after.editor ?? -9999) - (columnAnchor.before.editor ?? -9998)) > 2) {
+          throw new Error(`Scrolling the chat dragged the creator columns along: ${JSON.stringify(columnAnchor)}`);
+        }
         // The same carry must not become a leash: a reader who scrolled up to
         // re-read stays where they put themselves when the layout changes.
         const held = await page.evaluate(() => {

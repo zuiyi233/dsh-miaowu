@@ -1242,8 +1242,20 @@
    grid column 1 and squeezes both leaves into it. Give it the tree+editor
    columns so its flex fractions size the real columns. Nested panes are flex
    items of a cell, where this rule is inert. */
+/* 长对话把 grid 行撑到几千 px 后,网格项默认 stretch 会让 pane 被拉到与滚动
+   内容同高:树/编辑器上的 sticky 失去行程,滚动对话区时创作列跟着滚走(联动)。
+   把 pane 钳到 scroller 可视高(--oh-story-scroll-height = clientHeight,滚动
+   不变量)并 sticky 钉住,行高不再传染;列内 overflow/flex 链各自内滚。 */
 .oh-story-split-surface[data-open="true"] > [data-oh-split-root] > [data-oh-split-pane],
-.oh-story-split-surface[data-open="true"] > [data-oh-split-pane] { grid-column: 1 / 3; }
+.oh-story-split-surface[data-open="true"] > [data-oh-split-pane] {
+  grid-column: 1 / 3;
+  align-self: start;
+  height: var(--oh-story-scroll-height, 100%);
+  max-height: var(--oh-story-scroll-height, 100%);
+  min-height: 0;
+  position: sticky;
+  top: 0;
+}
 [data-oh-splitting] .oh-split-pane, [data-oh-splitting] .oh-split-cell { transition: none; }
 [data-oh-story-layout="compact"] .oh-split-divider { display: none; }
 [data-oh-story-layout="compact"] .oh-split-pane { flex-direction: column; }
