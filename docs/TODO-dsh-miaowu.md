@@ -37,7 +37,7 @@
 
 ## 待核实项
 
-- `story` skill 引用的 `scripts/dashboard-server.mjs` 不在 manifest/本地文件清单中（Dashboard 工作台入口依赖它）——上游同步时核实，若缺失回馈上游（实施各 Phase 未改动该基线状态）
+- ✅ 已核实（2026-09-05）：`story` skill 引用的 `scripts/dashboard-server.mjs` 在**上游 `oh-story-dsh@main` 全树同样不存在**（`packages/knowledge/oh-story/skills/story/scripts/` 仅含 `author_memory_commit.py`），本地 fork 该目录与上游 diff 为空；`build-dsh-plugin.ts` / `knowledge-assets.ts` 显式排除、`check-upstream-parity.ts` 跳过——系上游刻意不随包分发 Dashboard 服务，但 `SKILL.md`「Dashboard 工作台」引用未同步清除（短剧侧 `dashboard_server.py` 同模式）。处置：回馈上游（issue 文案已备，本机 `gh` 未装待手动贴出），本地保持基线不改。
 
 ## 工程注记（实施后）
 
