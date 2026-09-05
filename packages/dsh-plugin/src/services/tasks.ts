@@ -442,8 +442,7 @@ export async function applyCandidateRecord(
   realm: WorkspaceRealm,
   candidate: Candidate,
   maxBytes: number
-): Promise<{ candidate: Candidate; idempotentReplay: boolean }> {
-  if (candidate.status === "applied") {
+): Promise<{ candidate: Candidate; idempotentReplay: boolean }> {  if (candidate.status === "applied") {
     return { candidate, idempotentReplay: true };
   }
   if (candidate.status !== "confirmed") {
@@ -464,6 +463,67 @@ export async function applyCandidateRecord(
     },
     idempotentReplay: false,
   };
+}
+
+/** Agent-facing staging input: 候选登记不写文件,确认/应用留在工作台由人执行. */
+export interface StageCandidateInput {
+  readonly kind: string;
+  readonly title: string;
+  readonly description: string | undefined;
+  readonly payload: Record<string, unknown>;
+  readonly target: string | undefined;
+  readonly runId: string | undefined;
+}
+
+export async function stageCandidateRecord(realm: WorkspaceRealm, input: StageCandidateInput): Promise<Candidate> {
+  const candidate: Candidate = {
+    id: randomUUID(),
+    runId: input.runId,
+    kind: input.kind,
+    title: input.title,
+    description: input.description,
+    payload: input.payload,
+    target: input.target,
+    status: "proposed",
+    createdAt: Date.now(),
+  };
+  const items = await loadCandidates(realm);
+  await saveCandidates(realm, [...items, candidate]);
+  return candidate;
+}
+
+/** Agent-facing checkpoint input: 把长任务的进度落一个可恢复的检查点. */
+export interface CheckpointRunInput {
+  readonly kind: string;
+  readonly runId: string | undefined;
+  readonly meta: Record<string, unknown> | undefined;
+  readonly note: string | undefined;
+  readonly status: RunStatus | undefined;
+}
+
+export async function checkpointRunRecord(realm: WorkspaceRealm, input: CheckpointRunInput): Promise<TaskRun> {
+  const runs = await loadRuns(realm);
+  const found = input.runId === undefined ? undefined : runs.find((run) => run.id === input.runId);
+  const now = Date.now();
+  const checkpoint = { at: now, ...(input.note === undefined ? {} : { note: input.note }) };
+  if (found === undefined) {
+    const run: TaskRun = {
+      ...createRunRecord(input.kind, input.meta ?? {}),
+      status: input.status ?? "paused",
+      checkpoint,
+      updatedAt: now,
+    };
+    await saveRuns(realm, [...runs, run]);
+    return run;
+  }
+  const next: TaskRun = {
+    ...found,
+    status: input.status ?? (found.status === "completed" || found.status === "failed" ? found.status : "paused"),
+    checkpoint,
+    updatedAt: now,
+  };
+  await saveRuns(realm, replaceRun(runs, next));
+  return next;
 }
 
 function requireString(value: unknown): string | undefined {
@@ -637,20 +697,14 @@ async function handleTasksRequest(
       if (kind === undefined || title === undefined || payload === undefined) {
         throw new WorkspaceHttpError(400, "kind/title/payload 必填。");
       }
-      const now = Date.now();
-      const candidate: Candidate = {
-        id: randomUUID(),
-        runId: requireString(body.runId),
+      const candidate = await stageCandidateRecord(realm, {
         kind,
         title,
         description: typeof body.description === "string" ? body.description : undefined,
         payload,
         target: requireString(body.target),
-        status: "proposed",
-        createdAt: now,
-      };
-      const items = await loadCandidates(realm);
-      await saveCandidates(realm, [...items, candidate]);
+        runId: requireString(body.runId),
+      });
       send(response, 200, { candidate });
       return true;
     }

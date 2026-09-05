@@ -18,6 +18,7 @@ const DSH_SKILL_BRIDGE = [
   "DSH owns the workspace, model, preset, permissions, Session Log, tools, subagents, cancellation, resume, and Agent UI.",
   "Never start another Agent runtime, session transport, Dashboard, SSE stream, polling loop, or model configuration.",
   "All seven upstream Oh Story specialist Roles are bundled. Invoke one with oh_story_role and a self-contained prompt.",
+  "Long generation can stage AI suggestions as decision candidates with oh_story_task stage_candidate (never writes files; the creator confirms and applies from the workbench 任务与候选 panel) and bookmark resumable progress with oh_story_task checkpoint_run.",
   "Never inspect .claude/agents, .codex/agents, .opencode/agents, .agents/agents, .zcode, or .story-deployed to decide whether a Role is available, and never call invoke_subagent with a TypeName.",
   "Use only DSH-visible tools. DSH sandbox and permission policy remain authoritative.",
   "</dsh-miaowu-integration>"

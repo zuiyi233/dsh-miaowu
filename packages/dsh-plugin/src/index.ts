@@ -8,6 +8,7 @@ import { createDramaSkillProvider, createDshMiaowuSkillProvider, createNovelToGa
 import { registerOhStoryHooks } from "./native-hooks.js";
 import { registerOhStoryRoleTool } from "./role-tool.js";
 import { registerOhStoryProductionTool } from "./production-tool.js";
+import { registerOhStoryTaskTool } from "./task-tool.js";
 import { registerWorkspaceRoute } from "./workspace-route.js";
 import { registerWorkspaceServices } from "./services/index.js";
 import { assertTrustedWorkspaceAuthority } from "./workspace-request-trust.js";
@@ -16,6 +17,7 @@ export { createDramaSkillProvider, createDshMiaowuSkillProvider, createNovelToGa
 export { OH_STORY_ROLE_NAMES, loadBundledRole } from "./role-provider.js";
 export { createOhStoryRoleTool, OH_STORY_ROLE_TOOL_NAME, registerOhStoryRoleTool, roleToolFilter, type OhStoryRoleSubagents } from "./role-tool.js";
 export { createOhStoryProductionTool, registerOhStoryProductionTool } from "./production-tool.js";
+export { createOhStoryTaskTool, OH_STORY_TASK_OPS, OH_STORY_TASK_STATUSES, OH_STORY_TASK_TOOL_NAME, registerOhStoryTaskTool } from "./task-tool.js";
 export { OH_STORY_PRODUCTION_TOOL_NAME, validateProductionIntent, type ProductionIntentArgs } from "./production-intent.js";
 export { bundledReferenceGuard, createOhStoryReferenceTool, OH_STORY_REFERENCE_TOOL_NAME } from "./reference-tool.js";
 export { registerWorkspaceRoute } from "./workspace-route.js";
@@ -46,6 +48,7 @@ export async function apply(context: Context, config: Config = {}): Promise<void
   context.skills.registerProvider(() => createDshMiaowuSkillProvider());
   registerOhStoryHooks(context);
   registerOhStoryProductionTool(context);
+  registerOhStoryTaskTool(context);
   await registerOhStoryRoleTool(context);
   registerWorkspaceServices();
   registerWorkspaceRoute(context, { maxBytes: config.editorMaxBytes ?? 2_097_152, trustedHosts });

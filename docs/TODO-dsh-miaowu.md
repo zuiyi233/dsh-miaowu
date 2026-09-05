@@ -10,8 +10,8 @@
 | # | 功能 | 借鉴来源 | 落点 | 状态 | 落点（实施后） |
 |---|---|---|---|---|---|
 | 1 | 全文检索 | Scriverse（FTS5 trigram + 拼音双通道） | 小说工作台 | ✅ | `src/services/search.ts` + `pinyin-map.ts`（26k 字拼音表）+ 搜索面板：行级索引落 `.oh-story/index/`，懒增量刷新，GET /oh-story/search 返回 path/line/offset/text（via text/pinyin），10 万字 <2s |
-| 2 | AI 建议不自动成为决策（candidate staging） | NarraLume | 短剧生产 / 小说章节采纳 / 游戏生成 | ✅ | `src/services/tasks.ts` 候选底座：propose→confirm→apply(reject/amend 分支、幂等、file committer CAS 写入)，confirmed 产物独立于 run 生命周期 |
-| 3 | 长任务可中断可恢复 | NarraLume（steps/checkpoints/runs）、Scriverse（analysis_tasks 状态机） | 短剧批次生产 / 小说长文生成 | ✅ | `src/services/tasks.ts` run/step/checkpoint：resume 返回最近 paused/failed run 含 checkpoint；内置 novel-chapter / drama-batch / game-content 三 recipe；任务中心面板 |
+| 2 | AI 建议不自动成为决策（candidate staging） | NarraLume | 短剧生产 / 小说章节采纳 / 游戏生成 | ✅ | `src/services/tasks.ts` 候选底座：propose→confirm→apply(reject/amend 分支、幂等、file committer CAS 写入)，confirmed 产物独立于 run 生命周期；Agent 侧新增 `oh_story_task stage_candidate` 工具（skill bridge 已告知自有 skill），登记候选不写文件，确认/应用留在「任务与候选」面板由人执行 |
+| 3 | 长任务可中断可恢复 | NarraLume（steps/checkpoints/runs）、Scriverse（analysis_tasks 状态机） | 短剧批次生产 / 小说长文生成 | ✅ | `src/services/tasks.ts` run/step/checkpoint：resume 返回最近 paused/failed run 含 checkpoint；内置 novel-chapter / drama-batch / game-content 三 recipe；任务中心面板；Agent 侧新增 `oh_story_task checkpoint_run` 工具，长写 agent 可在中断前落检查点，工作台按 resume 恢复 |
 | 4 | 备份三件套 | NarraLume（bundle/snapshot/全库备份） | workspace 数据层 | ✅ | `src/services/backup.ts` + 备份面板：bundle/snapshot/full（hash+counts+sizeBytes），恢复一律新目录不覆盖，支持离线 JSON 导入；备份→篡改→恢复回归测试 |
 | 5 | 版本化 + 审计 + 行级批注 | Scriverse（entity_versions/audit_logs/行 ID 锚定） | 小说编辑器 / 短剧五文档 | ✅ | `src/services/history.ts` + 历史面板：保存快照（≤50/文件去重）+ 回滚（CAS 412）+ audit.jsonl 留痕 + 行级批注（quote 窗口重锚 moved/stale），LCS 逐行 diff 展示 |
 | 6 | 异步双面板 + 自由窗口 | DSH-better-sidebar | 游戏/视频两栏 + 素材浮动 | ✅（素材板浮动为 ⏳ 简化） | `src/client/layout/`（split-tree/split-pane/free-window）+ 会话隔离布局持久化（oh-story.layout.v1.<sessionId>）；故事/短剧 tree\|editor 递归 split、游戏/视频 Studio 浮动镜像 + 回 dock；短剧生产素材/分镜板独立浮动留后续（需 split 第三 leaf） |
@@ -28,7 +28,7 @@
 | 12 | 伏笔埋设→提醒→回收闭环、书架多作品管理 | Scriverse / NarraLume | 小说第二阶段 | ✅ | `src/services/foreshadows.ts`（状态机/按章提醒/snooze/A3 sidecar 导入）+ `src/services/bookshelf.ts`（发现/归档/30 天回收站/不删内容）+ 双面板 |
 | 13 | P0/P1/P2 问题分类法 + 端到端链路审计方法 | 旧项目审计文档（历史基线） | VALIDATION 门禁 / 工作台链路检查表 | ✅ | `docs/VALIDATION.md` 扩展：P0/P1/P2 分类表 + 工作台链路检查表（每链路的确定性证据映射，🔒 标记 verify 强制项） |
 | 14 | 出版/投稿/发行执行 | 全流程断档③ | 新 skill | ✅ | `packages/knowledge/dsh-miaowu/skills/publishing/`：投稿准备/组包/{作品}/发行/ 状态跟踪/上架复盘，投稿动作由创作者执行 |
-| 15 | 完结/收尾专项结算 | 全流程断档④ | 新 skill | ✅ | `packages/knowledge/dsh-miaowu/skills/story-completion/`：完结判定（含伏笔回收门禁）/资产盘点/完结结算报告/平台完结指引 |
+| 15 | 完结/收尾专项结算 | 全流程断档④ | 新 skill | ✅ | `packages/knowledge/dsh-miaowu/skills/finalize/`：完结判定（含伏笔回收门禁）/资产盘点/完结结算报告/平台完结指引 |
 
 ## 明确不借鉴
 
