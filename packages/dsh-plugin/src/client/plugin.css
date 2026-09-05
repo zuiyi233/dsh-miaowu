@@ -355,6 +355,8 @@
 .oh-story-tree {
   grid-column: 1;
   overflow: auto;
+  /* 阻断滚动链:内层滚到边界不再把滚动传给共享的 [data-conversation-scroll]。 */
+  overscroll-behavior-y: contain;
   padding: 14px 10px 24px;
   border-right: 1px solid var(--os-border);
   background: var(--dsw-specific-sidebar-fill);
@@ -534,6 +536,8 @@
   resize: none;
   border: 0;
   outline: 0;
+  /* 阻断滚动链:见 .oh-story-tree。 */
+  overscroll-behavior-y: contain;
   padding: clamp(20px, 6%, 48px) clamp(22px, 10%, 84px) 48px;
   color: var(--dsw-alias-label-primary);
   background: transparent;
@@ -550,6 +554,8 @@
   min-height: 0;
   flex: 1;
   overflow: auto;
+  /* 阻断滚动链:见 .oh-story-tree。 */
+  overscroll-behavior-y: contain;
   padding: clamp(24px, 8%, 56px) clamp(24px, 10%, 92px) 64px;
   color: var(--dsw-alias-label-primary);
   font: 16px/1.85 ui-serif, "Songti SC", "STSong", Georgia, serif;
@@ -604,7 +610,7 @@
 .oh-story-jsonl-summary { display: flex; min-height: 42px; flex: none; align-items: center; gap: 10px; padding: 0 18px; border-bottom: 1px solid var(--os-border); font-size: 12px; }
 .oh-story-jsonl-summary strong { font-weight: 600; }
 .oh-story-jsonl-summary span { color: var(--os-muted); }
-.oh-story-jsonl-records { overflow: auto; padding: 14px 18px 36px; }
+.oh-story-jsonl-records { overflow: auto; /* 阻断滚动链:见 .oh-story-tree。 */ overscroll-behavior-y: contain; padding: 14px 18px 36px; }
 .oh-story-jsonl details,
 .oh-story-jsonl-error { overflow: hidden; margin-bottom: 10px; border: 1px solid var(--os-border); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); }
 .oh-story-jsonl summary { display: flex; min-height: 42px; align-items: center; gap: 9px; padding: 0 12px; cursor: pointer; list-style: none; font: 12px/1.4 var(--dsw-font-family); }
@@ -636,7 +642,7 @@
 .oh-story-conflict { color: var(--dsw-alias-state-warn-label); background: var(--dsw-specific-tip); }
 .oh-story-conflict > div { display: flex; gap: 6px; margin-top: 6px; }
 .oh-story-conflict button,
-.oh-story-empty button {
+.oh-story-editor-empty button {
   border: 1px solid var(--os-border);
   border-radius: 6px;
   color: inherit;
@@ -650,7 +656,8 @@
 @keyframes oh-story-pulse { to { opacity: .62; } }
 @media (prefers-reduced-motion: reduce) { .oh-story-stream[data-stage="streaming"] { animation: none; } }
 
-.oh-story-empty { margin: auto; max-width: 480px; padding: 30px; color: var(--os-muted); line-height: 1.7; text-align: center; }
+/* 编辑器内联空态:跟随编辑器列排版,绝不能复用会话角浮层的 .oh-story-empty(fixed)。 */
+.oh-story-editor-empty { margin: auto; max-width: 480px; padding: 30px; color: var(--os-muted); line-height: 1.7; text-align: center; }
 .oh-story-error { margin: 8px; padding: 8px 10px; border-radius: 8px; color: var(--dsw-alias-state-error-primary); background: var(--dsw-specific-tip); font-size: 12px; }
 
 .oh-story-role { display: flex; flex-direction: column; margin: 0; overflow: hidden; }
@@ -805,7 +812,7 @@
 .oh-story-canvas-shell > .oh-story-projection-note { z-index: 3; flex: none; margin: 8px 168px 8px 8px; }
 .oh-story-canvas-controls { position: absolute; z-index: 4; top: 8px; right: 8px; display: flex; align-items: center; gap: 3px; padding: 3px; border: 1px solid var(--os-border); border-radius: 8px; background: var(--dsw-alias-bg-base); }
 .oh-story-canvas-controls span { min-width: 44px; color: var(--os-muted); text-align: center; }
-.oh-story-canvas-viewport { width: 100%; min-height: 0; flex: 1; overflow: auto; background-color: var(--dsw-alias-bg-base); background-image: radial-gradient(var(--os-border) 1px, transparent 1px); background-size: 20px 20px; }
+.oh-story-canvas-viewport { width: 100%; min-height: 0; flex: 1; overflow: auto; /* 阻断滚动链:见 .oh-story-tree。 */ overscroll-behavior: contain; background-color: var(--dsw-alias-bg-base); background-image: radial-gradient(var(--os-border) 1px, transparent 1px); background-size: 20px 20px; }
 .oh-story-canvas { position: relative; width: 1800px; height: 1800px; transform-origin: 0 0; }
 .oh-story-canvas svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .oh-story-canvas path { fill: none; opacity: .35; stroke: var(--dsw-alias-border-l2); stroke-width: 1.5; }

@@ -63,6 +63,10 @@ function SplitDivider({ direction, index, path, sizes, paneRef, onCommit }: Divi
     if (state !== null && commit) onCommit(path, state.fraction);
   };
 
+  // pointercancel 与 lostpointercapture 同路径:捕获丢失时拖拽已死,必须清状态、
+  // 摘 data-oh-splitting,幂等(重复触发走空分支)。
+  const abortDrag = (): void => { endDrag(false); };
+
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const pane = paneRef.current;
     if (pane === null || drag.current !== null) return;
@@ -108,7 +112,8 @@ function SplitDivider({ direction, index, path, sizes, paneRef, onCommit }: Divi
     onPointerDown={onPointerDown}
     onPointerMove={onPointerMove}
     onPointerUp={(event) => { if (drag.current?.pointerId === event.pointerId) endDrag(true); }}
-    onPointerCancel={() => { endDrag(false); }}
+    onPointerCancel={abortDrag}
+    onLostPointerCapture={abortDrag}
   />;
 }
 

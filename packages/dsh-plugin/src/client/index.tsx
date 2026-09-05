@@ -72,6 +72,11 @@ import {
   type SplitTree
 } from "./layout/split-tree.js";
 import { registerSettingsFeature, settingsBridge } from "./layout/layout-settings.js";
+import {
+  isParkedAtTail,
+  shouldPinTail,
+  TAIL_UNPARK_WINDOW_MS
+} from "./workbench-tail.js";
 
 export const name = "oh-story";
 export const inject = ["slots", "sessions", "conversation"];
@@ -288,6 +293,8 @@ const WORKBENCH_MODES = ["story", "drama", "game", "video"] as const;
 const EDITOR_MODES = ["preview", "source", "production"] as const;
 const GAME_FLOAT_ID = "game-studio";
 const VIDEO_FLOAT_ID = "video-studio";
+/** 宿主重排/虚拟化时锚点闪断的宽限:连续 N 次查不到才真正卸载,避免 :has() 瞬间失配。 */
+const BRIDGE_ANCHOR_MISS_LIMIT = 3;
 
 function groupForPath(path: string): string {
   return path === "short-drama.json" ? "项目" : path.split("/", 1)[0] ?? "其他";
@@ -1700,7 +1707,7 @@ function CreativeWorkbench({
       </div>}
       {fileError !== undefined && <div className="oh-story-error">{fileError}</div>}
       {selected === undefined
-        ? <div className="oh-story-empty">{workbench === "story"
+        ? <div className="oh-story-editor-empty">{workbench === "story"
             ? <>当前 workspace 还没有小说文件。可在右侧 Chat 中运行 <code>/story-setup</code>。</>
             : <>当前 workspace 还没有短剧项目。可在右侧 Chat 中运行 <code>/short-drama</code>。</>}</div>
         : selectedMedia && selectedFile !== undefined
@@ -1710,9 +1717,9 @@ function CreativeWorkbench({
                 ? <audio src={endpoint("media", sessionId, selectedFile.path)} controls />
                 : <video src={endpoint("media", sessionId, selectedFile.path)} controls preload="metadata" />}</div>
         : buffer === undefined
-          ? <div className="oh-story-empty">正在加载 {selected}…</div>
+          ? <div className="oh-story-editor-empty">正在加载 {selected}…</div>
         : buffer.missing === true
-          ? <div className="oh-story-empty">文件已从 workspace 移除，本地草稿仍保留。请先复制需要的内容，再放弃草稿。<button type="button" onClick={() => {
+          ? <div className="oh-story-editor-empty">文件已从 workspace 移除，本地草稿仍保留。请先复制需要的内容，再放弃草稿。<button type="button" onClick={() => {
             setBuffers((current) => {
               const next = { ...current };
               delete next[selected];
@@ -1856,9 +1863,18 @@ function CreativeSplitBridge({ sessionId, useSession, useChat, useStore, actions
   useLayoutEffect(() => {
     const document = marker.current?.ownerDocument;
     if (document === undefined) return;
+    // 锚点查不到时保留旧 target:宿主重排/虚拟化会让锚点闪断一两帧,立即置空会让
+    // .oh-story-split-surface 卸载、:has() 失配,宿主瞬间弹回官方全宽。
+    let missed = 0;
     const locate = (): void => {
       const anchor = document.querySelector<HTMLElement>("[data-conversation-scroll] > [data-slot='conversation.session']");
-      setTarget((current) => current === anchor ? current : anchor ?? undefined);
+      if (anchor !== null) {
+        missed = 0;
+        setTarget((current) => current === anchor ? current : anchor);
+        return;
+      }
+      missed += 1;
+      if (missed >= BRIDGE_ANCHOR_MISS_LIMIT) setTarget(undefined);
     };
     locate();
     const observer = new MutationObserver(locate);
@@ -1892,22 +1908,33 @@ function CreativeSplitBridge({ sessionId, useSession, useChat, useStore, actions
     // The seat overlaps the Chat column here, so a reader parked at the tail has
     // to be carried across every layout pass; losing the tail does not merely
     // scroll it out of sight, it leaves the last lines behind the Composer.
-    // Being parked cannot be read inside the pass — a reflow moves the tail
-    // before the observer runs — and it cannot be read from scroll events alone
-    // either: the Chat settles over several frames after a resize and every one
-    // of those frames scrolls without the reader asking. So only a scroll the
-    // reader actually drove releases the tail; reaching the bottom always
-    // reclaims it.
-    const parkedAtTail = (): boolean => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 8;
+    // Being parked is a sticky snapshot: reaching the tail always claims it,
+    // but only a scroll the reader actually drove releases it. publishLayout
+    // must never touch it — a growing scrollHeight during streaming is not
+    // the reader leaving (#26).
+    const parkedAtTail = (): boolean => isParkedAtTail(scroller.scrollHeight, scroller.scrollTop, scroller.clientHeight);
     let parked = parkedAtTail();
     let drivenAt = 0;
+    let pointerHeld = false;
     const markDriven = (event: Event): void => {
       if (event.target instanceof Node && composerSeat()?.contains(event.target) === true) return;
       drivenAt = performance.now();
     };
     const trackParked = (): void => {
+      if (parkedAtTail()) { parked = true; return; }
+      // 只有用户驱动的滚动(指针按下/解除窗口内)才允许解除贴底;
+      // scroll anchoring 与宿主重排的自发滚动不得解除(#26 长答复跟随依赖此语义)。
+      if (pointerHeld || performance.now() - drivenAt < TAIL_UNPARK_WINDOW_MS) parked = false;
+    };
+    const pinTail = (): void => {
+      // 在底部即认领:程序化跳底/异步 scroll 事件可能迟到,当前几何已在尾部时
+      // 跟随永远是正确语义,不依赖事件时序(#26)。
       if (parkedAtTail()) parked = true;
-      else if (performance.now() - drivenAt < 400) parked = false;
+      // 流式输出停在尾部 → 跟随到底;指针按下/用户手势宽限内 → 不写回,滚动条位置归用户。
+      if (shouldPinTail({ parked, pointerHeld, lastDrivenAt: drivenAt, now: performance.now() })) {
+        scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight;
+        parked = true;
+      }
     };
     const publishLayout = (): void => {
       scroller.style.setProperty("--oh-story-scroll-height", `${String(scroller.clientHeight)}px`);
@@ -1923,7 +1950,7 @@ function CreativeSplitBridge({ sessionId, useSession, useChat, useStore, actions
       const mediumAt = workbench === "game" || workbench === "video" ? 960 : 900;
       const layout = scroller.clientWidth < compactAt ? "compact" : scroller.clientWidth < mediumAt ? "medium" : "wide";
       if (scroller.dataset.ohStoryLayout !== layout) scroller.dataset.ohStoryLayout = layout;
-      if (parked) scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight;
+      pinTail();
     };
     const observer = new ResizeObserver(publishLayout);
     const observed = new WeakSet<Element>();
@@ -1942,10 +1969,22 @@ function CreativeSplitBridge({ sessionId, useSession, useChat, useStore, actions
       }
     };
     publishLayout();
+    const view = scroller.ownerDocument;
+    // 滚动条拖拽的 pointerdown 落在 scroller 自身:capture 捕获起始,全局 up/cancel 释放按下态。
+    const holdPointer = (event: Event): void => {
+      if (event.target instanceof Node && composerSeat()?.contains(event.target) === true) return;
+      pointerHeld = true;
+      drivenAt = performance.now();
+    };
+    const releasePointer = (): void => { pointerHeld = false; drivenAt = performance.now(); };
     scroller.addEventListener("scroll", trackParked, { passive: true });
-    for (const driven of ["wheel", "touchmove", "pointerdown", "keydown"]) {
+    for (const driven of ["wheel", "touchmove", "keydown"]) {
       scroller.addEventListener(driven, markDriven, { passive: true });
     }
+    scroller.addEventListener("pointerdown", markDriven, { passive: true, capture: true });
+    view.addEventListener("pointerdown", holdPointer, { capture: true });
+    view.addEventListener("pointerup", releasePointer);
+    view.addEventListener("pointercancel", releasePointer);
     observer.observe(scroller);
     observePanes();
     const seats = new MutationObserver(() => { observePanes(); publishLayout(); });
@@ -1957,9 +1996,13 @@ function CreativeSplitBridge({ sessionId, useSession, useChat, useStore, actions
     return () => {
       panes.disconnect();
       scroller.removeEventListener("scroll", trackParked);
-      for (const driven of ["wheel", "touchmove", "pointerdown", "keydown"]) {
+      for (const driven of ["wheel", "touchmove", "keydown"]) {
         scroller.removeEventListener(driven, markDriven);
       }
+      scroller.removeEventListener("pointerdown", markDriven, { capture: true });
+      view.removeEventListener("pointerdown", holdPointer, { capture: true });
+      view.removeEventListener("pointerup", releasePointer);
+      view.removeEventListener("pointercancel", releasePointer);
       observer.disconnect();
       seats.disconnect();
       scroller.style.removeProperty("--oh-story-scroll-height");

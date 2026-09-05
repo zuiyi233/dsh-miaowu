@@ -1789,7 +1789,12 @@ async function main(): Promise<void> {
       if (await page.getByText("This turn failed", { exact: false }).isVisible()) throw new Error("Drama Chat contains a failed turn.");
       if (!useRealDeepSeek) {
         const scroller = page.locator("[data-conversation-scroll]");
-        await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+        await scroller.evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+          // 程序化赋值的 scroll 事件是异步派发,与紧随的渲染存在竞态;真实用户
+          // 滚动的事件里人就在底部。同步补发一次,让"贴底认领"不依赖派发时机。
+          element.dispatchEvent(new Event("scroll", { bubbles: true }));
+        });
         // A long answer read to the end must stay readable across a resize. The
         // seat overlaps the Chat column, so a reader carried out of the tail by a
         // reflow does not merely lose the bottom — the lines land behind the
