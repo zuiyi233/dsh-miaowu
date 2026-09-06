@@ -50,13 +50,62 @@ export interface DramaPreflight {
   readonly comfyui?: DramaPreflightComfyui | undefined;
 }
 
+/**
+ * 工作区 ComfyUI 配置内联表单:打开时 GET 预填,保存 POST 成功后关闭并触发 preflight 刷新。
+ * 在线/离线两态共用:离线时改地址恰恰是恢复连接的入口,所以离线分支也挂同一表单。
+ */
+function ComfyuiConfigForm({ sessionId, form, setForm, loading, saving, setSaving, formError, setFormError, setEditing, onConfigSaved }: {
+  readonly sessionId: string;
+  readonly form: WorkspaceComfyuiConfigForm;
+  readonly setForm: (form: WorkspaceComfyuiConfigForm) => void;
+  readonly loading: boolean;
+  readonly saving: boolean;
+  readonly setSaving: (saving: boolean) => void;
+  readonly formError: string | undefined;
+  readonly setFormError: (error: string | undefined) => void;
+  readonly setEditing: (editing: boolean) => void;
+  readonly onConfigSaved: (() => void) | undefined;
+}) {
+  const saveConfig = (): void => {
+    if (saving) return;
+    setSaving(true);
+    setFormError(undefined);
+    const body: Record<string, string> = {};
+    if (form.baseUrl.trim() !== "") body.baseUrl = form.baseUrl.trim();
+    if (form.workflow.trim() !== "") body.workflow = form.workflow.trim();
+    if (form.workflowDir.trim() !== "") body.workflowDir = form.workflowDir.trim();
+    void fetch(endpoint("comfyui-config", sessionId), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({})) as { readonly error?: string };
+        if (!response.ok) throw new Error(typeof payload.error === "string" && payload.error !== "" ? payload.error : `HTTP ${String(response.status)}`);
+        setEditing(false);
+        onConfigSaved?.();
+      })
+      .catch((error: unknown) => { setFormError(error instanceof Error ? error.message : "保存工作区配置失败。"); })
+      .finally(() => { setSaving(false); });
+  };
+  return <span className="oh-story-comfyui-config-form">
+    <label>服务地址<input aria-label="ComfyUI 服务地址" value={form.baseUrl} placeholder="http://127.0.0.1:8188（空=默认）" disabled={loading || saving} onChange={(event) => { setForm({ ...form, baseUrl: event.target.value }); }} /></label>
+    <label>工作流<input aria-label="ComfyUI 工作流" value={form.workflow} placeholder="文件名或路径（空=未配置）" disabled={loading || saving} onChange={(event) => { setForm({ ...form, workflow: event.target.value }); }} /></label>
+    <label>工作流目录<input aria-label="ComfyUI 工作流目录" value={form.workflowDir} placeholder="bare-name 查找目录（空=未配置）" disabled={loading || saving} onChange={(event) => { setForm({ ...form, workflowDir: event.target.value }); }} /></label>
+    {formError !== undefined && <span data-warn>{formError}</span>}
+    <button type="button" disabled={loading || saving} onClick={saveConfig}>{saving ? "保存中…" : "保存"}</button>
+    <button type="button" disabled={saving} onClick={() => { setEditing(false); setFormError(undefined); }}>取消</button>
+    <em>写入工作区 .comfyui/config.json；环境变量优先于此文件；短剧适配器只认环境变量。</em>
+  </span>;
+}
 /** Display subset of the host ComfyuiPreflightSummary: online state plus workflow presence. */
 export interface DramaPreflightComfyui {
   readonly online: boolean;
   readonly version?: string | undefined;
   readonly baseUrl: string;
   readonly error?: string | undefined;
-  readonly workflow: { readonly configured: boolean; readonly source: "env-file" | "env-dir" | null };
+  /** 与服务端 ComfyuiWorkflowStatus.source 同步:新增 "workspace-file"(工作区 `.comfyui/config.json`)。 */
+  readonly workflow: { readonly configured: boolean; readonly source: "env-file" | "env-dir" | "workspace-file" | null };
   /**
    * Server-side python.ok passthrough (agent M adds it): false means the host
    * found no usable interpreter, so ComfyUI jobs cannot run even when online.
@@ -70,24 +119,80 @@ const MODALITY_LABEL = { image: "图片", video: "视频", music: "音乐" } as 
 function comfyuiWorkflowSourceLabel(source: DramaPreflightComfyui["workflow"]["source"]): string | undefined {
   if (source === "env-file") return "环境变量文件";
   if (source === "env-dir") return "工作流目录";
+  if (source === "workspace-file") return "工作区配置";
   return undefined;
 }
 
+/** 工作区级 ComfyUI 配置的读写形态:GET/POST /oh-story/comfyui-config 的 config 部分。 */
+export interface WorkspaceComfyuiConfigForm {
+  readonly baseUrl: string;
+  readonly workflow: string;
+  readonly workflowDir: string;
+}
+
 /**
- * Local ComfyUI online state inside the same environment strip. Display only:
- * no extra requests, no config writes. A missing field (older host or cache)
- * renders nothing and throws nothing.
+ * Local ComfyUI online state inside the same environment strip, plus an inline
+ * workspace-config editor (GET/POST /oh-story/comfyui-config).
+ * The editor only touches the workspace file; env-level settings stay authoritative
+ * (server merges env > workspace-file > default). Saving triggers the same
+ * preflight refresh the 生产 view already uses, via onConfigSaved.
  *
  * pythonOk mirrors preflight.python.ok for hosts whose comfyui block has no
  * runnerReady yet. Both absent keeps the previous rendering unchanged.
  */
-export function ComfyuiEnvironmentStatus({ comfyui, pythonOk }: { readonly comfyui: DramaPreflightComfyui | undefined; readonly pythonOk?: boolean | undefined }) {
+export function ComfyuiEnvironmentStatus({ comfyui, pythonOk, sessionId, onConfigSaved }: {
+  readonly comfyui: DramaPreflightComfyui | undefined;
+  readonly pythonOk?: boolean | undefined;
+  readonly sessionId?: string | undefined;
+  readonly onConfigSaved?: (() => void) | undefined;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState<WorkspaceComfyuiConfigForm>({ baseUrl: "", workflow: "", workflowDir: "" });
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string>();
+  useEffect(() => {
+    if (!editing || sessionId === undefined) return;
+    const controller = new AbortController();
+    setLoading(true);
+    setFormError(undefined);
+    void fetch(endpoint("comfyui-config", sessionId), { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
+        const body = await response.json() as { readonly config?: { readonly baseUrl?: string; readonly workflow?: string; readonly workflowDir?: string } };
+        if (controller.signal.aborted) return;
+        setForm({
+          baseUrl: typeof body.config?.baseUrl === "string" ? body.config.baseUrl : "",
+          workflow: typeof body.config?.workflow === "string" ? body.config.workflow : "",
+          workflowDir: typeof body.config?.workflowDir === "string" ? body.config.workflowDir : ""
+        });
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setFormError(error instanceof Error ? error.message : "读取工作区配置失败。");
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => { controller.abort(); };
+  }, [editing, sessionId]);
   if (comfyui === undefined || comfyui === null || typeof comfyui !== "object") return null;
   if (!comfyui.online) {
     const error = typeof comfyui.error === "string" && comfyui.error.trim() !== "" ? comfyui.error.trim() : undefined;
+    const canEdit = sessionId !== undefined && sessionId !== "";
     return <>
       <span title={error ?? "ComfyUI 未连接"}>ComfyUI 未连接{error === undefined ? "" : ` · ${error}`}</span>
       <span data-warn>检查 ComfyUI 是否启动、COMFYUI_BASE_URL 是否指向正确地址，详见插件 docs/comfyui.md。</span>
+      {canEdit && !editing && <button type="button" onClick={() => { setEditing(true); }}>编辑配置</button>}
+      {canEdit && editing && sessionId !== undefined && <ComfyuiConfigForm
+        sessionId={sessionId}
+        form={form}
+        setForm={setForm}
+        loading={loading}
+        saving={saving}
+        setSaving={setSaving}
+        formError={formError}
+        setFormError={setFormError}
+        setEditing={setEditing}
+        onConfigSaved={onConfigSaved}
+      />}
     </>;
   }
   const version = typeof comfyui.version === "string" && comfyui.version.trim() !== "" ? `（版本 ${comfyui.version.trim()}）` : "";
@@ -95,12 +200,26 @@ export function ComfyuiEnvironmentStatus({ comfyui, pythonOk }: { readonly comfy
   const workflowConfigured = comfyui.workflow?.configured === true;
   const sourceLabel = comfyuiWorkflowSourceLabel(comfyui.workflow?.source);
   const runnerMissing = comfyui.runnerReady === false || (comfyui.runnerReady === undefined && pythonOk === false);
+  const canEdit = sessionId !== undefined && sessionId !== "";
   return <>
     <span data-ready title={address === "" ? "ComfyUI 服务在线" : `ComfyUI 服务在线：${comfyui.baseUrl}`}>ComfyUI 已连接{version}{address}</span>
     {workflowConfigured
       ? <span data-ready title={sourceLabel === undefined ? "工作流已配置" : `工作流来源：${sourceLabel}`}>工作流已配置{sourceLabel === undefined ? "" : `（${sourceLabel}）`}</span>
       : <span data-warn title="需设置 COMFYUI_WORKFLOW 或 COMFYUI_WORKFLOW_DIR">未配置工作流——需设置 COMFYUI_WORKFLOW 或 COMFYUI_WORKFLOW_DIR</span>}
     {runnerMissing && <span data-warn title="需安装 Python 3.10 以上版本后重启 DSH">本机未检测到可用 Python（3.10+），ComfyUI 生成任务将无法执行——请安装后重启 DSH</span>}
+    {canEdit && !editing && <button type="button" onClick={() => { setEditing(true); }}>编辑配置</button>}
+    {canEdit && editing && sessionId !== undefined && <ComfyuiConfigForm
+      sessionId={sessionId}
+      form={form}
+      setForm={setForm}
+      loading={loading}
+      saving={saving}
+      setSaving={setSaving}
+      formError={formError}
+      setFormError={setFormError}
+      setEditing={setEditing}
+      onConfigSaved={onConfigSaved}
+    />}
   </>;
 }
 
@@ -133,7 +252,12 @@ function ProductionEnvironment({ sessionId }: { readonly sessionId: string }) {
     {typeof preflight === "object" && <>
       <span data-ready={preflight.python.ok || undefined}>Python {preflight.python.version ?? "未找到"}</span>
       {preflight.adapters.map((adapter) => <span key={adapter.name} data-ready={adapter.configured || undefined} title={adapter.configured ? `${adapter.name} 已配置` : `缺少环境变量 ${adapter.missing.join("、")}`}>{MODALITY_LABEL[adapter.modality]} {adapter.label}{adapter.configured ? "" : ` · 缺 ${adapter.missing.join("、")}`}</span>)}
-      <ComfyuiEnvironmentStatus comfyui={preflight.comfyui} pythonOk={preflight.python.ok} />
+      <ComfyuiEnvironmentStatus
+        comfyui={preflight.comfyui}
+        pythonOk={preflight.python.ok}
+        sessionId={sessionId}
+        onConfigSaved={() => { setPreflight(undefined); setAttempt((value) => value + 1); }}
+      />
       <em>DeepSeek 只负责写提示词；图片、视频、音乐由上面的供应商 API 生成，Key 在启动 DSH 前写入宿主机环境变量。
         {unconfigured.length === preflight.adapters.length && " 当前一个都没配置，生产任务会停在 adapter 之前。"}
         {" "}Adapter 配置{preflight.adapterConfig.generated ? "已自动登记" : "使用自定义文件"}{preflight.adapterConfig.ok ? "" : "（写入失败）"}：<code>{preflight.adapterConfig.path}</code>。详见 README「媒体生成 API」。</em>
@@ -276,9 +400,28 @@ function TaskBoard({ jobs, queue, sessionRunning, onCancel, onRemoveQueued }: {
     {jobs.length === 0 ? <div className="oh-story-production-empty">还没有生产任务。可从镜头或素材页提交单个或批量任务。</div> : [...jobs].reverse().map((job) => {
       const queued = queuedItemForJob(job.id, queue);
       const displayStatus = queued === undefined ? STATUS_LABELS[job.status] : "DSH Queue";
-      return <article key={job.id} data-job-id={job.id} data-status={job.status}><header><strong title={job.targetId}>{job.targetId}</strong><span>{JOB_KIND_LABEL[job.kind]}</span><span>{displayStatus}</span></header><div className="oh-story-task-progress"><i style={{ width: `${String(job.progress)}%` }} /></div><details><summary>查看投产提示词</summary><p>{job.prompt}</p></details>{job.expectedOutputs > 1 && <small>{job.completedOutputs}/{job.expectedOutputs} 项成果</small>}{job.error !== undefined && <div className="oh-story-error">{job.error}</div>}{job.output !== undefined && <MediaPreview version={job.output} />}<footer>{queued !== undefined && (job.status === "awaiting_confirmation" || job.status === "pending" || job.status === "running") && <button type="button" onClick={() => { void onRemoveQueued(job, queued.id); }}>从 DSH Queue 移除</button>}{activeJobId === job.id && <button type="button" onClick={() => { void onCancel(job); }}>停止当前 DSH Turn</button>}</footer></article>;
+      return <article key={job.id} data-job-id={job.id} data-status={job.status}><header><strong title={job.targetId}>{job.targetId}</strong><span>{JOB_KIND_LABEL[job.kind]}</span><span>{displayStatus}</span></header><div className="oh-story-task-progress"><i style={{ width: `${String(job.progress)}%` }} /></div><details><summary>查看投产提示词</summary><p>{job.prompt}</p></details><JobFilenameHint job={job} />{job.expectedOutputs > 1 && <small>{job.completedOutputs}/{job.expectedOutputs} 项成果</small>}{job.error !== undefined && <div className="oh-story-error">{job.error}</div>}{job.output !== undefined && <MediaPreview version={job.output} />}<footer>{queued !== undefined && (job.status === "awaiting_confirmation" || job.status === "pending" || job.status === "running") && <button type="button" onClick={() => { void onRemoveQueued(job, queued.id); }}>从 DSH Queue 移除</button>}{activeJobId === job.id && <button type="button" onClick={() => { void onCancel(job); }}>停止当前 DSH Turn</button>}</footer></article>;
     })}
   </section>;
+}
+
+/**
+ * 任务确认前的文件名关联提示:prepare 不强制输出文件名含 job ID,工作台靠
+ * mediaVersionMatchesJob 的 token 语义关联结果——待确认且已声明 outputs 时,
+ * 输出名缺 job ID token 就 warn,避免生成后永远 running/无结果。
+ */
+export function JobFilenameHint({ job }: { readonly job: ProductionJob }) {
+  if (job.status !== "awaiting_confirmation") return null;
+  const outputs = job.outputs;
+  if (outputs === undefined || outputs.length === 0) return null;
+  const escaped = job.id.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const tokenPattern = new RegExp(`(?:^|[-_.])${escaped}(?:[-_.]|$)`, "u");
+  const missing = outputs.filter((name) => {
+    const basename = name.split("/").at(-1) ?? "";
+    return !tokenPattern.test(basename);
+  });
+  if (missing.length === 0) return null;
+  return <span data-warn title="输出文件名需包含任务 ID,工作台才能自动关联结果">产出文件名未包含任务 ID（{job.id}），生成后工作台将无法自动关联结果——请在提示词或 job outputs 中修正</span>;
 }
 
 function SequenceBoard(props: Props & { readonly onCompose: () => void }) {

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { Context } from "@deepseek-ai/cordis";
 import type { JsonValue } from "@deepseek-ai/dsh-util-values";
 import { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-ai/dsh-tools";
+import { readWorkspaceComfyuiConfigFile, resolveComfyuiConfig } from "./comfyui-status.js";
 import { hostPython } from "./host-python.js";
 
 export const OH_STORY_COMFYUI_TOOL_NAME = "oh_story_comfyui";
@@ -53,6 +54,8 @@ export interface ComfyuiSpawnRequest {
   readonly cwd: string;
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
+  /** 仅当同名环境变量未显式设置时才注入工作区配置值(env 优先);凭据类一律不注入。 */
+  readonly env?: Readonly<Record<string, string>> | undefined;
 }
 
 export interface ComfyuiSpawnResult {
@@ -68,6 +71,10 @@ export interface ComfyuiToolDeps {
   readonly pythonCommand?: () => Promise<string>;
   readonly runnerPath?: string;
   readonly moduleUrl?: string;
+  /** 注入给定基根的工作区配置读取(默认读基根 `.comfyui/config.json`),测试可替换。 */
+  readonly readWorkspaceConfig?: (localDir: string) => Promise<{ readonly workflow?: string | undefined; readonly workflowDir?: string | undefined; readonly baseUrl?: string | undefined }>;
+  /** 默认用 process.env,测试可注入假环境。 */
+  readonly env?: NodeJS.ProcessEnv;
 }
 
 /** src/comfyui-tool.ts 与编译后 lib/comfyui-tool.js 都映射到 packages/dsh-plugin/python/。 */
@@ -301,7 +308,12 @@ function tailText(value: string, limit = 2000): string {
 
 function defaultSpawnRunner(request: ComfyuiSpawnRequest): Promise<ComfyuiSpawnResult> {
   return new Promise<ComfyuiSpawnResult>((resolvePromise, rejectPromise) => {
-    const child = spawn(request.command, [...request.argv], { cwd: request.cwd, stdio: ["pipe", "pipe", "pipe"] });
+    // overlay 只补缺:进程已有 env 永远优先,工作区配置不能覆盖部署级显式设置。
+    const child = spawn(request.command, [...request.argv], {
+      cwd: request.cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+      ...(request.env === undefined ? {} : { env: { ...process.env, ...request.env } })
+    });
     const chunks: string[] = [];
     const errors: string[] = [];
     let settled = false;
@@ -347,6 +359,28 @@ function defaultSpawnRunner(request: ComfyuiSpawnRequest): Promise<ComfyuiSpawnR
       fail(`向 ComfyUI runner 下发 payload 失败：${cause instanceof Error ? cause.message : String(cause)}`);
     }
   });
+}
+
+/**
+ * 工作区配置注入:工具解析出的生效值只在同名 env 未显式设置时才带给子进程(env 优先)。
+ * runner 只认环境变量,所以注入在 TS 侧完成;凭据类(COMFYUI_API_KEY 等)这里一律不碰。
+ */
+export function comfyuiWorkspaceEnvOverlay(
+  env: NodeJS.ProcessEnv,
+  file: { readonly baseUrl?: string | undefined; readonly workflow?: string | undefined; readonly workflowDir?: string | undefined }
+): Record<string, string> {
+  const resolved = resolveComfyuiConfig(env, file);
+  const overlay: Record<string, string> = {};
+  if ((env.COMFYUI_BASE_URL ?? "") === "" && resolved.baseUrlSource === "workspace-file") {
+    overlay.COMFYUI_BASE_URL = resolved.baseUrl;
+  }
+  if ((env.COMFYUI_WORKFLOW ?? "") === "" && resolved.workflow !== undefined) {
+    overlay.COMFYUI_WORKFLOW = resolved.workflow;
+  }
+  if ((env.COMFYUI_WORKFLOW_DIR ?? "") === "" && resolved.workflowDir !== undefined) {
+    overlay.COMFYUI_WORKFLOW_DIR = resolved.workflowDir;
+  }
+  return overlay;
 }
 
 export function createOhStoryComfyuiTool(deps: ComfyuiToolDeps = {}): ToolDefinition {
@@ -412,6 +446,11 @@ export function createOhStoryComfyuiTool(deps: ComfyuiToolDeps = {}): ToolDefini
         ? await deps.pythonCommand()
         : (await hostPython()).command;
       const runnerPath = deps.runnerPath ?? resolveComfyuiRunnerPath(deps.moduleUrl ?? import.meta.url);
+      const env = deps.env ?? process.env;
+      const readConfig = deps.readWorkspaceConfig ?? readWorkspaceComfyuiConfigFile;
+      // 工作区配置读失败只视为"无配置",不阻断工具:读盘是领域数据,不是执行错误。
+      const file = await readConfig(base.localDir).catch(() => ({}));
+      const overlay = comfyuiWorkspaceEnvOverlay(env, file);
       let spawned: ComfyuiSpawnResult;
       try {
         spawned = await spawner({
@@ -420,7 +459,8 @@ export function createOhStoryComfyuiTool(deps: ComfyuiToolDeps = {}): ToolDefini
           stdin: JSON.stringify(payload),
           cwd: base.localDir,
           timeoutMs: payload.timeout_seconds * 1000,
-          signal: exec.signal
+          signal: exec.signal,
+          ...(Object.keys(overlay).length === 0 ? {} : { env: overlay })
         });
       } catch (cause) {
         throw new Error(`ComfyUI runner 启动或执行失败：${cause instanceof Error ? cause.message : String(cause)}`, { cause });

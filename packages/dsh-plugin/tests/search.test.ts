@@ -6,6 +6,7 @@ import { pinyinInitials, pinyinize, PINYIN_MAP } from "../src/services/pinyin-ma
 import {
   buildFileIndex,
   ensureFreshIndex,
+  excludedHeavyPath,
   handleSearchRequest,
   lineHitOffset,
   matchLines,
@@ -173,7 +174,12 @@ function seedWorkspace(): { fs: MemoryFs; files: Map<string, MemoryFile> } {
     "ws/设定/人物.json": JSON.stringify({ name: "潘金莲" }),
     "ws/拆文库/拆书A.md": ["拆书记录", "金字塔结构"].join("\n"),
     "ws/.oh-story/index/meta.json": JSON.stringify({}),
-    "ws/video-recaps/某项目/正文.md": ["金藏视频目录"].join("\n"),
+    "ws/video-recaps/某项目/work/narration.json": JSON.stringify([{ text: "解说词正文" }]),
+    "ws/video-recaps/某项目/work/frames/frame-00001.json": JSON.stringify({ frame: 1 }),
+    "ws/video-recaps/某项目/sources/input.mp4": "binary-stub",
+    "ws/game-adaptations/demo/PRODUCT_BRIEF.md": ["# 游戏立项", "金莲主角"].join("\n"),
+    "ws/game-adaptations/demo/design/GAME_DESIGN.md": ["# 游戏设计", "核心循环玩法"].join("\n"),
+    "ws/game-adaptations/demo/build/app/index.html": "<html>构建产物</html>",
     "ws/game-adaptations/demo/设定.md": ["金藏游戏目录"].join("\n"),
   });
 }
@@ -185,12 +191,30 @@ describe("searchablePath", () => {
     expect(searchablePath("设定/人物.json")).toBe(true);
   });
 
-  it("skips hidden paths, oversized media dirs, and non-text types", () => {
+  it("skips hidden paths and non-text types, but keeps project text searchable", () => {
     expect(searchablePath(".oh-story/index/meta.json")).toBe(false);
-    expect(searchablePath("video-recaps/某项目/正文.md")).toBe(false);
-    expect(searchablePath("game-adaptations/demo/设定.md")).toBe(false);
+    // 游戏文本产物可检索, build 构建树仍排除.
+    expect(searchablePath("game-adaptations/demo/PRODUCT_BRIEF.md")).toBe(true);
+    expect(searchablePath("game-adaptations/demo/design/GAME_DESIGN.md")).toBe(true);
+    expect(searchablePath("game-adaptations/demo/build/app/index.html")).toBe(false);
+    // 视频 work/ 根文本可检索, 媒体与重型中间目录仍排除.
+    expect(searchablePath("video-recaps/某项目/work/narration.json")).toBe(true);
+    expect(searchablePath("video-recaps/某项目/work/timeline.json")).toBe(true);
+    expect(searchablePath("video-recaps/某项目/work/frames/frame-00001.json")).toBe(false);
+    expect(searchablePath("video-recaps/某项目/sources/input.mp4")).toBe(false);
+    expect(searchablePath("video-recaps/某项目/outputs/recap.mp4")).toBe(false);
     expect(searchablePath("正文/封面.png")).toBe(false);
     expect(searchablePath("随笔/杂记.md")).toBe(false);
+  });
+
+  it("shares one heavy-path predicate between filtering and traversal", () => {
+    expect(excludedHeavyPath("game-adaptations/demo/PRODUCT_BRIEF.md")).toBe(false);
+    expect(excludedHeavyPath("game-adaptations/demo/build/app/index.html")).toBe(true);
+    expect(excludedHeavyPath("video-recaps/某项目/work/narration.json")).toBe(false);
+    expect(excludedHeavyPath("video-recaps/某项目/work/timeline.json")).toBe(false);
+    expect(excludedHeavyPath("video-recaps/某项目/work/frames/frame-00001.json")).toBe(true);
+    expect(excludedHeavyPath("video-recaps/某项目/sources/input.mp4")).toBe(true);
+    expect(excludedHeavyPath("video-recaps/某项目/outputs/recap.mp4")).toBe(true);
   });
 });
 
@@ -262,11 +286,19 @@ describe("index lifecycle", () => {
     const { fs } = seedWorkspace();
     const realm = realmFor(fs);
     const count = await rebuildAll(realm);
-    // 4 个可索引文件(正文/大纲/设定/拆文库), 视频与游戏目录被跳过.
-    expect(count).toBe(4);
+    // 8 个可索引文本(正文/大纲/设定/拆文库 + 游戏 3 文本 + 视频解说词),
+    // build 构建树与 sources/frames 重产物目录被跳过.
+    expect(count).toBe(8);
     const single = await refreshSingleFile(realm, "大纲/主线.md");
     expect(single?.path).toBe("大纲/主线.md");
-    expect(await refreshSingleFile(realm, "video-recaps/某项目/正文.md")).toBeUndefined();
+    expect(await refreshSingleFile(realm, "game-adaptations/demo/PRODUCT_BRIEF.md")).toMatchObject({
+      path: "game-adaptations/demo/PRODUCT_BRIEF.md",
+    });
+    expect(await refreshSingleFile(realm, "video-recaps/某项目/work/narration.json")).toMatchObject({
+      path: "video-recaps/某项目/work/narration.json",
+    });
+    expect(await refreshSingleFile(realm, "game-adaptations/demo/build/app/index.html")).toBeUndefined();
+    expect(await refreshSingleFile(realm, "video-recaps/某项目/work/frames/frame-00001.json")).toBeUndefined();
   });
 
   it("searches across documents with the agreed ranking", async () => {
@@ -280,7 +312,18 @@ describe("index lifecycle", () => {
     expect(outcome.hits[0]?.line).toBe(1);
     expect(outcome.hits[1]).toMatchObject({ path: "正文/第001章.md", line: 3 });
     expect(outcome.hits.some((hit) => hit.path === "拆文库/拆书A.md")).toBe(true);
-    expect(outcome.hits.some((hit) => hit.path.startsWith("video-recaps"))).toBe(false);
+    expect(outcome.hits.some((hit) => hit.path.startsWith("video-recaps/某项目/sources"))).toBe(false);
+    expect(outcome.hits.some((hit) => hit.path.includes("/build/"))).toBe(false);
+  });
+
+  it("indexes game briefs and video narration text", async () => {
+    const { fs } = seedWorkspace();
+    const realm = realmFor(fs);
+    await rebuildAll(realm);
+    const brief = await searchWorkspace(realm, "立项", 200);
+    expect(brief.hits.some((hit) => hit.path === "game-adaptations/demo/PRODUCT_BRIEF.md")).toBe(true);
+    const narration = await searchWorkspace(realm, "解说词", 200);
+    expect(narration.hits.some((hit) => hit.path === "video-recaps/某项目/work/narration.json")).toBe(true);
   });
 
   it("picks up fresh content lazily after an external write", async () => {
@@ -331,7 +374,7 @@ describe("search routes", () => {
     expect(indexed.status).toBe(200);
     const rebuilt = await callRoute(fs, "POST", "/oh-story/search/rebuild?sessionId=s");
     expect(rebuilt.status).toBe(200);
-    expect((rebuilt.body as { files: number }).files).toBe(4);
+    expect((rebuilt.body as { files: number }).files).toBe(8);
     // 非白名单路径: creativeTarget 抛 403(直调时透出异常); 白名单内但缺失: 返回 404.
     await expect(callRoute(fs, "POST", "/oh-story/search/index?sessionId=s&path=%E4%B8%8D%E5%AD%98%E5%9C%A8.md")).rejects.toThrow();
     const gone = await callRoute(fs, "POST", "/oh-story/search/index?sessionId=s&path=%E6%AD%A3%E6%96%87%2F%E7%BC%BA%E5%A4%B1.md");

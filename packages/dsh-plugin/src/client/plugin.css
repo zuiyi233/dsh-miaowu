@@ -670,6 +670,20 @@
 .oh-story-role pre { max-height: 260px; overflow: auto; margin: 4px 0 4px 4px; padding: 12px 16px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 12px; color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-markdown-code-block); white-space: pre-wrap; font: var(--dsw-font-markdown-code-block-small); }
 .oh-story-role > button { align-self: flex-start; margin: 4px 0 2px 4px; font-size: 11px; }
 
+/* ComfyUI 生成结果卡片:图片网格 + 非图片文件链接,沿用工具卡片的 DSW 语义 token。 */
+.oh-story-comfyui { margin: 4px 0 4px 4px; }
+.oh-story-comfyui-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font-size: 13px; line-height: 20px; }
+.oh-story-comfyui-head span { color: var(--dsw-alias-state-business-primary); }
+.oh-story-comfyui-head strong { margin-right: auto; color: var(--dsw-alias-label-secondary); font-weight: 500; }
+.oh-story-comfyui-head em { color: var(--dsw-alias-label-caption); font-style: normal; font-size: 12px; }
+.oh-story-comfyui-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+.oh-story-comfyui-item { margin: 0; overflow: hidden; border: 1px solid var(--dsw-alias-border-l1); border-radius: 12px; background: var(--dsw-alias-markdown-code-block); }
+.oh-story-comfyui-item img { display: block; width: 100%; height: 160px; object-fit: cover; background: var(--dsw-alias-bg-base); }
+.oh-story-comfyui-item figcaption { overflow: hidden; padding: 4px 8px; color: var(--dsw-alias-label-caption); font-size: 11px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.oh-story-comfyui-file { display: flex; gap: 6px; margin: 0; padding: 6px 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 12px; font-size: 12px; }
+.oh-story-comfyui-file a { overflow: hidden; color: var(--dsw-alias-state-business-primary); text-overflow: ellipsis; white-space: nowrap; }
+.oh-story-comfyui-file span { flex: none; color: var(--dsw-alias-label-caption); }
+
 /* Short-drama production views are projections of the creator Markdown and
    DSH Session state. They intentionally use only DSH semantic tokens. */
 .oh-story-production { min-height: 0; flex: 1; overflow: auto; background: var(--dsw-alias-bg-base); font: 12px/1.5 var(--dsw-font-family); }
@@ -706,6 +720,10 @@
 .oh-story-production-environment em { flex-basis: 100%; font-style: normal; line-height: 1.5; }
 .oh-story-production-environment code { font-size: 10px; overflow-wrap: anywhere; }
 .oh-story-production-environment button { min-height: 24px; border: 1px solid var(--os-border); border-radius: 6px; padding: 0 8px; color: inherit; background: var(--dsw-alias-bg-base); cursor: pointer; font: inherit; }
+/* 工作区 ComfyUI 配置内联表单:复用环境条的按钮与媒体库输入风格,仅加纵向布局。 */
+.oh-story-comfyui-config-form { display: flex; flex-basis: 100%; flex-direction: column; gap: 4px; }
+.oh-story-comfyui-config-form label { display: flex; align-items: center; gap: 6px; }
+.oh-story-comfyui-config-form input { width: 180px; box-sizing: border-box; border: 1px solid var(--os-border); border-radius: 6px; padding: 5px 8px; color: inherit; background: var(--dsw-alias-bg-base); font: inherit; }
 .oh-story-production-diagnostics { margin: 8px 12px 0; padding: 7px 9px; border: 1px solid var(--dsw-alias-state-warn-label); border-radius: 7px; background: var(--dsw-specific-tip); }
 .oh-story-production-diagnostics summary { color: var(--dsw-alias-state-warn-label); cursor: pointer; }
 .oh-story-production-diagnostics ul { display: grid; gap: 4px; margin: 8px 0 0; padding: 0; list-style: none; }

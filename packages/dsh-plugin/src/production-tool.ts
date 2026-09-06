@@ -29,6 +29,7 @@ export function createOhStoryProductionTool(): ToolDefinition {
       jobId: { type: "string", description: "Stable ID that must also appear in produced output filenames." },
       jobKind: { type: "string", enum: PRODUCTION_INTENT_JOB_KINDS },
       expectedOutputs: { type: "integer", description: "Number of media files this job will produce. Repeat the count the creator approved when re-registering a batch; omit it to keep the count the workbench already recorded." },
+      outputs: { type: "array", items: { type: "string" }, description: "Confirmed job output filenames; lets the workbench warn before confirmation when a filename cannot be reconciled." },
       prompt: { type: "string", description: "Exact prompt/specification for a tracked job; not a production authorization." }
     },
     output: {

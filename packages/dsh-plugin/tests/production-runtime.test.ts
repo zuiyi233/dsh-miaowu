@@ -17,6 +17,20 @@ describe("production runtime", () => {
     const pending = createPendingJob({ id: "local-1", targetId: "SHOT-EP001-001", kind: "video", prompt: "动作" });
     expect(pending).toMatchObject({ id: "local-1", targetId: "SHOT-EP001-001", kind: "video", status: "pending", progress: 0, expectedOutputs: 1, completedOutputs: 0 });
     expect(pending).not.toHaveProperty("remoteTaskId");
+    expect(pending.outputs).toBeUndefined();
+  });
+
+  it("lets declared outputs drive the expected count", () => {
+    const declared = createPendingJob({
+      id: "job-out",
+      targetId: "SHOT-001",
+      kind: "image",
+      prompt: "p",
+      expectedOutputs: 5,
+      outputs: ["a-job-out.png", "b-job-out.png"]
+    });
+    expect(declared.outputs).toEqual(["a-job-out.png", "b-job-out.png"]);
+    expect(declared.expectedOutputs).toBe(2);
   });
 
   it("distinguishes an exact DSH queue item from the current running turn", () => {

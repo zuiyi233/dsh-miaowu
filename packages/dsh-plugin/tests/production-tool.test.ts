@@ -33,9 +33,38 @@ describe("native short-drama production intent tool", () => {
       jobId: "agent-job-003",
       jobKind: "video",
       expectedOutputs: 1,
+      outputs: ["剧集/EP001/制作成果/SHOT-EP001-003-agent-job-003.mp4"],
       prompt: "从冻结关键帧开始运动"
     }, {} as ToolRunContext);
     expect(result).toEqual(expect.objectContaining({ action: "track_job", episode: "剧集/EP001" }));
+  });
+
+  it("validates track_job outputs and keeps them optional", () => {
+    const base = {
+      action: "track_job" as const,
+      episode: "剧集/EP001",
+      targetId: "SHOT-EP001-003",
+      jobId: "agent-job-003",
+      jobKind: "video" as const
+    };
+    // 合法:去空白后透传。
+    expect(validateProductionIntent({ ...base, outputs: ["  a.mp4 ", "b.mp4"] }).outputs).toEqual(["a.mp4", "b.mp4"]);
+    // 向后兼容:不传不报错、不带字段。
+    expect(validateProductionIntent(base).outputs).toBeUndefined();
+    // 越界:空数组、超 16 项、全空白、非串一律拒绝。
+    expect(() => validateProductionIntent({ ...base, outputs: [] })).toThrow(/outputs/u);
+    expect(() => validateProductionIntent({ ...base, outputs: Array.from({ length: 17 }, (_, index) => `f${String(index)}.mp4`) })).toThrow(/outputs/u);
+    expect(() => validateProductionIntent({ ...base, outputs: ["   "] })).toThrow(/outputs/u);
+    expect(() => validateProductionIntent({ ...base, outputs: ["a.mp4", 42 as unknown as string] })).toThrow(/outputs/u);
+  });
+
+  it("exposes track_job outputs in the tool parameters", () => {
+    const tool = createOhStoryProductionTool();
+    // defineTool 把简写 parameters 规范化为 JSON Schema:字段在 properties 下。
+    const properties = (tool.parameters as { readonly properties?: Record<string, { readonly type?: string; readonly items?: { readonly type?: string }; readonly description?: string }> }).properties;
+    expect(properties?.["outputs"]?.type).toBe("array");
+    expect(properties?.["outputs"]?.items).toEqual({ type: "string" });
+    expect(properties?.["outputs"]?.description).toContain("reconciled");
   });
 
   it("replays only durable successful DSH tool calls in Chat order", () => {

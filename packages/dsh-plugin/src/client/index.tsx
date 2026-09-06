@@ -57,6 +57,7 @@ import {
   type WorkbenchPreference
 } from "./workbench-presence.js";
 import { endpoint, handleTabKey, isLayoutRecord, readFeatureEnabled } from "./workbench-ui.js";
+import { ComfyuiToolView, OH_STORY_COMFYUI_TOOL_NAME } from "./comfyui-toolview.js";
 import { EmptyStateOnboarding } from "./empty-state-onboarding.js";
 import styles from "./plugin.css?inline";
 import { registerClientFeatures } from "./features/index.js";
@@ -1052,6 +1053,9 @@ function CreativeWorkbench({
         }));
       } else if (intent.action === "track_job" && intent.jobId !== undefined && intent.targetId !== undefined && intent.jobKind !== undefined) {
         const { jobId, targetId, jobKind } = intent;
+        // 有 outputs 时数量以列表长度为准:旧任务重 track 补文件名也同步修正数量。
+        const declaredOutputs = intent.outputs !== undefined && intent.outputs.length > 0 ? [...intent.outputs] : undefined;
+        const declaredCount = declaredOutputs?.length;
         actions.setProductionJobs((current) => {
           const jobs = current[intent.episode] ?? [];
           if (jobs.some((job) => job.id === jobId)) {
@@ -1064,7 +1068,8 @@ function CreativeWorkbench({
                 status: "running",
                 progress: Math.max(10, job.progress),
                 prompt: intent.prompt ?? job.prompt,
-                expectedOutputs: intent.expectedOutputs ?? job.expectedOutputs,
+                ...(declaredOutputs === undefined ? {} : { outputs: declaredOutputs }),
+                expectedOutputs: declaredCount ?? intent.expectedOutputs ?? job.expectedOutputs,
                 error: undefined
               } : job)
             };
@@ -1077,7 +1082,8 @@ function CreativeWorkbench({
                 targetId,
                 kind: jobKind,
                 prompt: intent.prompt ?? "",
-                expectedOutputs: intent.expectedOutputs
+                expectedOutputs: intent.expectedOutputs,
+                ...(declaredOutputs === undefined ? {} : { outputs: declaredOutputs })
               }),
               status: "running",
               progress: 10
@@ -2127,6 +2133,11 @@ export function apply(context: ClientContext): void {
     name: "tool.call.toolview",
     key: OH_STORY_PRODUCTION_TOOL_NAME
   }, ProductionToolView));
+  context.slots.inject("tool.call.toolview", () => context.slots.register({
+    name: "tool.call.toolview",
+    key: OH_STORY_COMFYUI_TOOL_NAME,
+    inject: (sessionId) => ({ sessionId })
+  }, ComfyuiToolView));
 }
 
 export default { name, inject, apply };

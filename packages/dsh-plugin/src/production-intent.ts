@@ -23,6 +23,8 @@ export interface ProductionIntentArgs {
   readonly jobId?: string | undefined;
   readonly jobKind?: ProductionIntentJobKind | undefined;
   readonly expectedOutputs?: number | undefined;
+  /** Agent track 时声明的确认产出文件名;工作台按 token 语义做确认前关联提示。 */
+  readonly outputs?: readonly string[] | undefined;
   readonly prompt?: string | undefined;
 }
 
@@ -61,6 +63,12 @@ export function validateProductionIntent(args: ProductionIntentArgs): Production
     throw new Error("oh_story_production expectedOutputs must be an integer between 1 and 500.");
   }
   if (args.jobKind === undefined) throw new Error("oh_story_production jobKind is required for track_job.");
+  // outputs 运行时来自 JSON,先逐项断言 string 再 trim:非串直接报校验错,不抛 TypeError。
+  const rawOutputs = args.outputs as readonly unknown[] | undefined;
+  const outputs = rawOutputs?.map((value) => typeof value === "string" ? value.trim() : "").filter((value) => value !== "");
+  if (rawOutputs !== undefined && (outputs === undefined || outputs.length === 0 || outputs.length > 16 || outputs.length !== rawOutputs.length)) {
+    throw new Error("oh_story_production outputs must be 1-16 non-empty filename strings.");
+  }
   const prompt = args.prompt?.trim();
   return {
     action: args.action,
@@ -69,6 +77,7 @@ export function validateProductionIntent(args: ProductionIntentArgs): Production
     targetId: requiredText(args.targetId, "targetId"),
     jobKind: args.jobKind,
     expectedOutputs,
+    ...(outputs === undefined ? {} : { outputs }),
     prompt: prompt === "" ? undefined : prompt
   };
 }

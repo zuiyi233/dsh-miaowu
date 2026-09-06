@@ -45,7 +45,8 @@ export interface SearchOutcome {
 const INDEX_DIR = ".oh-story/index";
 const META_NAME = "meta.json";
 const INDEXABLE_EXTENSIONS = new Set([".md", ".txt", ".json", ".jsonl"]);
-// 创作白名单目录 + 拆文库(workspace 根拆书目录, 不在创作白名单但也要检索).
+// 创作白名单目录 + 拆文库(workspace 根拆书目录, 不在创作白名单但也要检索)
+// + 两类工程目录(文本产物可检索, 重产物子目录另由 excludedProjectPath 减去).
 const SEARCH_ROOTS = [
   "正文",
   "大纲",
@@ -61,10 +62,16 @@ const SEARCH_ROOTS = [
   "创作者决策",
   "审查",
   "拆文库",
+  "game-adaptations",
+  "video-recaps",
 ] as const;
-const GAME_BUILD_PREFIX = "game-adaptations/";
+const GAME_DIRECTORY = "game-adaptations";
 const VIDEO_DIRECTORY = "video-recaps";
-const GAME_BUILD_MARKER = "/build/app";
+/** 游戏重型顶层目录: build/** 为 web 可玩构建产物(文件多且为生成物), 整树不索引. */
+const GAME_HEAVY_TOP_DIRS = new Set(["build"]);
+/** 视频重型目录: sources/ 与 outputs/ 为媒体整树排除; work/ 下重型中间目录与 video-project.ts SKIPPED_DIRECTORIES 同口径. */
+const VIDEO_HEAVY_TOP_DIRS = new Set(["sources", "outputs"]);
+const VIDEO_WORK_HEAVY_DIRS = new Set(["frames", "asr_chunks", "chunks", "cache", "tmp", ".subtitle_measure"]);
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 1000;
@@ -77,12 +84,38 @@ function indexableExtension(path: string): boolean {
   return INDEXABLE_EXTENSIONS.has(path.slice(dot).toLowerCase());
 }
 
-/** 是否纳入检索范围: 跳过点开头路径、video-recaps 与 game-adaptations 大目录. */
+/**
+ * 重产物排除(单一谓词, searchablePath 与目录遍历共享口径, 避免两处漂移).
+ * 当初整目录排除的动机是 build 构建产物与视频媒体/中间目录量大且多为二进制,
+ * 会拖慢索引并污染结果; 但整目录一刀切把两类工程的文本产物(设计文档、解说词)
+ * 也屏蔽了. 现收窄为重产物子目录, 文本产物保留可检索:
+ * - game-adaptations/<项目>/build/** 整树排除(web 构建生成物);
+ *   PRODUCT_BRIEF.md / analysis/ / concepts/ / design/ / qa/ 等文本保留.
+ *   (examples/jin-ping-mei 大例子在 skills 知识目录不在 workspace 内, 无需处理;
+ *   qa/verification.json 为小文本, 靠 2MB 上限兜底, 保留可检索.)
+ * - video-recaps/<项目>/sources/** 与 outputs/** 整树排除(源片与成片媒体);
+ *   work/ 下仅排除重型中间目录(与 video-project.ts SKIPPED_DIRECTORIES 同口径),
+ *   work/ 根的 narration.json / timeline.json 等解说与计划文本保留.
+ */
+export function excludedHeavyPath(path: string): boolean {
+  const parts = path.split("/");
+  if (parts[0] === GAME_DIRECTORY) {
+    return parts.length >= 3 && GAME_HEAVY_TOP_DIRS.has(parts[2] ?? "");
+  }
+  if (parts[0] === VIDEO_DIRECTORY) {
+    if (parts.length >= 3 && VIDEO_HEAVY_TOP_DIRS.has(parts[2] ?? "")) return true;
+    if (parts[2] === "work" && parts.slice(3).some((part) => VIDEO_WORK_HEAVY_DIRS.has(part))) {
+      return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+/** 是否纳入检索范围: 跳过点开头路径与重产物子树, 其余走创作白名单 + 文本扩展名. */
 export function searchablePath(path: string): boolean {
   if (path === "" || path.split("/").some((segment) => segment.startsWith("."))) return false;
-  if (path === VIDEO_DIRECTORY || path.startsWith(`${VIDEO_DIRECTORY}/`)) return false;
-  if (path === "game-adaptations" || path.startsWith(GAME_BUILD_PREFIX)) return false;
-  if (path.includes(GAME_BUILD_MARKER)) return false;
+  if (excludedHeavyPath(path)) return false;
   const root = path.split("/", 1)[0] ?? "";
   if (!(SEARCH_ROOTS as readonly string[]).includes(root)) return false;
   return indexableExtension(path);
@@ -284,8 +317,8 @@ async function collectWorkspaceFiles(realm: WorkspaceRealm): Promise<string[]> {
       if (!realm.fs.contains(realm.root, entry.target) && !realm.fs.contains(dir, entry.target)) continue;
       const childPath = `${prefix}/${entry.name}`;
       if (entry.type === "directory") {
-        if (childPath === VIDEO_DIRECTORY || childPath.startsWith(`${VIDEO_DIRECTORY}/`)) continue;
-        if (childPath === "game-adaptations" || childPath.startsWith(GAME_BUILD_PREFIX)) continue;
+        // 重产物子树整枝剪掉(与 searchablePath 同一谓词, 口径不漂移).
+        if (excludedHeavyPath(childPath)) continue;
         if (searchablePath(childPath)) continue;
         const root = childPath.split("/", 1)[0] ?? "";
         if (!(SEARCH_ROOTS as readonly string[]).includes(root)) continue;

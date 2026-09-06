@@ -5,6 +5,7 @@ import {
   COMFYUI_DEFAULT_COUNT,
   COMFYUI_DEFAULT_FILENAME_PREFIX,
   COMFYUI_DEFAULT_TIMEOUT_SECONDS,
+  comfyuiWorkspaceEnvOverlay,
   createOhStoryComfyuiTool,
   extractComfyuiRunnerError,
   OH_STORY_COMFYUI_TOOL_NAME,
@@ -157,6 +158,64 @@ describe("oh_story_comfyui 工作区基根", () => {
     await expect(base.resolveInside("../evil", "output_dir")).rejects.toThrow(/逃逸/u);
     await expect(base.resolveInside("/abs/path", "output_dir")).rejects.toThrow();
     await expect(base.resolveInside("cover/ep01", "output_dir")).resolves.toBe("cover/ep01");
+  });
+});
+
+describe("oh_story_comfyui 工作区配置注入", () => {
+  it("只在 env 未设置时注入文件值(env 优先)", () => {
+    expect(comfyuiWorkspaceEnvOverlay(
+      {},
+      { baseUrl: "http://file:8188", workflow: "file.json", workflowDir: "/file" }
+    )).toEqual({ COMFYUI_BASE_URL: "http://file:8188", COMFYUI_WORKFLOW: "file.json", COMFYUI_WORKFLOW_DIR: "/file" });
+    expect(comfyuiWorkspaceEnvOverlay(
+      { COMFYUI_WORKFLOW: "env.json" },
+      { workflow: "file.json", workflowDir: "/file" }
+    )).toEqual({ COMFYUI_WORKFLOW_DIR: "/file" });
+    expect(comfyuiWorkspaceEnvOverlay(
+      { COMFYUI_BASE_URL: "http://env:8188", COMFYUI_WORKFLOW: "e.json", COMFYUI_WORKFLOW_DIR: "/e" },
+      { baseUrl: "http://file:8188", workflow: "file.json", workflowDir: "/file" }
+    )).toEqual({});
+    expect(comfyuiWorkspaceEnvOverlay({}, {})).toEqual({});
+  });
+
+  it("spawn 请求里携带 env 覆盖,无配置时不带 env 键", async () => {
+    const seen: Array<{ env?: Readonly<Record<string, string>> | undefined }> = [];
+    const tool = createOhStoryComfyuiTool({
+      pythonCommand: () => Promise.resolve("python3"),
+      runnerPath: "/pkg/python/comfyui_runner.py",
+      env: {},
+      readWorkspaceConfig: () => Promise.resolve({ workflow: "file.json" }),
+      spawner: (request) => {
+        seen.push({ env: request.env });
+        return Promise.resolve(successResult(JSON.stringify({
+          files: [{ path: "cover/a.png", bytes: 10 }],
+          prompt_ids: [],
+          duration_ms: 100
+        })));
+      }
+    });
+    await tool.execute({ prompt: "a cat", output_dir: "cover" }, execWithoutAgent());
+    expect(seen[0]?.env).toEqual({ COMFYUI_WORKFLOW: "file.json" });
+  });
+
+  it("env 已设时 spawn 不带覆盖", async () => {
+    const seen: Array<{ env?: Readonly<Record<string, string>> | undefined }> = [];
+    const tool = createOhStoryComfyuiTool({
+      pythonCommand: () => Promise.resolve("python3"),
+      runnerPath: "/pkg/python/comfyui_runner.py",
+      env: { COMFYUI_WORKFLOW: "env.json" },
+      readWorkspaceConfig: () => Promise.resolve({ workflow: "file.json" }),
+      spawner: (request) => {
+        seen.push({ env: request.env });
+        return Promise.resolve(successResult(JSON.stringify({
+          files: [{ path: "cover/a.png", bytes: 10 }],
+          prompt_ids: [],
+          duration_ms: 100
+        })));
+      }
+    });
+    await tool.execute({ prompt: "a cat", output_dir: "cover" }, execWithoutAgent());
+    expect(seen[0]?.env).toBeUndefined();
   });
 });
 

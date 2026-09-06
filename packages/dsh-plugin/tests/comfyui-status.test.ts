@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   COMFYUI_DEFAULT_BASE_URL,
   comfyuiBaseUrl,
+  comfyuiConfigResponse,
   comfyuiWorkflowStatus,
+  parseWorkspaceComfyuiConfig,
   probeComfyui,
+  resolveComfyuiConfig,
+  validateWorkspaceComfyuiConfigBody,
   type ComfyuiFetch
 } from "../src/comfyui-status.js";
 
@@ -113,5 +117,91 @@ describe("comfyuiWorkflowStatus", () => {
       .toEqual({ configured: true, source: "env-dir" });
     expect(comfyuiWorkflowStatus({ COMFYUI_WORKFLOW: "/data/w.json", COMFYUI_WORKFLOW_DIR: "/data" }))
       .toEqual({ configured: true, source: "env-file" });
+  });
+
+  it("resolves the workspace file when no env workflow is set", () => {
+    expect(comfyuiWorkflowStatus({}, { workflow: "portrait" }))
+      .toEqual({ configured: true, source: "workspace-file" });
+    expect(comfyuiWorkflowStatus({}, { workflowDir: "/data" }))
+      .toEqual({ configured: true, source: "workspace-file" });
+    expect(comfyuiWorkflowStatus({ COMFYUI_WORKFLOW: "env.json" }, { workflow: "file.json" }))
+      .toEqual({ configured: true, source: "env-file" });
+  });
+});
+
+describe("resolveComfyuiConfig", () => {
+  it("merges env > workspace-file > default per key", () => {
+    expect(resolveComfyuiConfig({}, {})).toMatchObject({
+      baseUrl: COMFYUI_DEFAULT_BASE_URL,
+      baseUrlSource: "default",
+      workflow: undefined,
+      workflowSource: null,
+      workflowDir: undefined,
+      workflowDirSource: null
+    });
+    expect(resolveComfyuiConfig({}, { baseUrl: "http://file:8188", workflow: "file.json", workflowDir: "/file" }))
+      .toMatchObject({
+        baseUrl: "http://file:8188",
+        baseUrlSource: "workspace-file",
+        workflow: "file.json",
+        workflowSource: "workspace-file",
+        workflowDir: "/file",
+        workflowDirSource: "workspace-file"
+      });
+    // 各键独立:env 只覆盖自己对应的键。
+    expect(resolveComfyuiConfig(
+      { COMFYUI_BASE_URL: "http://env:8188" },
+      { baseUrl: "http://file:8188", workflow: "file.json" }
+    )).toMatchObject({
+      baseUrl: "http://env:8188",
+      baseUrlSource: "env",
+      workflow: "file.json",
+      workflowSource: "workspace-file"
+    });
+    expect(resolveComfyuiConfig(
+      { COMFYUI_WORKFLOW: "env.json", COMFYUI_WORKFLOW_DIR: "/env" },
+      { workflow: "file.json", workflowDir: "/file" }
+    )).toMatchObject({ workflow: "env.json", workflowSource: "env", workflowDir: "/env", workflowDirSource: "env" });
+  });
+});
+
+describe("parseWorkspaceComfyuiConfig", () => {
+  it("ignores unknown keys and invalid values instead of throwing", () => {
+    expect(parseWorkspaceComfyuiConfig({ baseUrl: "::::bad", workflow: 42, extra: "x" })).toEqual({});
+    expect(parseWorkspaceComfyuiConfig([1, 2])).toEqual({});
+    expect(parseWorkspaceComfyuiConfig("nope")).toEqual({});
+    expect(parseWorkspaceComfyuiConfig({ baseUrl: "https://h:8188///", workflow: " w.json ", workflowDir: "" }))
+      .toEqual({ baseUrl: "https://h:8188", workflow: "w.json" });
+  });
+});
+
+describe("validateWorkspaceComfyuiConfigBody", () => {
+  it("accepts a full body and normalizes trailing slashes", () => {
+    expect(validateWorkspaceComfyuiConfigBody({
+      baseUrl: "http://192.168.1.10:8188///",
+      workflow: "portrait",
+      workflowDir: "/data"
+    })).toEqual({ baseUrl: "http://192.168.1.10:8188", workflow: "portrait", workflowDir: "/data" });
+  });
+
+  it("treats empty strings as clearing the key", () => {
+    expect(validateWorkspaceComfyuiConfigBody({ baseUrl: "  ", workflow: "", workflowDir: "" })).toEqual({});
+  });
+
+  it("rejects illegal URLs, unknown keys and non-strings", () => {
+    expect(() => validateWorkspaceComfyuiConfigBody({ baseUrl: "not-a-url" })).toThrow(/http/);
+    expect(() => validateWorkspaceComfyuiConfigBody({ baseUrl: "ftp://h/x" })).toThrow(/http/);
+    expect(() => validateWorkspaceComfyuiConfigBody({ nope: "x" })).toThrow(/未知/);
+    expect(() => validateWorkspaceComfyuiConfigBody({ workflow: 42 })).toThrow(/字符串/);
+    expect(() => validateWorkspaceComfyuiConfigBody([])).toThrow(/对象/);
+  });
+});
+
+describe("comfyuiConfigResponse", () => {
+  it("reports the effective values with per-key sources", () => {
+    expect(comfyuiConfigResponse({ COMFYUI_WORKFLOW: "env.json" }, { baseUrl: "http://file:8188" })).toEqual({
+      config: { baseUrl: "http://file:8188", workflow: "env.json" },
+      source: { baseUrl: "workspace-file", workflow: "env", workflowDir: null }
+    });
   });
 });

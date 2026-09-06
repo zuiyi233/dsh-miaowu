@@ -11,7 +11,7 @@ import type { SandboxPolicyService } from "@deepseek-ai/dsh-sandbox-policy";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import type {} from "@deepseek-ai/dsh-typert-registry";
 import { type GameVerificationBinding, WorkspaceVerificationTracker } from "./game-verification.js";
-import { comfyuiWorkflowStatus, probeComfyui, type ComfyuiPreflightSummary } from "./comfyui-status.js";
+import { comfyuiWorkflowStatus, probeComfyui, parseWorkspaceComfyuiConfig, comfyuiConfigResponse, validateWorkspaceComfyuiConfigBody, writeWorkspaceComfyuiConfigFile, COMFYUI_CONFIG_RELATIVE_PATH, type ComfyuiPreflightSummary, type WorkspaceComfyuiConfig } from "./comfyui-status.js";
 import { dramaAdapterStatuses, ensureDramaAdapterConfig, type DramaAdapterStatus } from "./drama-adapters.js";
 import { commandOutput, hostPython } from "./host-python.js";
 import { defaultDramaSkillRoot, defaultNovelToGameSkillRoot } from "./skill-provider.js";
@@ -128,33 +128,106 @@ interface DramaPreflightSummary {
   readonly comfyui: ComfyuiPreflightSummary & { readonly runnerReady: boolean };
 }
 
+/**
+ * 工作区级 ComfyUI 配置读写:工作区根 `.comfyui/config.json`(插件领域数据,非宿主状态)。
+ * 读:realm.fs.resolve + contains 守界 + readBytes 上限,不存在/超限/坏 JSON 一律回 {}。
+ * 写:严格校验(非法 URL/未知键 400)后,经 processPath 落本地做 tmp+rename 原子发布。
+ * 短剧 drama 链路的 runner 由上游 production_tool spawn,走不到这里——该链路只能用环境变量。
+ */
+async function readRealmComfyuiConfig(realm: WorkspaceRealm, maxBytes: number): Promise<WorkspaceComfyuiConfig> {
+  const target = await realm.fs.resolve(COMFYUI_CONFIG_RELATIVE_PATH, { cwd: realm.cwd });
+  if (!realm.fs.contains(realm.root, target)) return {};
+  const info = await realm.fs.stat(target).catch(() => undefined);
+  if (info?.type !== "file") return {};
+  let bytes: Uint8Array;
+  try {
+    bytes = await realm.fs.readBytes(target, undefined, maxBytes);
+  } catch {
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
+  } catch {
+    return {};
+  }
+  return parseWorkspaceComfyuiConfig(parsed);
+}
+
+/**
+ * 工作区配置原子写:dsh-fs 的 writeText 本身是原子发布(atomic create-or-replace),
+ * 无 mkdir 语义——但 `.comfyui/config.json` 的父目录恒为工作区内固定名,resolve 后
+ * writeText 会连同缺失父目录一起创建(与现有 PUT /oh-story/file 同语义)。
+ * 先 stat:父目录缺失时直接走本地 processPath + mkdir + tmp/rename,与 node 侧写盘保持一致。
+ */
+async function writeRealmComfyuiConfig(
+  realm: WorkspaceRealm,
+  config: WorkspaceComfyuiConfig,
+  maxBytes: number
+): Promise<WorkspaceComfyuiConfig> {
+  const directory = await realm.fs.resolve(".comfyui", { cwd: realm.cwd });
+  if (!realm.fs.contains(realm.root, directory)) throw new WorkspaceHttpError(403, "文件路径离开了 DSH 工作目录。");
+  // dsh-fs 无 mkdir:父目录缺失时回退本地 processPath 建目录(与 drama-adapters 私有目录同模式)。
+  const dirInfo = await realm.fs.stat(directory).catch(() => undefined);
+  if (dirInfo === undefined) {
+    const localRoot = realm.fs.processPath(realm.root);
+    return writeWorkspaceComfyuiConfigFile(localRoot, config);
+  }
+  if (dirInfo.type !== "directory") throw new WorkspaceHttpError(409, ".comfyui 不是目录，无法写入配置。");
+  const target = await realm.fs.resolve(COMFYUI_CONFIG_RELATIVE_PATH, { cwd: realm.cwd });
+  if (!realm.fs.contains(realm.root, target)) throw new WorkspaceHttpError(403, "文件路径离开了 DSH 工作目录。");
+  const body = `${JSON.stringify(config)}\n`;
+  if (Buffer.byteLength(body, "utf8") > maxBytes) throw new WorkspaceHttpError(413, "文件超过工作台大小限制。");
+  await realm.fs.writeText(
+    target,
+    body,
+    undefined,
+    undefined,
+    realm.sandboxPolicy.resolve({ session: realm.agent.session })
+  );
+  return config;
+}
+
 let dramaPreflightInFlight: Promise<DramaPreflightSummary> | undefined;
 
-async function dramaPreflight(): Promise<DramaPreflightSummary> {
-  if (dramaPreflightCache !== undefined && dramaPreflightCache.expires > Date.now()) return dramaPreflightCache.value;
-  // One probe per cache miss: concurrent requests share the write instead of
-  // racing it, and the write itself is atomic (temp file + rename).
-  dramaPreflightInFlight ??= (async () => {
-    try {
-      const python = await hostPython();
-      const adapterConfig = await ensureDramaAdapterConfig(defaultDramaSkillRoot(), { python: python.command });
-      // 探测失败只写 online:false,不影响路由其余部分:这是探测语义本身,不算吞错。
-      const probe = await probeComfyui(process.env).catch((error: unknown) => ({
-        online: false as const,
-        baseUrl: "unknown",
-        error: `探测异常:${error instanceof Error ? error.message : String(error)}`
-      }));
-      const value = {
-        python: python.probe,
-        adapterConfig,
-        adapters: dramaAdapterStatuses(),
-        comfyui: { ...probe, workflow: comfyuiWorkflowStatus(process.env), runnerReady: python.probe.ok }
-      };
-      dramaPreflightCache = { expires: Date.now() + 30_000, value };
-      return value;
-    } finally { dramaPreflightInFlight = undefined; }
-  })();
-  return dramaPreflightInFlight;
+/**
+ * 短剧预检:无工作区文件时走 30s host-wide 缓存(env-only);带工作区文件时按
+ * env > workspace-file > default 合并后实时探测,不进共享缓存(多工作区内容
+ * 不同,共用缓存会串味)。响应形状不变。
+ */
+export async function dramaPreflight(file: WorkspaceComfyuiConfig = {}): Promise<DramaPreflightSummary> {
+  const hasWorkspaceFile = file.baseUrl !== undefined || file.workflow !== undefined || file.workflowDir !== undefined;
+  if (!hasWorkspaceFile) {
+    if (dramaPreflightCache !== undefined && dramaPreflightCache.expires > Date.now()) return dramaPreflightCache.value;
+    // One probe per cache miss: concurrent requests share the write instead of
+    // racing it, and the write itself is atomic (temp file + rename).
+    dramaPreflightInFlight ??= (async () => {
+      try {
+        const value = await buildDramaPreflight();
+        dramaPreflightCache = { expires: Date.now() + 30_000, value };
+        return value;
+      } finally { dramaPreflightInFlight = undefined; }
+    })();
+    return dramaPreflightInFlight;
+  }
+  return buildDramaPreflight(file);
+}
+
+async function buildDramaPreflight(file: WorkspaceComfyuiConfig = {}): Promise<DramaPreflightSummary> {
+  const python = await hostPython();
+  const adapterConfig = await ensureDramaAdapterConfig(defaultDramaSkillRoot(), { python: python.command });
+  // 探测失败只写 online:false,不影响路由其余部分:这是探测语义本身,不算吞错。
+  const probe = await probeComfyui(process.env, undefined, file).catch((error: unknown) => ({
+    online: false as const,
+    baseUrl: "unknown",
+    error: `探测异常:${error instanceof Error ? error.message : String(error)}`
+  }));
+  return {
+    python: python.probe,
+    adapterConfig,
+    adapters: dramaAdapterStatuses(),
+    comfyui: { ...probe, workflow: comfyuiWorkflowStatus(process.env, file), runnerReady: python.probe.ok }
+  };
 }
 
 async function videoPreflight(): Promise<VideoPreflightSummary> {
@@ -847,7 +920,51 @@ async function handle(context: Context, request: IncomingMessage, response: Serv
       return;
     }
     if (url.pathname === "/oh-story/drama-preflight" && request.method === "GET") {
-      send(response, 200, await dramaPreflight());
+      // 可选 sessionId:能解析出工作区 realm 时读该工作区根 `.comfyui/config.json`,
+      // comfyui 块走 env > workspace-file > default 合并链;无 sessionId、
+      // 会话不可用或读文件失败时回退 env-only(向后兼容,响应形状不变)。
+      const rawSessionId = url.searchParams.get("sessionId");
+      let file: WorkspaceComfyuiConfig = {};
+      if (rawSessionId !== null && rawSessionId !== "") {
+        try {
+          const realm = await workspaceRealmForSession(context, rawSessionId);
+          file = await readRealmComfyuiConfig(realm, options.maxBytes);
+        } catch {
+          file = {};
+        }
+      }
+      send(response, 200, await dramaPreflight(file));
+      return;
+    }
+    // 工作区级 ComfyUI 配置:GET 返回生效值 + 每键来源(凭据类永不进入响应);
+    // POST 严格校验后原子写工作区根 `.comfyui/config.json`,成功返回 GET 同构响应。
+    if (url.pathname === "/oh-story/comfyui-config" && request.method === "GET") {
+      const realm = await workspaceRealm(context, url);
+      const file = await readRealmComfyuiConfig(realm, options.maxBytes);
+      send(response, 200, comfyuiConfigResponse(process.env, file));
+      return;
+    }
+    if (url.pathname === "/oh-story/comfyui-config" && request.method === "POST") {
+      const realm = await workspaceRealm(context, url);
+      const body = await jsonBody(request, options.maxBytes);
+      let validated: WorkspaceComfyuiConfig;
+      try {
+        validated = validateWorkspaceComfyuiConfigBody(body);
+      } catch (error) {
+        throw new WorkspaceHttpError(400, error instanceof Error ? error.message : "ComfyUI 配置非法。");
+      }
+      const saved = await writeRealmComfyuiConfig(realm, validated, options.maxBytes);
+      const savedBody = `${JSON.stringify(saved)}\n`;
+      send(response, 200, comfyuiConfigResponse(process.env, saved));
+      // `.comfyui/config.json` 不在 listFiles 白名单内,写事件只做审计通知:version 固定标记,
+      // 不参与编辑器 readVersionedFile 的版本链(该文件走专属 GET/POST,不走 /oh-story/file)。
+      notifyWorkspaceWrite({
+        realm,
+        path: COMFYUI_CONFIG_RELATIVE_PATH,
+        content: savedBody,
+        bytes: Buffer.byteLength(savedBody),
+        version: "comfyui-config"
+      });
       return;
     }
     if (url.pathname === "/oh-story/file" && request.method === "GET") {

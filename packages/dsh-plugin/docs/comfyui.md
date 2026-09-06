@@ -56,10 +56,29 @@ dsh-miaowu 通过本地 ComfyUI 生成图片（及后续的视频 / 音频），
 | `COMFYUI_API_KEY` | 否 | — | 可选。配置后以 `Authorization: Bearer <key>` 访问需要鉴权的 ComfyUI 服务 |
 | `COMFYUI_TIMEOUT_SECONDS` | 否 | `600` | 仅短剧 drama 模式生效：适配器超时秒数，上限 `3600` |
 
-解析优先级只有两级：调用参数显式传入的工作流 > `COMFYUI_WORKFLOW` 指定的文件；
-`COMFYUI_WORKFLOW_DIR` 只在按名选用时生效（作为 bare-name 工作流名的查找目录）。
-没有配 `COMFYUI_WORKFLOW` 且调用也没传工作流时，直接报 `workflow_not_configured`，
+解析优先级只有三级：调用参数显式传入的工作流 > `COMFYUI_WORKFLOW` 指定的文件（环境变量）>
+工作区配置文件（工作区根 `.comfyui/config.json` 的 `workflow` 键）；
+`COMFYUI_WORKFLOW_DIR`（环境变量）或配置文件的 `workflowDir` 只在按名选用时生效（作为 bare-name 工作流名的查找目录）。
+没有配 `COMFYUI_WORKFLOW` 且调用也没传工作流、配置文件也没有 `workflow` 时，直接报 `workflow_not_configured`，
 Agent 应如实告诉创作者“没有配置 ComfyUI 工作流”，而不是悄悄切换到别的生图方式。
+
+## 3.1 工作区配置文件（只对 `oh_story_comfyui` 工具与工作台状态生效）
+
+除环境变量外，ComfyUI 的三个非凭据项也可以写进**工作区根**的 `.comfyui/config.json`（三键均可选）：
+
+```json
+{ "baseUrl": "http://192.168.1.10:8188", "workflow": "portrait", "workflowDir": "/data/workflows" }
+```
+
+- 优先级：**环境变量 > 工作区配置文件 > 内置默认**（各键独立：`COMFYUI_BASE_URL` 已设时只覆盖地址，`workflow` 仍可取文件值）。
+- 生效范围：`oh_story_comfyui` 工具（TS 侧在 spawn runner 前把解析出的配置值注入子进程环境变量，
+  仅当同名 env 未显式设置时才注入）与工作台 `drama-preflight` 状态（`workflow.source` 新增 `"workspace-file"`）。
+- 读写入口：工作台生产视图生成环境条的「编辑配置」按钮（`GET`/`POST /oh-story/comfyui-config`），
+  也可以手工建文件；写盘为临时文件 + rename 原子发布。
+- **短剧适配器的 ComfyUI 配置只能用环境变量；工作区配置文件只对 `oh_story_comfyui` 工具与工作台状态生效。**
+  短剧链路的 runner 由上游 `production_tool` spawn，工作台侧无法把工作区配置注入进去——
+  走 `comfyui` / `comfyui-video` / `comfyui-music` 适配器的生产任务仍需在启动 DSH 前 export 第 3 节的环境变量。
+- 凭据（`COMFYUI_API_KEY` 等）永远只读环境变量，不进配置文件、不进任何响应。
 
 ## 4. 两个入口的用法
 

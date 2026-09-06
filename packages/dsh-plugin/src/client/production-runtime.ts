@@ -19,6 +19,11 @@ export interface ProductionJob {
   readonly prompt: string;
   readonly error?: string | undefined;
   readonly output?: ProductionMediaVersion | undefined;
+  /**
+   * prepare 声明的产出文件名(工作区相对路径或裸文件名):待确认态的关联提示用它
+   * 按 mediaVersionMatchesJob 的 token 语义检查 job ID;成功关联后由 versions 承载,不再依赖它。
+   */
+  readonly outputs?: readonly string[] | undefined;
   readonly expectedOutputs: number;
   readonly completedOutputs: number;
 }
@@ -44,7 +49,13 @@ export function createPendingJob(input: {
   readonly kind: ProductionJobKind;
   readonly prompt: string;
   readonly expectedOutputs?: number | undefined;
+  readonly outputs?: readonly string[] | undefined;
 }): ProductionJob {
+  // 有 outputs 时数量以列表长度为准(expectedOutputs 的 Agent 传值/旧值都不再覆盖它)。
+  const declared = input.outputs?.filter((name) => name.trim() !== "");
+  const expectedOutputs = declared !== undefined && declared.length > 0
+    ? declared.length
+    : Math.max(1, Math.floor(input.expectedOutputs ?? 1));
   return {
     id: input.id,
     targetId: input.targetId,
@@ -52,7 +63,8 @@ export function createPendingJob(input: {
     status: "pending",
     progress: 0,
     prompt: input.prompt,
-    expectedOutputs: Math.max(1, Math.floor(input.expectedOutputs ?? 1)),
+    ...(declared === undefined || declared.length === 0 ? {} : { outputs: declared }),
+    expectedOutputs,
     completedOutputs: 0
   };
 }

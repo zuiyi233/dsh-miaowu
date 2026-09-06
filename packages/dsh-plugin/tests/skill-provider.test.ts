@@ -133,6 +133,7 @@ describe("Drama Skills bundled provider", () => {
     expect(production?.content).toContain("剧集/<EP>/制作成果/");
     expect(production?.content).toContain("parameters.workflow");
     expect(production?.content).toContain("job ID");
+    expect(production?.content).toContain("track_job outputs");
   });
 });
 
