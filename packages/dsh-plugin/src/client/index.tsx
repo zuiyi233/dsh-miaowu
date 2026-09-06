@@ -116,6 +116,8 @@ interface GameProject {
   readonly previewUrl?: string | undefined;
   readonly previewVersion: string;
   readonly qa?: GameQaSummary | undefined;
+  /** ART-* 三方对账诊断(登记/art//build);服务端随 games 列表下发,旧宿主无此字段。 */
+  readonly gameArtDiagnostics?: readonly { readonly level: "error" | "warning"; readonly code: string; readonly message: string }[] | undefined;
 }
 interface FilePayload {
   readonly path: string;
@@ -552,7 +554,13 @@ function GameDesign({
   </div>;
   if ((documents.length === 0 && artworks.length === 0 && audios.length === 0) || path === undefined) return <div className="oh-game-design-empty">当前项目还没有可检查的设计或源文件。</div>;
   const markdown = path.toLocaleLowerCase().endsWith(".md");
+  const diagnostics = project.gameArtDiagnostics ?? [];
   return <div className="oh-game-design">
+    {diagnostics.length > 0 && <details className="oh-game-art-diagnostics" data-level={diagnostics.some((item) => item.level === "error") ? "error" : "warning"}>
+      <summary>美术接入诊断（三方对账）: {diagnostics.length} 项</summary>
+      <ul>{diagnostics.map((item, index) => <li data-level={item.level} key={`${item.code}:${String(index)}`}>{item.level === "error" ? "⛔" : "⚠"} {item.message}</li>)}</ul>
+    </details>}
+    <p className="oh-game-cost-note" role="note">美术 / 音频均由 ComfyUI 本地生成 · 免费（需本地已部署 ComfyUI）</p>
     <label>项目文件<select value={path} onChange={(event) => {
       setPath(event.target.value);
       onSelect(event.target.value);
@@ -577,6 +585,43 @@ function FloatMirror({ title, hint }: { readonly title: string; readonly hint: s
     <strong>{title}</strong>
     <p>{hint}</p>
   </div>;
+}
+
+/**
+ * 构建导出:把可玩 build/app 冻结为项目内交付快照(POST /oh-story/game-export)。
+ * 仅 workspace 项目的 previewReady 态可用;错误显式展示,不吞。
+ */
+function GameExportButton({ sessionId, project }: {
+  readonly sessionId: string;
+  readonly project: GameProject;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState<{ readonly ok: true; readonly exportPath: string; readonly fileCount: number } | { readonly ok: false; readonly message: string } | undefined>();
+  if (project.source !== "workspace" || !project.previewReady) return null;
+  const projectName = project.root.slice("game-adaptations/".length);
+  const run = (): void => {
+    if (busy) return;
+    setBusy(true);
+    setOutcome(undefined);
+    void fetch(endpoint("game-export", sessionId), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: projectName })
+    }).then(async (response) => {
+      const payload = await response.json().catch(() => undefined) as { readonly exportPath?: string; readonly fileCount?: number; readonly error?: string } | undefined;
+      if (!response.ok || payload === undefined) {
+        throw new Error(payload?.error ?? `HTTP ${String(response.status)}`);
+      }
+      setOutcome({ ok: true, exportPath: payload.exportPath ?? "", fileCount: payload.fileCount ?? 0 });
+    }).catch((reason: unknown) => {
+      setOutcome({ ok: false, message: reason instanceof Error ? reason.message : String(reason) });
+    }).finally(() => { setBusy(false); });
+  };
+  return <span className="oh-game-export">
+    <button type="button" disabled={busy} onClick={run}>{busy ? "导出中…" : "导出交付快照"}</button>
+    {outcome?.ok === true && <span role="status">已导出到 {outcome.exportPath}（{String(outcome.fileCount)} 个文件）</span>}
+    {outcome?.ok === false && <span className="oh-story-error" role="alert">导出失败:{outcome.message}</span>}
+  </span>;
 }
 
 function GameStudio({  sessionId,
@@ -669,6 +714,7 @@ function GameStudio({  sessionId,
           onClick={() => { onGameTab(tab); }}
         >{tab === "preview" ? "试玩" : tab === "qa" ? "质检" : project.source === "example" ? "说明" : "项目文件"}</button>)}
       </div>
+      <GameExportButton sessionId={sessionId} project={project} />
     </header>
     <div className="oh-game-panels">
       <div className="oh-game-panel" role="tabpanel" id={`${tabsId}-preview-panel`} aria-labelledby={`${tabsId}-preview-tab`} hidden={gameTab !== "preview"}>
@@ -833,14 +879,26 @@ function CreativeWorkbench({
     () => episodeDirectory === undefined ? undefined : parseEpisodeProduction(episodeDocuments, episodeDirectory, episodeVoiceoverFiles),
     [episodeDirectory, episodeDocuments, episodeVoiceoverFiles]
   );
+  // 审查文档按 EP 精确命名(审查/<EP>-审查.md);存在但未打开时 content 为 undefined,
+  // 徽标如实提示"未加载"而不猜结论。
+  const episodeName = episodeDirectory === undefined ? undefined : episodeDirectory.split("/").at(-1);
+  const reviewDocument = useMemo(() => {
+    if (episodeName === undefined) return undefined;
+    const path = (workspace?.files ?? []).find((file) => file.kind === "text" && file.path === `审查/${episodeName}-审查.md`)?.path;
+    if (path === undefined) return undefined;
+    return { path, content: buffers[path]?.missing === true ? undefined : buffers[path]?.content };
+  }, [buffers, episodeName, workspace?.files]);
   const productionLibrary = useMemo(() => (workspace?.files ?? []).flatMap((file): ProductionMediaVersion[] => {
-    if (file.kind !== "media" || file.mimeType?.startsWith("audio/") === true) return [];
+    if (file.kind !== "media") return [];
+    // 音频(配音/配乐产物)进生产库:music 产量行与播放器都靠它;游戏 audio 在
+    // game-adaptations/ 下,被 剧集/交付 前缀过滤自然排除。
     if (!file.path.startsWith("剧集/") && !file.path.startsWith("交付/")) return [];
     const targetId = file.path.toLocaleUpperCase().match(/(?:SHOT|IMG|MOTION|VISUAL)-[A-Z0-9-]+/u)?.[0] ?? file.path.split("/").at(-2) ?? "PROJECT-MEDIA";
     return [{
       id: `workspace:${file.path}:${file.version}`,
       targetId,
-      kind: file.mimeType?.startsWith("image/") === true ? "image" : "video",
+      kind: file.mimeType?.startsWith("image/") === true ? "image"
+        : file.mimeType?.startsWith("audio/") === true ? "audio" : "video",
       url: endpoint("media", sessionId, file.path),
       path: file.path
     }];
@@ -1763,6 +1821,7 @@ function CreativeWorkbench({
           ? <DramaProductionView
               sessionId={sessionId}
               production={episodeProduction}
+              reviewDocument={reviewDocument}
               sessionRunning={sessionRunning}
               queue={productionQueue}
               section={productionSection}

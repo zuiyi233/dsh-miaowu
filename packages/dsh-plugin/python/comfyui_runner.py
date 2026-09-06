@@ -265,6 +265,16 @@ def _media_ok(suffix: str, content: bytes) -> bool:
         return len(content) >= 8 and content[4:8] == b"ftyp"
     if suffix == ".wav":
         return len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"WAVE"
+    if suffix == ".mp3":
+        # ID3v2 标签头，或 MPEG 音频帧同步字（首字节 0xFF + 次字节高 3 位全 1）。
+        return content.startswith(b"ID3") or (
+            len(content) >= 2 and content[0] == 0xFF and content[1] & 0xE0 == 0xE0)
+    if suffix == ".flac":
+        return content.startswith(b"fLaC")
+    if suffix == ".m4a":
+        # ftyp box 且 major brand 含 M4A（如 "M4A "）。
+        return (len(content) >= 12 and content[4:8] == b"ftyp"
+                and b"M4A" in content[8:12])
     return False
 
 
@@ -319,11 +329,11 @@ def _poll_history(base: str, prompt_id: str, timeout_seconds: int) -> dict[str, 
 
 
 def _collect_media(outputs: dict[str, Any]) -> list[dict[str, str]]:
-    """Collect images/gifs across all nodes; type output wins, else keep all."""
+    """Collect images/gifs/audio/videos across all nodes; type output wins, else keep all."""
     found = [{"filename": item["filename"], "subfolder": str(item.get("subfolder", "")),
               "type": str(item.get("type", "output"))}
              for node_output in outputs.values() if isinstance(node_output, dict)
-             for key in ("images", "gifs") if isinstance(node_output.get(key), list)
+             for key in ("images", "gifs", "audio", "videos") if isinstance(node_output.get(key), list)
              for item in node_output[key]
              if isinstance(item, dict) and isinstance(item.get("filename"), str)]
     preferred = [item for item in found if item["type"] == "output"]
@@ -731,13 +741,33 @@ class SelfTests(unittest.TestCase):
                  ".jpeg": b"\xff\xd8\xff\xe1" + b"\x00" * 8,
                  ".webp": b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 4,
                  ".mp4": b"\x00\x00\x00\x18ftypisom" + b"\x00" * 4,
-                 ".wav": b"RIFF\x00\x00\x00\x00WAVE" + b"\x00" * 4}
+                 ".wav": b"RIFF\x00\x00\x00\x00WAVE" + b"\x00" * 4,
+                 ".mp3": b"ID3\x04\x00" + b"\x00" * 8,
+                 ".flac": b"fLaC" + b"\x00" * 8,
+                 ".m4a": b"\x00\x00\x00\x20ftypM4A " + b"\x00" * 4}
         for suffix, content in valid.items():
             self.assertTrue(_media_ok(suffix, content), suffix)
+        # 无 ID3 标签的裸 MPEG 流同样是合法 mp3（帧同步字）。
+        self.assertTrue(_media_ok(".mp3", b"\xff\xfb\x90\x00" + b"\x00" * 8))
         for suffix, content in [(".png", b"not a png file...."), (".mp4", b"\x00" * 16),
-                                (".mp3", b"ID3" + b"\x00" * 8), ("", PNG_BYTES),
+                                (".mp3", b"not an mp3 file.."), (".flac", b"not flac....."),
+                                (".m4a", b"\x00\x00\x00\x20ftypisom" + b"\x00" * 4),
+                                ("", PNG_BYTES),
                                 (".png", b"")]:
             self.assertFalse(_media_ok(suffix, content), suffix)
+
+    def test_collect_media_audio_video_keys(self) -> None:
+        # SaveAudio→audio、SaveVideo/VHS→videos：键缺失时曾报 empty_output。
+        outputs = {
+            "9": {"audio": [{"filename": "a.flac", "subfolder": "",
+                             "type": "output"}]},
+            "10": {"videos": [{"filename": "b.mp4", "subfolder": "",
+                               "type": "output"}]},
+            "11": {"images": [{"filename": "c.png", "subfolder": "",
+                               "type": "temp"}]},
+        }
+        found = _collect_media(outputs)
+        self.assertEqual([item["filename"] for item in found], ["a.flac", "b.mp4"])
 
     def test_error_envelope(self) -> None:
         failure = ComfyFailure("node blew up", code="node_error", http_status=400,

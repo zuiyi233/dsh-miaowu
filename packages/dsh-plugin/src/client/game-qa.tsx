@@ -14,6 +14,14 @@ export interface GameQaSummary {
   readonly verdict?: string | undefined;
   readonly binding?: GameVerificationBinding | undefined;
   readonly checks?: readonly GameQaCheckSummary[] | undefined;
+  /** 运行证据文件三态检查(由服务端 stat 得出);example 项目无此字段不校验。 */
+  readonly runEvidence?: GameQaRunEvidence | undefined;
+}
+
+export interface GameQaRunEvidence {
+  readonly path: string;
+  readonly exists: boolean;
+  readonly kind: "file" | "directory" | "missing";
 }
 
 const CHECK_LABELS: Readonly<Record<GameQaCheckSummary["id"], string>> = {
@@ -75,6 +83,9 @@ export function GameQa({ qa, projectTitle }: {
       <span className="oh-story-game-qa-verdict" data-state={badge.state}>{badge.text}</span>
       {binding !== undefined && <span className="oh-story-game-qa-binding" data-state={qa.binding}>{binding}</span>}
     </div>
+    {qa.runEvidence?.exists === false && <p className="oh-story-game-qa-evidence-missing" data-kind={qa.runEvidence.kind}>
+      运行证据缺失：<code>{qa.runEvidence.path}</code> 不存在，QA 结论缺少可核查的运行记录。
+    </p>}
     <ol className="oh-story-game-qa-checks">
       {qa.checks.map((check) => {
         const open = expanded.has(check.id);

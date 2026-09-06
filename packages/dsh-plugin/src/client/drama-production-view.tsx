@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { productionCompleteness, type DramaDocumentTarget, type DramaEpisodeProduction, type DramaProductionSection } from "./drama-production.js";
+import { parseDramaReviewDocument, type DramaReviewVerdict } from "./drama-review.js";
 import { endpoint } from "./workbench-ui.js";
 import { nativeBatchPrompt, nativeCompositionPrompt, nativeProductionPrompt } from "./production-prompts.js";
 import { activeProductionJobId, createPendingJob, queuedItemForJob, reconcileProductionJobs, reconcileSequence, referencesForTarget, reorderSequence, sequenceIssues, selectedVersionForTarget, summarizeEpisodeOutput, type CanvasPoint, type EpisodeOutputKind, type ProductionJob, type ProductionMediaVersion, type ProductionQueueEntry, type ProductionSequenceItem } from "./production-runtime.js";
@@ -8,6 +9,8 @@ import { DramaPlayback } from "./drama-playback.js";
 interface Props {
   readonly sessionId: string;
   readonly production: DramaEpisodeProduction;
+  /** 当前 EP 的审查文档(审查/<EP>-审查.md);存在但未加载时 content 为 undefined。 */
+  readonly reviewDocument?: { readonly path: string; readonly content: string | undefined } | undefined;
   readonly sessionRunning: boolean;
   readonly queue: readonly ProductionQueueEntry[];
   readonly section: DramaProductionSection;
@@ -40,7 +43,29 @@ const SECTION_LABELS: Readonly<Record<DramaProductionSection, string>> = { shots
 const SECTION_ORDER = Object.keys(SECTION_LABELS) as DramaProductionSection[];
 const STATUS_LABELS: Readonly<Record<ProductionJob["status"], string>> = { awaiting_confirmation: "等待确认", pending: "已提交", running: "DSH 执行中", dispatched_unknown: "待核对", succeeded: "已完成", failed: "失败", canceled: "已取消" };
 const ASSET_KIND_LABEL = { character: "人物", scene: "场景", prop: "道具", state: "状态", unknown: "设定" } as const;
-const JOB_KIND_LABEL = { image: "图片", video: "视频", composition: "成片" } as const;
+const JOB_KIND_LABEL = { image: "图片", video: "视频", composition: "成片", music: "音乐" } as const;
+
+/** 审查结论徽标:审查文档存在但内容未加载时不猜结论,如实提示打开后解析。 */
+function ReviewVerdictBadge({ document: review }: { readonly document: { readonly path: string; readonly content: string | undefined } }) {
+  const verdict: DramaReviewVerdict = review.content === undefined
+    ? { conclusion: "unknown", blockers: [] }
+    : parseDramaReviewDocument(review.content);
+  if (review.content === undefined) {
+    return <span className="oh-story-review-badge" data-conclusion="unloaded" title={review.path}>审查:文档未加载</span>;
+  }
+  if (verdict.conclusion === "pass" && verdict.blockers.length === 0) {
+    return <span className="oh-story-review-badge" data-conclusion="pass">审查:通过</span>;
+  }
+  if (verdict.conclusion === "blocked" || verdict.blockers.length > 0) {
+    return <details className="oh-story-review-badge" data-conclusion="blocked">
+      <summary>审查:有阻塞({String(verdict.blockers.length)} 条)</summary>
+      <ul>{verdict.blockers.map((blocker) => <li key={blocker.id}>
+        <strong>{blocker.id}</strong>{blocker.target !== undefined && <span>（{blocker.target}）</span>}{blocker.title !== undefined && <span> {blocker.title}</span>}
+      </li>)}</ul>
+    </details>;
+  }
+  return <span className="oh-story-review-badge" data-conclusion="unknown">审查:结论未解析</span>;
+}
 
 /** Mirror of the host `/oh-story/drama-preflight` summary: presence only, never values. */
 export interface DramaPreflight {
@@ -231,7 +256,8 @@ export function ComfyuiEnvironmentStatus({ comfyui, pythonOk, sessionId, onConfi
   </>;
 }
 
-const OUTPUT_COST_LABEL: Readonly<Record<EpisodeOutputKind, string>> = { image: "本地 ComfyUI 免费", video: "云按次计费", music: "云按次计费" };
+// music 走两类适配器:comfyui-music=本地免费,minimax-music=云按次,静态标签如实写两种可能。
+const OUTPUT_COST_LABEL: Readonly<Record<EpisodeOutputKind, string>> = { image: "本地 ComfyUI 免费", video: "云按次计费", music: "本地 ComfyUI 免费 / 云按次" };
 
 /** 本 EP 产出汇总行:从 runtime 状态聚合,不发新请求;成本模型按 image=本地免费 / video+music=云计费标注。 */
 export function EpisodeOutputLedger({ jobs, versions }: {
@@ -368,6 +394,7 @@ export function DramaProductionView(props: Props) {
   return <div className="oh-story-production">
     <div className="oh-story-production-bar"><div className="oh-story-production-tabs" role="tablist" aria-label="短剧生产视图">{SECTION_ORDER.map((item) => <button type="button" role="tab" tabIndex={props.section === item ? 0 : -1} aria-selected={props.section === item} key={item} onKeyDown={(event) => { handleSectionKey(event, item, props.onSectionChange); }} onClick={() => { props.onSectionChange(item); }}>{SECTION_LABELS[item]}</button>)}</div><div className="oh-story-production-meta"><span className="oh-story-production-summary">{props.production.shots.length} 镜 · {props.production.assets.length + props.production.visualAssets.length} 素材 · {props.jobs.filter((job) => job.status === "awaiting_confirmation" || job.status === "running" || job.status === "pending").length} 任务</span><button type="button" onClick={props.onRefresh}>刷新</button></div></div>
     <ProductionEnvironment sessionId={props.sessionId} jobs={props.jobs} versions={props.versions} />
+    {props.reviewDocument !== undefined && <ReviewVerdictBadge document={props.reviewDocument} />}
     {notice !== undefined && <div className="oh-story-production-notice" role="status"><span>{notice}</span><button type="button" aria-label="关闭提示" onClick={() => { setNotice(undefined); }}>×</button></div>}
     {props.production.diagnostics.length > 0 && <details className="oh-story-production-diagnostics"><summary>{protocolErrors > 0 ? `${String(protocolErrors)} 个协议错误` : `${String(props.production.diagnostics.length)} 个格式提醒`}</summary><ul>{props.production.diagnostics.slice(0, 8).map((item) => <li data-severity={item.severity} key={`${item.path}:${String(item.offset)}:${item.code}`}><button type="button" onClick={() => { props.onNavigate({ path: item.path, offset: item.offset, id: item.targetId ?? item.code }); }}>{item.path.split("/").at(-1)}:{item.line}</button><span>{item.message}</span></li>)}</ul>{props.production.diagnostics.length > 8 && <p>另有 {props.production.diagnostics.length - 8} 项，请按文档位置修复。</p>}</details>}
     {props.section === "shots" && <ShotBoard {...props} onCreateJob={createJob} onBatch={createBatch} />}
@@ -394,7 +421,7 @@ function ShotBoard(props: Props & { readonly onCreateJob: (targetId: string, kin
 
 function AssetBoard(props: Props & { readonly onCreateJob: (targetId: string, kind: "image" | "video", prompt: string) => Promise<void> }) {
   const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<"all" | "image" | "video">("all");
+  const [kind, setKind] = useState<"all" | "image" | "video" | "audio">("all");
   const assets = [...props.production.assets, ...props.production.visualAssets.filter((visual) => !props.production.assets.some((asset) => asset.title === visual.title))];
   const needle = query.trim().toLocaleLowerCase();
   const library = props.libraryVersions.filter((version) => (kind === "all" || version.kind === kind) && (needle === "" || `${version.targetId} ${version.path ?? ""}`.toLocaleLowerCase().includes(needle)));
@@ -408,7 +435,7 @@ function AssetBoard(props: Props & { readonly onCreateJob: (targetId: string, ki
     props.onManualReferencesChange({ ...mutable, [referenceTarget]: next });
   };
   if (assets.length === 0 && props.libraryVersions.length === 0) return <section className="oh-story-assets"><MissingDocument document={`${props.production.episodeDirectory}/图片提示词.md`} documentPaths={props.production.documentPaths} what="素材" skill="/short-drama-image-prompts" onNavigate={props.onNavigate} /></section>;
-  return <section className="oh-story-assets"><div className="oh-story-asset-grid">{assets.map((asset) => { const prompt = "prompt" in asset ? asset.prompt : asset.description; const versions = props.versions.filter((version) => version.targetId === asset.id); const selected = selectedVersionForTarget(asset.id, props.versions, props.selections, "image"); return <article className="oh-story-asset-card" ref={props.selectedId === asset.id ? selectedRef : undefined} data-selected={props.selectedId === asset.id || undefined} key={asset.id}>{selected === undefined ? <div className="oh-story-asset-placeholder">{asset.kind === "character" ? "人" : asset.kind === "scene" ? "景" : asset.kind === "prop" ? "物" : "设"}</div> : <MediaPreview version={selected} />}<div><small>{ASSET_KIND_LABEL[asset.kind]}</small><h3>{asset.title}</h3><button type="button" onClick={() => { props.onNavigate({ path: asset.path, offset: asset.offset, id: asset.id }); }}>{asset.id}</button></div>{prompt !== undefined && <p className="oh-story-asset-description">{prompt}</p>}<div className="oh-story-card-actions">{prompt !== undefined && <button type="button" onClick={() => { void props.onCreateJob(asset.id, "image", prompt); }}>准备素材</button>}</div>{versions.length > 0 && <VersionStrip targetId={asset.id} versions={versions} selections={props.selections} onSelectionsChange={props.onSelectionsChange} />}</article>; })}</div><div className="oh-story-media-library"><header><div><strong>项目媒体库</strong><span>{library.length}/{props.libraryVersions.length} 项 · 可跨集复用</span></div><div><input aria-label="搜索项目媒体" value={query} placeholder="搜索 ID 或路径" onChange={(event) => { setQuery(event.target.value); }} /><select aria-label="筛选媒体类型" value={kind} onChange={(event) => { setKind(event.target.value as typeof kind); }}><option value="all">全部</option><option value="image">图片</option><option value="video">视频</option></select></div></header>{referenceTarget === undefined && <p className="oh-story-projection-note">先在镜头页选中一个镜头，再回到这里把已有图片设为该镜头的额外参考。</p>}<div className="oh-story-media-library-grid">{library.map((version) => { const selected = referenceTarget !== undefined && (props.manualReferences[referenceTarget] ?? []).includes(version.id); return <article key={version.id}><MediaPreview version={version} /><strong>{version.targetId}</strong><span title={version.path}>{version.path}</span><footer>{version.path !== undefined && <button type="button" onClick={() => { props.onOpenMedia(version.path!); }}>打开文件</button>}{referenceTarget !== undefined && version.kind === "image" && <button type="button" aria-pressed={selected} aria-label={`${selected ? "取消" : "设为"} ${referenceTarget} 参考 ${version.targetId}`} onClick={() => { toggleReference(version.id); }}>{selected ? "已引用" : "作为参考"}</button>}</footer></article>; })}</div></div></section>;
+  return <section className="oh-story-assets"><div className="oh-story-asset-grid">{assets.map((asset) => { const prompt = "prompt" in asset ? asset.prompt : asset.description; const versions = props.versions.filter((version) => version.targetId === asset.id); const selected = selectedVersionForTarget(asset.id, props.versions, props.selections, "image"); return <article className="oh-story-asset-card" ref={props.selectedId === asset.id ? selectedRef : undefined} data-selected={props.selectedId === asset.id || undefined} key={asset.id}>{selected === undefined ? <div className="oh-story-asset-placeholder">{asset.kind === "character" ? "人" : asset.kind === "scene" ? "景" : asset.kind === "prop" ? "物" : "设"}</div> : <MediaPreview version={selected} />}<div><small>{ASSET_KIND_LABEL[asset.kind]}</small><h3>{asset.title}</h3><button type="button" onClick={() => { props.onNavigate({ path: asset.path, offset: asset.offset, id: asset.id }); }}>{asset.id}</button></div>{prompt !== undefined && <p className="oh-story-asset-description">{prompt}</p>}<div className="oh-story-card-actions">{prompt !== undefined && <button type="button" onClick={() => { void props.onCreateJob(asset.id, "image", prompt); }}>准备素材</button>}</div>{versions.length > 0 && <VersionStrip targetId={asset.id} versions={versions} selections={props.selections} onSelectionsChange={props.onSelectionsChange} />}</article>; })}</div><div className="oh-story-media-library"><header><div><strong>项目媒体库</strong><span>{library.length}/{props.libraryVersions.length} 项 · 可跨集复用</span></div><div><input aria-label="搜索项目媒体" value={query} placeholder="搜索 ID 或路径" onChange={(event) => { setQuery(event.target.value); }} /><select aria-label="筛选媒体类型" value={kind} onChange={(event) => { setKind(event.target.value as typeof kind); }}><option value="all">全部</option><option value="image">图片</option><option value="video">视频</option><option value="audio">音频</option></select></div></header>{referenceTarget === undefined && <p className="oh-story-projection-note">先在镜头页选中一个镜头，再回到这里把已有图片设为该镜头的额外参考。</p>}<div className="oh-story-media-library-grid">{library.map((version) => { const selected = referenceTarget !== undefined && (props.manualReferences[referenceTarget] ?? []).includes(version.id); return <article key={version.id}><MediaPreview version={version} /><strong>{version.targetId}</strong><span title={version.path}>{version.path}</span><footer>{version.path !== undefined && <button type="button" onClick={() => { props.onOpenMedia(version.path!); }}>打开文件</button>}{referenceTarget !== undefined && version.kind === "image" && <button type="button" aria-pressed={selected} aria-label={`${selected ? "取消" : "设为"} ${referenceTarget} 参考 ${version.targetId}`} onClick={() => { toggleReference(version.id); }}>{selected ? "已引用" : "作为参考"}</button>}</footer></article>; })}</div></div></section>;
 }
 
 function TaskBoard({ jobs, queue, sessionRunning, onCancel, onRemoveQueued }: {
@@ -492,5 +519,9 @@ function MissingDocument({ document, documentPaths, what, skill, onNavigate }: {
 }
 
 function ReferenceButton({ id, production, onNavigate }: { readonly id: string; readonly production: DramaEpisodeProduction; readonly onNavigate: (target: DramaDocumentTarget) => void }) { const target = production.targets.get(id); return <button type="button" disabled={target === undefined} onClick={(event) => { event.stopPropagation(); if (target !== undefined) onNavigate(target); }}>{id}</button>; }
-function MediaPreview({ version, interactive = true }: { readonly version: ProductionMediaVersion; readonly interactive?: boolean }) { return version.kind === "image" ? <img className="oh-story-media-preview" src={version.url} alt={version.targetId} loading="lazy" /> : <video className="oh-story-media-preview" src={version.url} controls={interactive} muted={!interactive} preload="metadata" />; }
+function MediaPreview({ version, interactive = true }: { readonly version: ProductionMediaVersion; readonly interactive?: boolean }) {
+  if (version.kind === "image") return <img className="oh-story-media-preview" src={version.url} alt={version.targetId} loading="lazy" />;
+  if (version.kind === "audio") return <audio className="oh-story-media-preview" src={version.url} controls={interactive} preload="metadata" />;
+  return <video className="oh-story-media-preview" src={version.url} controls={interactive} muted={!interactive} preload="metadata" />;
+}
 function VersionStrip({ targetId, versions, selections, onSelectionsChange }: { readonly targetId: string; readonly versions: readonly ProductionMediaVersion[]; readonly selections: Readonly<Record<string, string>>; readonly onSelectionsChange: (value: Record<string, string>) => void }) { const selected = selectedVersionForTarget(targetId, versions, selections)?.id; return <div className="oh-story-version-strip" aria-label={`${targetId} 成果版本`}>{versions.map((version, index) => <button type="button" aria-pressed={version.id === selected} aria-label={`选择 ${targetId} 版本 ${String(index + 1)}`} data-selected={version.id === selected || undefined} key={version.id} onClick={(event) => { event.stopPropagation(); onSelectionsChange({ ...selections, [targetId]: version.id }); }}><MediaPreview version={version} interactive={false} /><span>V{String(index + 1)}</span></button>)}</div>; }

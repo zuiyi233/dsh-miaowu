@@ -52,11 +52,11 @@ export interface DramaShotAudio {
 
 /**
  * Dub audio directory segment under an EP: `剧集/<EP>/配音/`. Audios baked
- * via oh_story_comfyui land as `<SHOT-ID>.wav` (filename must carry the shot
- * ID), and the playback view resolves them back to shots.
+ * via oh_story_comfyui land as `<SHOT-ID>.wav` (or .mp3/.m4a/.flac; filename
+ * must carry the shot ID), and the playback view resolves them back to shots.
  */
 export const DRAMA_VOICEOVER_DIRECTORY = "配音";
-const DRAMA_VOICEOVER_AUDIO_EXTENSIONS = new Set([".wav", ".mp3", ".m4a"]);
+const DRAMA_VOICEOVER_AUDIO_EXTENSIONS = new Set([".wav", ".mp3", ".m4a", ".flac"]);
 
 export interface DramaAsset {
   readonly id: string;

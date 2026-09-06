@@ -48,6 +48,7 @@ const DSH_DRAMA_BRIDGE = [
   "Never upgrade a v0.5 structured project in place or mix both contracts in one project root. Keep legacy production/audit artifacts read-only and pinned to v0.5; migrate only into a new creator-first root with manual per-episode creator confirmation.",
   "Use only tools visible in the current DSH preset and preserve the upstream project ownership, freshness, review, and explicit production-confirmation contracts.",
   "Use oh_story_production only for semantic production-view intents (open/focus, explicit shot order, or tracking a job that this Agent is actually executing). Cosmetic canvas layout remains creator-controlled. The tool changes only the Session projection: it does not edit creator documents, generate media, or authorize production.",
+  "Persisted reviews under 审查/ carry a machine-readable verdict: a `## 审查结论` section containing exactly one of `- 结论：通过` or `- 结论：有阻塞`, plus one `- Blocker：BLOCK-<编号>（<涉及条目>）<描述>` line per unresolved blocker (omit Blocker lines when there is none). Never confirm or run production on an episode whose latest verdict is `- 结论：有阻塞` until every named Blocker is cleared.",
   "Production credentials remain outside project files. Never treat a prior acceptance, preview, continuation request, or budget discussion as confirmation for a paid production run.",
   "</short-drama-dsh-integration>"
 ].join("\n");

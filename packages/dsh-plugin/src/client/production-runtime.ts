@@ -1,10 +1,10 @@
-export type ProductionJobKind = "image" | "video" | "composition";
+export type ProductionJobKind = "image" | "video" | "composition" | "music";
 export type ProductionJobStatus = "awaiting_confirmation" | "pending" | "running" | "dispatched_unknown" | "succeeded" | "failed" | "canceled";
 
 export interface ProductionMediaVersion {
   readonly id: string;
   readonly targetId: string;
-  readonly kind: "image" | "video";
+  readonly kind: "image" | "video" | "audio";
   readonly url: string;
   /** Workspace-relative path when the result is owned by the DSH FileSystem. */
   readonly path?: string | undefined;
@@ -363,16 +363,22 @@ export function summarizeEpisodeOutput(
 ): readonly EpisodeOutputSummary[] {
   const kinds: readonly EpisodeOutputKind[] = ["image", "video", "music"];
   return kinds.map((kind) => {
-    const relevant = jobs.filter((job) => kind === "image" ? job.kind === "image" : kind === "video" ? (job.kind === "video" || job.kind === "composition") : false);
+    const relevant = jobs.filter((job) => kind === "image"
+      ? job.kind === "image"
+      : kind === "video"
+        ? (job.kind === "video" || job.kind === "composition")
+        : job.kind === "music");
     const succeeded = relevant.filter((job) => job.status === "succeeded");
     const running = relevant.filter((job) => job.status === "pending" || job.status === "running" || job.status === "dispatched_unknown").length;
     const jobCovered = new Set(succeeded.flatMap((job) => versions.filter((version) => mediaVersionMatchesJob(version, job.id)).map((version) => version.id)));
-    // Workspace media only carries image/video kinds (audio is excluded from
-    // the production library), so the music row counts jobs alone.
-    const existing = kind === "music" ? 0 : versions.filter((version) => {
-      if (kind === "image" ? version.kind !== "image" : version.kind !== "video") return false;
-      return !jobCovered.has(version.id);
-    }).length;
+    // 媒体库现已收录 audio(productionLibrary kind:"audio"),music 行同时计 jobs 与
+    // 未被成功 job 覆盖的 audio 产物,与 image/video 行口径一致。
+    const existing = kind === "music"
+      ? versions.filter((version) => version.kind === "audio" && !jobCovered.has(version.id)).length
+      : versions.filter((version) => {
+        if (kind === "image" ? version.kind !== "image" : version.kind !== "video") return false;
+        return !jobCovered.has(version.id);
+      }).length;
     return { kind, produced: jobCovered.size + existing, running };
   });
 }

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { readFile as readNodeFile, realpath as nodeRealpath, stat as nodeStat } from "node:fs/promises";
+import { copyFile, mkdir, readFile as readNodeFile, readdir, realpath as nodeRealpath, stat as nodeStat } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
@@ -10,8 +10,9 @@ import type {} from "@deepseek-ai/dsh-host-webserver";
 import type { SandboxPolicyService } from "@deepseek-ai/dsh-sandbox-policy";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import type {} from "@deepseek-ai/dsh-typert-registry";
-import { type GameVerificationBinding, WorkspaceVerificationTracker } from "./game-verification.js";
-import type { GameQaCheckId, GameQaCheckSummary, GameQaSummary } from "./client/game-qa.js";
+import { type GameVerificationBinding, parseVerificationObservationFile, serializeVerificationObservationFile, WorkspaceVerificationTracker, type VerificationObservationRecord } from "./game-verification.js";
+import type { GameQaCheckId, GameQaCheckSummary, GameQaRunEvidence, GameQaSummary } from "./client/game-qa.js";
+import { validateGameArtInventory, type GameArtDiagnostic } from "./game-art-validation.js";
 import { comfyuiWorkflowStatus, probeComfyui, parseWorkspaceComfyuiConfig, comfyuiConfigResponse, validateWorkspaceComfyuiConfigBody, writeWorkspaceComfyuiConfigFile, COMFYUI_CONFIG_RELATIVE_PATH, type ComfyuiPreflightSummary, type WorkspaceComfyuiConfig } from "./comfyui-status.js";
 import { dramaAdapterStatuses, ensureDramaAdapterConfig, type DramaAdapterStatus } from "./drama-adapters.js";
 import { commandOutput, hostPython } from "./host-python.js";
@@ -89,6 +90,8 @@ interface GameProjectSummary {
   readonly previewVersion: string;
   readonly verification: GameVerificationSummary;
   readonly qa: GameQaSummary;
+  /** ART-* 三方校验诊断(登记/art/ 落盘/build 接入);未走美术流时为空数组。 */
+  readonly gameArtDiagnostics?: readonly GameArtDiagnostic[];
 }
 
 export interface WorkspaceRealm {
@@ -606,7 +609,7 @@ const GAME_QA_CHECK_LABELS: Readonly<Record<GameQaCheckId, string>> = {
   restart: "重开"
 };
 
-export function summarizeGameQa(value: unknown, binding?: GameVerificationBinding): GameQaSummary {
+export function summarizeGameQa(value: unknown, binding?: GameVerificationBinding, runEvidence?: GameQaRunEvidence): GameQaSummary {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return { present: false };
   const record = value as Record<string, unknown>;
   const status = record.status === "PASS" || record.status === "FAIL" ? record.status : undefined;
@@ -617,7 +620,15 @@ export function summarizeGameQa(value: unknown, binding?: GameVerificationBindin
   const completeRun = typeof record.completeRun === "object" && record.completeRun !== null && !Array.isArray(record.completeRun)
     ? record.completeRun as Record<string, unknown>
     : {};
-  const runEvidence = typeof completeRun.evidence === "string" && completeRun.evidence !== "" ? completeRun.evidence : undefined;
+  const evidencePath = typeof completeRun.evidence === "string" && completeRun.evidence !== "" ? completeRun.evidence : undefined;
+  // 服务端 stat 过的三态结果优先;未传(内置示例,无法 stat 包内路径)时按契约只标注路径本身。
+  const evidenceNote = runEvidence !== undefined && !runEvidence.exists
+    ? `（运行证据缺失：${runEvidence.path} 不存在，结论缺运行记录支撑）`
+    : runEvidence !== undefined
+      ? `（见运行证据 ${runEvidence.path}）`
+      : evidencePath === undefined
+        ? "（本次运行未记录 evidence 路径）"
+        : `（见运行证据 ${evidencePath}）`;
   // qa 契约(schemas/game-qa/references/qa-contract.md):checks 只是六键状态字符串,
   // 逐项证据不在 checks 里,而是 completeRun.evidence 指向的同次运行观察清单。
   // 摘要沿用该映射:每项证据文本标注状态来源,run 级证据统一指向 evidence 路径,不伪造逐项证据。
@@ -629,10 +640,12 @@ export function summarizeGameQa(value: unknown, binding?: GameVerificationBindin
       status: checkStatus,
       evidence: checkStatus === "NOT_RUN"
         ? `${GAME_QA_CHECK_LABELS[id]}尚未验证`
-        : `${GAME_QA_CHECK_LABELS[id]}${checkStatus === "PASS" ? "通过" : "未通过"}（见运行证据${runEvidence === undefined ? "（本次运行未记录 evidence 路径）" : ` ${runEvidence}`}）`
+        : `${GAME_QA_CHECK_LABELS[id]}${checkStatus === "PASS" ? "通过" : "未通过"}${evidenceNote}`
     };
   });
-  const summary: GameQaSummary = { present: true, verdict: status, checks };
+  const summary: GameQaSummary = runEvidence === undefined
+    ? { present: true, verdict: status, checks }
+    : { present: true, verdict: status, checks, runEvidence };
   return binding === undefined ? summary : { ...summary, binding };
 }
 
@@ -709,11 +722,151 @@ function headingTitle(content: string | undefined, fallback: string): string {
   return heading?.replace(/^#\s+/u, "").replace(/^PRODUCT_BRIEF\s*[·・:]?\s*/iu, "").trim() || fallback;
 }
 
+const GAME_ART_SOURCE_EXTENSIONS = new Set([".js", ".html", ".css", ".json"]);
+const GAME_ART_SOURCE_FILE_LIMIT = 256 * 1_024;
+const GAME_ART_SOURCE_TOTAL_LIMIT = 2 * 1_024 * 1_024;
+
+/** 观察 key 形如 `<sessionId>\0<root>`;按项目持久化时用 root 段过滤。 */
+function observationRootOf(key: string): string | undefined {
+  const separator = key.indexOf("\0");
+  return separator < 0 ? undefined : key.slice(separator + 1);
+}
+
+/** stat completeRun.evidence 指向的路径得三态;无 evidence 字段时不检查(undefined,文案按契约标注)。 */
+async function gameQaRunEvidence(realm: WorkspaceRealm, root: string, verification: unknown): Promise<GameQaRunEvidence | undefined> {
+  if (typeof verification !== "object" || verification === null) return undefined;
+  const completeRun = (verification as Record<string, unknown>).completeRun;
+  const evidence = typeof completeRun === "object" && completeRun !== null && !Array.isArray(completeRun)
+    ? (completeRun as Record<string, unknown>).evidence
+    : undefined;
+  if (typeof evidence !== "string" || evidence === "") return undefined;
+  const target = await realm.fs.resolve(`${root}/${evidence}`, { cwd: realm.cwd }).catch(() => undefined);
+  if (target === undefined || !realm.fs.contains(realm.root, target)) return { path: evidence, exists: false, kind: "missing" };
+  const info = await realm.fs.stat(target).catch(() => undefined);
+  if (info?.type === "file") return { path: evidence, exists: true, kind: "file" };
+  if (info?.type === "directory") return { path: evidence, exists: true, kind: "directory" };
+  return { path: evidence, exists: false, kind: "missing" };
+}
+
+/** 采集 ART-* 三方对账输入:登记文本、art/ 与 build/app 文件列表、限量的 build 文本内容。 */
+async function collectGameArtDiagnostics(
+  realm: WorkspaceRealm,
+  root: string,
+  files: readonly WorkspaceFile[],
+  maxBytes: number
+): Promise<readonly GameArtDiagnostic[]> {
+  const artDirectionText = await workspaceText(realm, `${root}/design/ART_DIRECTION.md`, maxBytes).catch(() => undefined);
+  const artFiles: string[] = [];
+  const buildAppFiles: string[] = [];
+  const buildAppSources: { path: string; content: string }[] = [];
+  let sourceBytes = 0;
+  for (const file of files) {
+    if (file.path.startsWith(`${root}/art/`)) artFiles.push(file.path.slice(root.length + 1));
+    if (!file.path.startsWith(`${root}/build/app/`)) continue;
+    buildAppFiles.push(file.path.slice(root.length + 1));
+    if (!GAME_ART_SOURCE_EXTENSIONS.has(extname(file.path).toLowerCase()) || file.bytes > GAME_ART_SOURCE_FILE_LIMIT) continue;
+    if (sourceBytes + file.bytes > GAME_ART_SOURCE_TOTAL_LIMIT) continue;
+    const content = await workspaceText(realm, file.path, GAME_ART_SOURCE_FILE_LIMIT).catch(() => undefined);
+    if (content === undefined) continue;
+    buildAppSources.push({ path: file.path, content });
+    sourceBytes += file.bytes;
+  }
+  return validateGameArtInventory({ artDirectionText, artFiles, buildAppFiles, buildAppSources });
+}
+
+/**
+ * QA 新鲜度观察侧车(`<project>/qa/.verification-observations.json`,插件领域数据):
+ * 读:不存在 → 空记录;损坏/越界 → corrupt 标记由调用方暴露后按空处理。
+ * 写:dsh-fs writeText 原子发布(与 PUT /oh-story/file 同语义),失败向上抛。
+ */
+async function writeVerificationObservationEntries(
+  realm: WorkspaceRealm,
+  root: string,
+  entries: readonly VerificationObservationRecord[],
+  maxBytes: number
+): Promise<void> {
+  const target = await realm.fs.resolve(`${root}/qa/.verification-observations.json`, { cwd: realm.cwd });
+  if (!realm.fs.contains(realm.root, target)) throw new Error("观察侧车路径离开了 DSH 工作目录。");
+  const body = serializeVerificationObservationFile(entries);
+  if (Buffer.byteLength(body, "utf8") > maxBytes) throw new Error("观察侧车内容超过工作台大小限制。");
+  await realm.fs.writeText(
+    target,
+    body,
+    undefined,
+    undefined,
+    realm.sandboxPolicy.resolve({ session: realm.agent.session })
+  );
+}
+
+const GAME_EXPORT_DIRECTORY = "交付";
+
+function gameExportStamp(now: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+}
+
+/** node 侧递归复制(dsh-fs 无 copy/递归 mkdir;导出目标是冻结快照,绕过版本链直接落盘)。 */
+async function copyDirectoryNative(source: string, target: string): Promise<number> {
+  await mkdir(target, { recursive: true });
+  let count = 0;
+  for (const entry of await readdir(source, { withFileTypes: true })) {
+    const from = resolve(source, entry.name);
+    const to = resolve(target, entry.name);
+    if (entry.isDirectory()) count += await copyDirectoryNative(from, to);
+    else if (entry.isFile()) {
+      await copyFile(from, to);
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/** 项目名守卫:拒绝空名、点路径、路径分隔符与控制字符(不用控制字符正则,lint 禁 no-control-regex)。 */
+function isIllegalGameExportProject(project: string): boolean {
+  return project === "" || project === "." || project === ".."
+    || project.includes("/") || project.includes("\\")
+    || [...project].some((ch) => ch.charCodeAt(0) < 0x20);
+}
+
+/** 游戏构建导出:把可玩 build/app 冻结到 game-adaptations/<project>/交付/<stamp>/,不覆盖已有快照。 */
+async function exportGameBuild(realm: WorkspaceRealm, project: string): Promise<{ readonly exportPath: string; readonly fileCount: number }> {
+  if (isIllegalGameExportProject(project)) throw new WorkspaceHttpError(400, "项目名非法。");
+  const root = `${GAME_DIRECTORY}/${project}`;
+  const appTarget = await realm.fs.resolve(`${root}/build/app`, { cwd: realm.cwd }).catch(() => undefined);
+  if (appTarget === undefined || !realm.fs.contains(realm.root, appTarget)) {
+    throw new WorkspaceHttpError(404, `项目 ${project} 没有可导出的 build/app 构建目录。`);
+  }
+  const appInfo = await realm.fs.stat(appTarget).catch(() => undefined);
+  if (appInfo?.type !== "directory") throw new WorkspaceHttpError(404, `项目 ${project} 没有可导出的 build/app 构建目录。`);
+  const indexTarget = await realm.fs.resolve(`${root}/build/app/index.html`, { cwd: realm.cwd }).catch(() => undefined);
+  const indexInfo = indexTarget !== undefined ? await realm.fs.stat(indexTarget).catch(() => undefined) : undefined;
+  if (indexInfo?.type !== "file") throw new WorkspaceHttpError(409, "build/app 缺少 index.html，不是可玩构建，拒绝导出。");
+  const preview = await previewDigest(realm, root);
+  if (!preview.ready) throw new WorkspaceHttpError(409, "构建扫描不到 index.html，拒绝导出。");
+  const exportRoot = `${root}/${GAME_EXPORT_DIRECTORY}/${gameExportStamp(new Date())}-${preview.version.slice(0, 6)}`;
+  const exportTarget = await realm.fs.resolve(exportRoot, { cwd: realm.cwd }).catch(() => undefined);
+  if (exportTarget === undefined || !realm.fs.contains(realm.root, exportTarget)) throw new WorkspaceHttpError(403, "导出路径离开了 DSH 工作目录。");
+  if (await realm.fs.stat(exportTarget).catch(() => undefined) !== undefined) {
+    throw new WorkspaceHttpError(409, `导出目标 ${exportRoot} 已存在，不覆盖；请稍后重试或手动清理。`);
+  }
+  let localApp: string;
+  let localExport: string;
+  try {
+    localApp = realm.fs.processPath(appTarget);
+    localExport = realm.fs.processPath(exportTarget);
+  } catch (error) {
+    throw new WorkspaceHttpError(500, `当前文件系统不支持本地落盘，无法导出构建:${error instanceof Error ? error.message : String(error)}`);
+  }
+  const fileCount = await copyDirectoryNative(localApp, localExport);
+  return { exportPath: exportRoot, fileCount };
+}
+
 export async function workspaceGameProjects(
   realm: WorkspaceRealm,
   files: readonly WorkspaceFile[],
   sessionId: string,
-  maxBytes: number
+  maxBytes: number,
+  onPersistenceWarning?: (message: string) => void
 ): Promise<GameProjectSummary[]> {
   const roots = [...new Set(files.flatMap((file) => {
     const parts = file.path.split("/");
@@ -723,6 +876,13 @@ export async function workspaceGameProjects(
     const id = root.slice(`${GAME_DIRECTORY}/`.length);
     const qaPath = `${root}/qa/verification.json`;
     const qaFile = files.find((file) => file.path === qaPath);
+    // 侧车观察灌入让 binding 连续性跨进程存活;损坏文件按空记录处理并暴露日志,不阻断列表。
+    const observationFile = `${root}/qa/.verification-observations.json`;
+    const persisted = parseVerificationObservationFile(
+      await workspaceText(realm, observationFile, maxBytes).catch(() => undefined)
+    );
+    if (persisted.corrupt) onPersistenceWarning?.(`QA 新鲜度观察文件损坏，已按空记录处理：${observationFile}`);
+    workspaceVerificationTracker.hydrate(persisted.entries.filter((entry) => observationRootOf(entry.key) === root));
     // Isolate per-project metadata failures: an unreadable brief, a non-UTF-8 or oversized
     // verification file, or a build/app subtree removed mid-rebuild must degrade this one card,
     // never abort the shared workspace listing (which also carries the story and drama trees).
@@ -734,8 +894,19 @@ export async function workspaceGameProjects(
     let verification: unknown;
     try { verification = qa === undefined ? undefined : JSON.parse(qa) as unknown; }
     catch { verification = undefined; }
+    const [runEvidence, gameArtDiagnostics] = await Promise.all([
+      gameQaRunEvidence(realm, root, verification),
+      collectGameArtDiagnostics(realm, root, files, maxBytes)
+    ]);
     const freshness = workspaceVerificationTracker.observe(`${sessionId}\0${root}`, qaFile?.version, preview.version);
     const resolvedVerification = normalizedVerification(verification, freshness.binding, freshness.verifiedPreviewVersion);
+    // observe 后按项目写回侧车;失败只警告——新鲜度退化为进程内语义,不挡工作区列表。
+    try {
+      const entries = workspaceVerificationTracker.snapshot().filter((entry) => observationRootOf(entry.key) === root);
+      await writeVerificationObservationEntries(realm, root, entries, maxBytes);
+    } catch (error) {
+      onPersistenceWarning?.(`QA 新鲜度观察写回失败（binding 退化为进程内）:${error instanceof Error ? error.message : String(error)}`);
+    }
     return {
       id: `workspace:${id}`,
       root,
@@ -747,7 +918,8 @@ export async function workspaceGameProjects(
         : undefined,
       previewVersion: preview.version,
       verification: resolvedVerification,
-      qa: summarizeGameQa(verification, resolvedVerification.binding)
+      qa: summarizeGameQa(verification, resolvedVerification.binding, runEvidence),
+      gameArtDiagnostics
     };
   }));
 }
@@ -956,7 +1128,8 @@ async function handle(context: Context, request: IncomingMessage, response: Serv
       const sessionId = url.searchParams.get("sessionId");
       if (sessionId === null) throw new WorkspaceHttpError(400, "缺少 DSH sessionId。");
       const games = [
-        ...await workspaceGameProjects(realm, files, sessionId, options.maxBytes),
+        ...await workspaceGameProjects(realm, files, sessionId, options.maxBytes,
+          (message) => context.logger("oh-story").warn(message)),
         await bundledGameExample()
       ];
       const videos = await workspaceVideoProjects(realm, files, options.maxBytes);
@@ -1013,6 +1186,15 @@ async function handle(context: Context, request: IncomingMessage, response: Serv
         bytes: Buffer.byteLength(savedBody),
         version: "comfyui-config"
       });
+      return;
+    }
+    // 游戏构建导出:把可玩 build/app 冻结为项目内交付快照(对齐短剧"交付/"惯例),
+    // 不覆盖已有快照;成功返回导出目录与文件数,供工作台"导出"按钮展示。
+    if (url.pathname === "/oh-story/game-export" && request.method === "POST") {
+      const realm = await workspaceRealm(context, url);
+      const body = await jsonBody(request, options.maxBytes);
+      const result = await exportGameBuild(realm, typeof body.project === "string" ? body.project : "");
+      send(response, 200, result);
       return;
     }
     if (url.pathname === "/oh-story/file" && request.method === "GET") {

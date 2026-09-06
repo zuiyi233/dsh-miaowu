@@ -1049,9 +1049,13 @@ async function main(): Promise<void> {
     const dramaWorkspaceResponse = await dshFetch(`${origin}/oh-story/workspace?sessionId=${encodeURIComponent(dramaSession.sessionId)}`);
     const dramaWorkspacePayload = await dramaWorkspaceResponse.json() as { readonly mode?: string; readonly cwd?: string; readonly files?: readonly { readonly path: string; readonly kind?: string; readonly mimeType?: string }[]; readonly shortDrama?: unknown };
     const dramaPaths = dramaWorkspacePayload.files?.map((file) => file.path).sort() ?? [];
+    // demo fixtures 自带配音/制作成果/交付示例媒体（EP002 由 EP001 整树拷贝而来），
+    // 断言从"creator 五文档严格全等"放宽为"creator 全集 + 新链路代表文件必须被列出"。
     const expectedDramaPaths = ["EP001", "EP002"].flatMap((episode) => dramaCreatorFiles.map((name) => `剧集/${episode}/${name}`)).sort();
+    const demoMediaPaths = ["剧集/EP001/配音/SHOT-EP001-001.wav", "剧集/EP001/制作成果/成片-demo-demojob001.mp4", "交付/EP001/成片-demo.mp4"];
     if (!dramaWorkspaceResponse.ok || dramaWorkspacePayload.mode !== "dsh-session" || dramaWorkspacePayload.cwd !== await realpath(dramaRoot)
-      || JSON.stringify(dramaPaths) !== JSON.stringify(expectedDramaPaths) || dramaWorkspacePayload.shortDrama !== null
+      || !expectedDramaPaths.every((path) => dramaPaths.includes(path)) || !demoMediaPaths.every((path) => dramaPaths.includes(path))
+      || dramaPaths.length < expectedDramaPaths.length + demoMediaPaths.length || dramaWorkspacePayload.shortDrama !== null
       || dramaPaths.some((path) => /\.jsonl?$/u.test(path))) {
       throw new Error(`Drama Session workspace route failed: ${JSON.stringify(dramaWorkspacePayload)}`);
     }
@@ -2127,15 +2131,19 @@ async function main(): Promise<void> {
         || videoMetadata.width < 500 || videoMetadata.height < 900 || videoMetadata.duration < 4) {
         throw new Error(`Production mock media was not realistic: ${JSON.stringify({ keyframeMetadata, videoMetadata })}`);
       }
+      // 001 卡两个真实图片版本 + 可能随 demo fixtures 带入的配音/成片版本(2026-09 起媒体库收录 audio),
+      // 影像主预览仍优先 image/video;此处只断言两个图片版本都在版本条里。
       const firstShotVersions = page.locator(".oh-story-shot-card").first().locator(".oh-story-version-strip").getByRole("button");
-      if (await firstShotVersions.count() !== 2) throw new Error("Production image versions were not grouped under their shot.");
+      if (await firstShotVersions.count() < 2) throw new Error("Production image versions were not grouped under their shot.");
       await firstShotVersions.first().click();
       if (await firstShotVersions.first().getAttribute("data-selected") === null) throw new Error("Production version selection did not update the Session projection.");
       await page.locator(".oh-story-shot-card").first().locator("h3").click();
       await productionTabs.getByRole("tab", { name: "素材", exact: true }).click();
       if (await page.locator(".oh-story-asset-card").count() < 6) throw new Error("Production asset board omitted creator-facing assets.");
-      if (await page.locator(".oh-story-media-library-grid > article").count() !== 3) {
-        throw new Error("Project media library did not expose the three realistic workspace results.");
+      // demo fixtures 自带配音/成片/交付示例媒体(2026-09 起),生产库已收录 audio——
+      // 媒体库从"恰好三个 smoke 产物"放宽为"至少包含三个 smoke 产物",逐条断言由下方过滤完成。
+      if (await page.locator(".oh-story-media-library-grid > article").count() < 3) {
+        throw new Error("Project media library did not expose the realistic workspace results.");
       }
       const reusableReference = page.locator(".oh-story-media-library-grid > article").filter({ hasText: productionMediaPath })
         .getByRole("button", { name: /SHOT-EP001-001 参考/u });

@@ -59,6 +59,10 @@
 
 ## 5. V2 遗留项清单（真机联调时逐项确认）
 
+> runner 键与音频后缀缺口已在代码侧扩展（`_collect_media` 收 `images`/`gifs`/`audio`/`videos`，
+> `_media_ok` 新增 `.mp3`（ID3/帧同步）/`.flac`（`fLaC`）/`.m4a`（`ftyp`+M4A brand），
+> e2e 已覆盖 audio 键 + flac/mp3/m4a 落盘）——真机仍需按本清单逐项验证。
+
 - [ ] 一致性参考图自动装配验证：图生图 `input_image`（`__INPUT_IMAGE__`）在真实多参考场景下只选主角色一张的约定是否成立（见 `docs/comfyui.md` 4 节角色一致性）。
 - [ ] 串播带声验证：视频 + TTS/音乐合成后的串播带是否有声、音画是否同步。
 - [ ] 音频工作流默认输出多为 mp3/flac 段：runner 的 `_collect_media` 只收 `images` / `gifs` 键、

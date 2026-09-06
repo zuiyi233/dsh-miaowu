@@ -112,6 +112,11 @@ describe("Drama Skills bundled provider", () => {
       expect(skill?.content).toContain("an oral review writes nothing");
       expect(skill?.content).toContain("never create a parallel JSON/JSONL lifecycle truth");
       expect(skill?.content).toContain("Never upgrade a v0.5 structured project in place");
+      // 冻结契约：机器可读审查结论（解析与 UI 展示按此读，见报告交接）。
+      expect(skill?.content).toContain("## 审查结论");
+      expect(skill?.content).toContain("- 结论：通过");
+      expect(skill?.content).toContain("- 结论：有阻塞");
+      expect(skill?.content).toContain("- Blocker：BLOCK-");
     }
     const routeCandidate = listed.find((candidate) => candidate.name === "short-drama");
     const route = await provider.get(routeCandidate!, {});

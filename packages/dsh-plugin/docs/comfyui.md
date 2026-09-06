@@ -185,10 +185,10 @@ Agent 应如实告诉创作者“没有配置 ComfyUI 工作流”，而不是�
 模态无关提交/下载），不走生产适配器：
 
 1. 逐镜头取台词文本（分镜.md 该镜头的对白/旁白），用 `oh_story_comfyui` 逐个生成，
-   落盘 `剧集/<EP>/配音/<SHOT-ID>.wav`——**文件名必须含镜头 ID**（如
+   落盘 `剧集/<EP>/配音/<SHOT-ID>.wav`（配音解析接受 wav/mp3/m4a/flac）——**文件名必须含镜头 ID**（如
    `SHOT-EP001-001.wav`、`SHOT-EP001-001-take2.wav`），串播视图按文件名 token
    自动关联到对应镜头（`SHOT-EP001-0010.wav` 不会误关联到 `SHOT-EP001-001`）。
-2. 硬性格式：**mono（单声道）、16-bit PCM WAV、44100 Hz**，与第 7 节解说配音同规。
+2. 硬性格式：**mono（单声道）、16-bit、44100 Hz**，与第 7 节解说配音同规。
 3. TTS 工作流占位符用法：语音工作流 JSON 里文本用 `__PROMPT__`（整值替换），
    时长秒数用 `__DURATION_SECONDS__`（JSON 数字替换）；其余占位符规则见第 2 节
    （整值匹配才替换、缺值显式报错 `missing_placeholder_value`）。

@@ -230,4 +230,22 @@ describe("episode output ledger", () => {
       { kind: "music", produced: 0, running: 0 }
     ]);
   });
+
+  it("counts music jobs and audio media in the music row (audio is no longer invisible)", () => {
+    const jobs = [
+      { ...createPendingJob({ id: "music-job", targetId: "EP001-MUSIC", kind: "music", prompt: "p" }), status: "succeeded" as const },
+      { ...createPendingJob({ id: "music-run", targetId: "EP001-MUSIC", kind: "music", prompt: "p" }), status: "running" as const }
+    ];
+    const versions: ProductionMediaVersion[] = [
+      // 成功 music job 的产物(文件名含 job ID)由 job 覆盖计数;
+      // 未被任何成功 job 覆盖的配音/配乐音频按 existing 计入。
+      { id: "v-covered", targetId: "EP001-MUSIC", kind: "audio", url: "/m/theme.wav", path: "剧集/EP001/制作成果/theme-music-job.wav" },
+      { id: "v-dub", targetId: "SHOT-EP001-001", kind: "audio", url: "/m/dub.wav", path: "剧集/EP001/配音/SHOT-EP001-001.wav" }
+    ];
+    expect(summarizeEpisodeOutput(jobs, versions)).toEqual([
+      { kind: "image", produced: 0, running: 0 },
+      { kind: "video", produced: 0, running: 0 },
+      { kind: "music", produced: 2, running: 1 }
+    ]);
+  });
 });

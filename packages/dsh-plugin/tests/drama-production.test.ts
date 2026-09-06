@@ -176,6 +176,8 @@ describe("drama voiceover resolution", () => {
     { path: `${episode}/配音/SHOT-EP001-001-take2.wav` },
     { path: `${episode}/配音/SHOT-EP001-0010.wav` },
     { path: `${episode}/配音/SHOT-EP001-002.mp3` },
+    { path: `${episode}/配音/SHOT-EP001-002.flac` },
+    { path: `${episode}/配音/SHOT-EP001-003.ogg` },
     { path: `${episode}/配音/notes.txt` },
     { path: `${episode}/配音/nested/SHOT-EP001-001.wav` },
     { path: `${episode}/制作成果/SHOT-EP001-001.wav` },
@@ -190,6 +192,14 @@ describe("drama voiceover resolution", () => {
     expect(resolveDramaShotAudios("SHOT-EP001-0010", media, episode)).toEqual([
       { path: `${episode}/配音/SHOT-EP001-0010.wav`, label: "SHOT-EP001-0010.wav" }
     ]);
+  });
+
+  it("resolves flac dubs and ignores unknown audio extensions", () => {
+    expect(resolveDramaShotAudios("SHOT-EP001-002", media, episode)).toEqual([
+      { path: `${episode}/配音/SHOT-EP001-002.flac`, label: "SHOT-EP001-002.flac" },
+      { path: `${episode}/配音/SHOT-EP001-002.mp3`, label: "SHOT-EP001-002.mp3" }
+    ]);
+    expect(resolveDramaShotAudios("SHOT-EP001-003", media, episode)).toEqual([]);
   });
 
   it("fills shot audio through parseEpisodeProduction from the caller media list", () => {

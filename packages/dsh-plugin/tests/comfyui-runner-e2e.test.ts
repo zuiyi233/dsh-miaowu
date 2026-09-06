@@ -37,6 +37,25 @@ const WAV_BYTES = Buffer.concat([
   Buffer.alloc(32, 0)
 ]);
 
+// FLAC: "fLaC" 魔数即可，对齐 runner 的 flac 签名判断。
+const FLAC_BYTES = Buffer.concat([
+  Buffer.from("fLaC"),
+  Buffer.alloc(36, 0)
+]);
+
+// MP3: ID3v2 标签头即可，对齐 runner 的 mp3 签名判断（无标签裸流靠帧同步字，见 runner 自测）。
+const MP3_BYTES = Buffer.concat([
+  Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00]),
+  Buffer.alloc(32, 0)
+]);
+
+// M4A: ftyp 盒 + major brand 含 M4A，对齐 runner 的 m4a 签名判断。
+const M4A_BYTES = Buffer.concat([
+  Buffer.from([0x00, 0x00, 0x00, 0x20]),
+  Buffer.from("ftypM4A "),
+  Buffer.alloc(16, 0)
+]);
+
 type HistoryDoc = Record<string, unknown>;
 
 interface MockOptions {
@@ -544,5 +563,53 @@ describe("comfyui_runner 端到端（mock server + 真实 python 子进程）", 
     expect(nodeInput(submitted, "1", "text")).toBe("你好，这里是解说配音。");
     expect(typeof nodeInput(submitted, "2", "seed")).toBe("number");
     expectNoPlaceholders(submitted);
+  }, 60_000);
+
+  it("tool 音频：SaveAudio 的 audio 键 + flac 魔数 → 产物落盘", async () => {
+    const mock = await launch({
+      history: (pid) => ({ [pid]: { status: { status_str: "success", completed: true }, outputs: { "3": { audio: [{ filename: "ComfyUI_00001_.flac", subfolder: "", type: "output" }] } } } }),
+      view: FLAC_BYTES
+    });
+    const cwd = await makeTemp();
+    const result = await runRunner("tool", {
+      prompt: "lofi piano loop, 90bpm",
+      duration_seconds: 30,
+      output_dir: "music",
+      filename_prefix: "bgm"
+    }, runnerEnv({ COMFYUI_BASE_URL: mock.baseUrl, COMFYUI_WORKFLOW: FIXTURE_MUSIC }), cwd);
+    expect(result.exitCode).toBe(0);
+    const files = parseStdout(result.stdout)["files"] as Array<Record<string, unknown>>;
+    expect(files).toHaveLength(1);
+    const landed = String(files[0]?.["path"]);
+    expect(landed.endsWith("bgm-1.flac")).toBe(true);
+    const bytes = Buffer.from(await readFile(landed));
+    expect(bytes.equals(FLAC_BYTES)).toBe(true);
+    expect(bytes.subarray(0, 4).toString("ascii")).toBe("fLaC");
+  }, 60_000);
+
+  it("tool 音频：mp3(ID3)与 m4a 魔数 → 产物落盘", async () => {
+    for (const [bytes, suffix, ascii] of [
+      [MP3_BYTES, ".mp3", "ID3"],
+      [M4A_BYTES, ".m4a", "ftyp"]
+    ] as const) {
+      const mock = await launch({
+        history: (pid) => ({ [pid]: { status: { status_str: "success", completed: true }, outputs: { "3": { audio: [{ filename: `ComfyUI_00001_${suffix}`, subfolder: "", type: "output" }] } } } }),
+        view: bytes
+      });
+      const cwd = await makeTemp();
+      const result = await runRunner("tool", {
+        prompt: "audio signature probe",
+        duration_seconds: 10,
+        output_dir: "music",
+        filename_prefix: "sig"
+      }, runnerEnv({ COMFYUI_BASE_URL: mock.baseUrl, COMFYUI_WORKFLOW: FIXTURE_MUSIC }), cwd);
+      expect(result.exitCode).toBe(0);
+      const files = parseStdout(result.stdout)["files"] as Array<Record<string, unknown>>;
+      expect(files).toHaveLength(1);
+      const landed = String(files[0]?.["path"]);
+      expect(landed.endsWith(`sig-1${suffix}`)).toBe(true);
+      expect(Buffer.from(await readFile(landed)).subarray(0, 3).toString("ascii") === ascii
+        || Buffer.from(await readFile(landed)).subarray(4, 8).toString("ascii") === ascii).toBe(true);
+    }
   }, 60_000);
 });

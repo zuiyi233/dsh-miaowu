@@ -8,7 +8,9 @@ export const PRODUCTION_INTENT_ACTIONS = [
 ] as const;
 
 export const PRODUCTION_INTENT_SECTIONS = ["shots", "assets", "tasks", "sequence", "canvas"] as const;
-export const PRODUCTION_INTENT_JOB_KINDS = ["image", "video", "composition"] as const;
+// music:配乐/音频适配器(comfyui-music、minimax-music)与 image/video 同走 track_job;
+// 此前缺 music 会导致 Agent 无法追踪音乐任务,产量面板的 music 行恒为空。
+export const PRODUCTION_INTENT_JOB_KINDS = ["image", "video", "composition", "music"] as const;
 
 export type ProductionIntentAction = typeof PRODUCTION_INTENT_ACTIONS[number];
 export type ProductionIntentSection = typeof PRODUCTION_INTENT_SECTIONS[number];
