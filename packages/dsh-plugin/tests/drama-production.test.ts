@@ -6,7 +6,8 @@ import {
   parseImagePrompts,
   parseStoryboard,
   parseVideoPrompts,
-  productionCompleteness
+  productionCompleteness,
+  resolveDramaShotAudios
 } from "../src/client/drama-production.js";
 
 const episode = "剧集/EP001";
@@ -166,6 +167,47 @@ describe("storyboard contract regressions", () => {
     const diagnostic = production.diagnostics.find((item) => item.code === "invalid_visual_id");
     expect(diagnostic?.message).toContain("VISUAL_CHAR_JIANGCHEN");
     expect(production.diagnostics.map((item) => item.code)).not.toContain("generated_visual_id");
+  });
+});
+
+describe("drama voiceover resolution", () => {
+  const media = [
+    { path: `${episode}/配音/SHOT-EP001-001.wav` },
+    { path: `${episode}/配音/SHOT-EP001-001-take2.wav` },
+    { path: `${episode}/配音/SHOT-EP001-0010.wav` },
+    { path: `${episode}/配音/SHOT-EP001-002.mp3` },
+    { path: `${episode}/配音/notes.txt` },
+    { path: `${episode}/配音/nested/SHOT-EP001-001.wav` },
+    { path: `${episode}/制作成果/SHOT-EP001-001.wav` },
+    { path: `剧集/EP002/配音/SHOT-EP001-001.wav` }
+  ];
+
+  it("links dub audios by filename token and skips the prefix trap", () => {
+    expect(resolveDramaShotAudios("SHOT-EP001-001", media, episode)).toEqual([
+      { path: `${episode}/配音/SHOT-EP001-001-take2.wav`, label: "SHOT-EP001-001-take2.wav" },
+      { path: `${episode}/配音/SHOT-EP001-001.wav`, label: "SHOT-EP001-001.wav" }
+    ]);
+    expect(resolveDramaShotAudios("SHOT-EP001-0010", media, episode)).toEqual([
+      { path: `${episode}/配音/SHOT-EP001-0010.wav`, label: "SHOT-EP001-0010.wav" }
+    ]);
+  });
+
+  it("fills shot audio through parseEpisodeProduction from the caller media list", () => {
+    const production = parseEpisodeProduction({
+      [`${episode}/分镜.md`]: "## SHOT-EP001-001 · A\n- 来源：EP001-SC001\n\n## SHOT-EP001-003 · C\n"
+    }, episode, media);
+    expect(production.shots[0]?.audio).toEqual([
+      { path: `${episode}/配音/SHOT-EP001-001-take2.wav`, label: "SHOT-EP001-001-take2.wav" },
+      { path: `${episode}/配音/SHOT-EP001-001.wav`, label: "SHOT-EP001-001.wav" }
+    ]);
+    expect(production.shots[1]?.audio).toBeUndefined();
+  });
+
+  it("stays empty without a caller media list", () => {
+    const production = parseEpisodeProduction({
+      [`${episode}/分镜.md`]: "## SHOT-EP001-001 · A\n"
+    }, episode);
+    expect(production.shots[0]?.audio).toBeUndefined();
   });
 });
 

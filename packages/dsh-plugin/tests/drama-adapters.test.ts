@@ -92,16 +92,28 @@ describe("bundled Drama media adapters", () => {
 
   it("reports presence per adapter without exposing values", () => {
     const statuses = dramaAdapterStatuses({ OPENAI_API_KEY: "sk-secret", MINIMAX_API_KEY: "mm", MINIMAX_VIDEO_MODEL: "", ARK_API_KEY: "ark" });
-    expect(statuses.map((status) => [status.name, status.configured, status.missing])).toEqual([
-      ["gpt-image-2", true, []],
-      ["seedance", false, ["SEEDANCE_MODEL"]],
-      ["minimax-h3", false, ["MINIMAX_VIDEO_MODEL", "MINIMAX_VIDEO_RESOLUTIONS"]],
-      ["minimax-music", true, []],
-      ["comfyui", true, []],
-      ["comfyui-video", true, []],
-      ["comfyui-music", true, []]
+    expect(statuses.map((status) => [status.name, status.configured, status.missing, status.costModel])).toEqual([
+      ["gpt-image-2", true, [], "metered-cloud"],
+      ["seedance", false, ["SEEDANCE_MODEL"], "metered-cloud"],
+      ["minimax-h3", false, ["MINIMAX_VIDEO_MODEL", "MINIMAX_VIDEO_RESOLUTIONS"], "metered-cloud"],
+      ["minimax-music", true, [], "metered-cloud"],
+      ["comfyui", true, [], "free-local"],
+      ["comfyui-video", true, [], "free-local"],
+      ["comfyui-music", true, [], "free-local"]
     ]);
     expect(JSON.stringify(statuses)).not.toContain("sk-secret");
+  });
+
+  it("freezes the cost model: comfyui lines are free-local, upstream lines are metered-cloud", () => {
+    expect(DRAMA_ADAPTERS.map((adapter) => [adapter.name, adapter.costModel])).toEqual([
+      ["gpt-image-2", "metered-cloud"],
+      ["seedance", "metered-cloud"],
+      ["minimax-h3", "metered-cloud"],
+      ["minimax-music", "metered-cloud"],
+      ["comfyui", "free-local"],
+      ["comfyui-video", "free-local"],
+      ["comfyui-music", "free-local"]
+    ]);
   });
 
   it("marks adapters with no required env as configured even with an empty environment", () => {

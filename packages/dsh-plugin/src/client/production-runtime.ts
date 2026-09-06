@@ -33,6 +33,40 @@ export interface ProductionSequenceItem {
   readonly versionId?: string | undefined;
 }
 
+import type { DramaShotAudio } from "./drama-production.js";
+
+export interface PlaybackShot {
+  readonly shotId: string;
+  readonly index: number;
+  readonly title: string;
+  /** Dialogue/action line shown under the media; sourced from existing storyboard fields. */
+  readonly caption?: string | undefined;
+  readonly promptSummary?: string | undefined;
+  readonly image?: ProductionMediaVersion | undefined;
+  readonly video?: ProductionMediaVersion | undefined;
+  /**
+   * Per-shot dialogue dubbing from 剧集/<EP>/配音/ (resolveDramaShotAudios);
+   * the player renders the first track under the stage for image/placeholder
+   * shots and skips it on video shots (the video's own sound wins).
+   */
+  readonly audio?: readonly DramaShotAudio[] | undefined;
+}
+
+export interface PlaybackShotSource {
+  readonly id: string;
+  readonly title: string;
+  readonly purpose?: string | undefined;
+  readonly shotSpec?: string | undefined;
+  readonly start?: string | undefined;
+  readonly end?: string | undefined;
+  readonly keyframePrompt?: string | undefined;
+  readonly motionPrompt?: string | undefined;
+  /** Dubbing passthrough from resolveDramaShotAudios; empty stays empty. */
+  readonly audio?: readonly DramaShotAudio[] | undefined;
+}
+
+export type PlaybackAdvanceReason = "next" | "prev" | "image-timer" | "video-ended";
+
 export interface CanvasPoint {
   readonly x: number;
   readonly y: number;
@@ -229,4 +263,116 @@ export function reorderSequence(sequence: readonly ProductionSequenceItem[], sou
   const [item] = next.splice(source, 1);
   if (item !== undefined) next.splice(target, 0, item);
   return next;
+}
+
+/**
+ * Assemble one playback entry per shot, in document order. Media resolution
+ * reuses the same rule as the 镜头 board (`selectedVersionForTarget`, latest
+ * wins unless the user picked a version): index.tsx already scoped `versions`
+ * to this EP via `mediaTargetFromPath` + episode/交付 prefix match, so this
+ * function only selects within the passed list instead of reimplementing the
+ * token match (index.tsx itself must stay untouched).
+ */
+export function assemblePlaybackShots(
+  shots: readonly PlaybackShotSource[],
+  versions: readonly ProductionMediaVersion[],
+  selections: Readonly<Record<string, string>>
+): PlaybackShot[] {
+  return shots.map((shot, index) => {
+    const caption = [shot.purpose, shot.shotSpec, [shot.start, shot.end].filter((part) => part !== undefined && part !== "").join(" → ") || undefined]
+      .filter((part) => part !== undefined && part.trim() !== "")
+      .join(" ｜ ") || undefined;
+    const promptSummary = shot.keyframePrompt ?? shot.motionPrompt;
+    return {
+      shotId: shot.id,
+      index,
+      title: shot.title,
+      ...(caption === undefined ? {} : { caption }),
+      ...(promptSummary === undefined ? {} : { promptSummary }),
+      image: selectedVersionForTarget(shot.id, versions, selections, "image"),
+      video: selectedVersionForTarget(shot.id, versions, selections, "video"),
+      ...(shot.audio === undefined || shot.audio.length === 0 ? {} : { audio: shot.audio })
+    };
+  });
+}
+
+export function playbackPromptSnippet(prompt: string | undefined, limit = 48): string | undefined {
+  if (prompt === undefined) return undefined;
+  const singleLine = prompt.replace(/\s+/gu, " ").trim();
+  if (singleLine === "") return undefined;
+  return singleLine.length <= limit ? singleLine : `${singleLine.slice(0, limit)}…`;
+}
+
+export const PLAYBACK_IMAGE_SECONDS_MIN = 1;
+export const PLAYBACK_IMAGE_SECONDS_MAX = 30;
+export const PLAYBACK_IMAGE_SECONDS_DEFAULT = 4;
+
+export function clampPlaybackImageSeconds(value: number): number {
+  if (!Number.isFinite(value)) return PLAYBACK_IMAGE_SECONDS_DEFAULT;
+  return Math.min(PLAYBACK_IMAGE_SECONDS_MAX, Math.max(PLAYBACK_IMAGE_SECONDS_MIN, Math.round(value)));
+}
+
+export function playbackImageDelayMs(seconds: number): number {
+  return clampPlaybackImageSeconds(seconds) * 1000;
+}
+
+/**
+ * Image-timer plumbing for autoplay: fires once after the per-shot still
+ * duration; the player re-arms it on every shot change and cancels on pause.
+ * Covered with fake timers.
+ */
+export function schedulePlaybackImageAdvance(onAdvance: () => void, seconds: number): () => void {
+  const timer = globalThis.setTimeout(onAdvance, playbackImageDelayMs(seconds));
+  return () => { globalThis.clearTimeout(timer); };
+}
+
+/**
+ * Pure autoplay state machine. Next, image-timer and video-ended advance one
+ * shot and hold on the last one so the player stops instead of wrapping
+ * silently; prev steps back and clamps at the first shot.
+ */
+export function playbackNextIndex(current: number, total: number, reason: PlaybackAdvanceReason): number {
+  if (!Number.isInteger(current) || !Number.isInteger(total) || total <= 0) return 0;
+  const clamped = Math.min(total - 1, Math.max(0, current));
+  if (reason === "prev") return Math.max(0, clamped - 1);
+  return clamped >= total - 1 ? clamped : clamped + 1;
+}
+
+export function playbackShouldStop(total: number, index: number): boolean {
+  return total <= 0 || index >= total - 1;
+}
+
+export type EpisodeOutputKind = "image" | "video" | "music";
+
+export interface EpisodeOutputSummary {
+  readonly kind: EpisodeOutputKind;
+  /** succeeded 任务数 + 已存在产物去重后的已产出文件数。 */
+  readonly produced: number;
+  readonly running: number;
+}
+
+/**
+ * Aggregate the EP ledger from existing runtime state only (no new requests):
+ * succeeded jobs count as produced, pending/running/dispatched_unknown count
+ * as running; workspace media not already covered by a succeeded job adds to
+ * produced. Composition jobs fold into the video row.
+ */
+export function summarizeEpisodeOutput(
+  jobs: readonly ProductionJob[],
+  versions: readonly ProductionMediaVersion[]
+): readonly EpisodeOutputSummary[] {
+  const kinds: readonly EpisodeOutputKind[] = ["image", "video", "music"];
+  return kinds.map((kind) => {
+    const relevant = jobs.filter((job) => kind === "image" ? job.kind === "image" : kind === "video" ? (job.kind === "video" || job.kind === "composition") : false);
+    const succeeded = relevant.filter((job) => job.status === "succeeded");
+    const running = relevant.filter((job) => job.status === "pending" || job.status === "running" || job.status === "dispatched_unknown").length;
+    const jobCovered = new Set(succeeded.flatMap((job) => versions.filter((version) => mediaVersionMatchesJob(version, job.id)).map((version) => version.id)));
+    // Workspace media only carries image/video kinds (audio is excluded from
+    // the production library), so the music row counts jobs alone.
+    const existing = kind === "music" ? 0 : versions.filter((version) => {
+      if (kind === "image" ? version.kind !== "image" : version.kind !== "video") return false;
+      return !jobCovered.has(version.id);
+    }).length;
+    return { kind, produced: jobCovered.size + existing, running };
+  });
 }

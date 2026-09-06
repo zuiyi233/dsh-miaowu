@@ -94,6 +94,25 @@ Agent 应如实告诉创作者“没有配置 ComfyUI 工作流”，而不是�
 （`parameters.workflow` = 工作流名或绝对路径），**不要放顶层**
 （顶层 workflow 会被 production_tool 拒绝）；只有环境变量兜底时无需此参数。
 
+### 角色一致性（图生图参考）
+
+为某镜头生成图片时，若该镜头涉及的角色/场景在 `剧集/<EP>/视觉设定.md`
+已有 `VISUAL-*` 定妆图（已生成于 `剧集/<EP>/制作成果/` 下），Agent 应把其
+**项目内相对路径**写入 job `parameters` 的 `input_image`，作为图生图参考；
+多个参考候选时只选主角色的一张（ComfyUI 工作流只有一个 `__INPUT_IMAGE__`
+输入占位）。
+
+- 路径语义：runner 侧 `_resolve_input_file(value, project_root)`——相对路径
+  相对 `project_root`（run 快照根，含本次已确认的 `source` 与 `references`），
+  绝对路径按原样使用；文件必须存在且为普通文件（非 symlink），否则报错。
+  因此参考图必须已是本次 job 的已确认输入（`source`/`references` 之一，
+  已 pin 进 run 快照），否则 runner 在快照里找不到该文件。
+- 工作流要求：所选工作流 JSON 必须含 `__INPUT_IMAGE__` 占位符；调用传了
+  `input_image` 但工作流没有该占位符时，对应参数会被忽略（记入 ignored）。
+  反之工作流有占位符而调用没传 `input_image` 时，报 `missing_placeholder_value`。
+- 上传机制：runner 在提交 prompt 前把该文件经 ComfyUI `/upload/image`
+  上传，替换为服务端返回的文件名再填入工作流。
+
 ### 通用侧（`oh_story_comfyui` 工具）
 
 在对话里直接让 Agent 调用 `oh_story_comfyui`，示例参数：
@@ -159,3 +178,22 @@ Agent 应如实告诉创作者“没有配置 ComfyUI 工作流”，而不是�
    应在解说文案侧缩短句子，而不是指望合成阶段修。
 
 未配置语音工作流时，Agent 应说明配音仍走上游 MiMo / Fish 通路，不虚构已生成音频。
+
+## 8. 短剧台词配音（TTS 语音工作流占位）
+
+短剧每镜头的台词配音走**通用工具** `oh_story_comfyui`（创作者配置的 TTS 语音工作流，
+模态无关提交/下载），不走生产适配器：
+
+1. 逐镜头取台词文本（分镜.md 该镜头的对白/旁白），用 `oh_story_comfyui` 逐个生成，
+   落盘 `剧集/<EP>/配音/<SHOT-ID>.wav`——**文件名必须含镜头 ID**（如
+   `SHOT-EP001-001.wav`、`SHOT-EP001-001-take2.wav`），串播视图按文件名 token
+   自动关联到对应镜头（`SHOT-EP001-0010.wav` 不会误关联到 `SHOT-EP001-001`）。
+2. 硬性格式：**mono（单声道）、16-bit PCM WAV、44100 Hz**，与第 7 节解说配音同规。
+3. TTS 工作流占位符用法：语音工作流 JSON 里文本用 `__PROMPT__`（整值替换），
+   时长秒数用 `__DURATION_SECONDS__`（JSON 数字替换）；其余占位符规则见第 2 节
+   （整值匹配才替换、缺值显式报错 `missing_placeholder_value`）。
+4. 与 video-recap 配音契约的区别：短剧**无需手写 `tts_meta.json`**，也不走
+   `assemble.py` 合成——配音文件直接由串播视图按镜头播放（图片镜头停留期间
+   自动播其配音，视频镜头只播视频自带声音）。
+5. 工具不可见（当前 preset 没配 `oh_story_comfyui`）或没配语音工作流时，
+   Agent 应明确说明限制，不虚构已生成音频。

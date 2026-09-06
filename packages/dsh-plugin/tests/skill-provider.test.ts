@@ -134,6 +134,14 @@ describe("Drama Skills bundled provider", () => {
     expect(production?.content).toContain("parameters.workflow");
     expect(production?.content).toContain("job ID");
     expect(production?.content).toContain("track_job outputs");
+    expect(production?.content).toContain("input_image");
+    expect(production?.content).toContain("VISUAL-*");
+    expect(production?.content).toContain("__INPUT_IMAGE__");
+    expect(production?.content).toContain("剧集/<EP>/配音/<SHOT-ID>.wav");
+    expect(production?.content).toContain("oh_story_comfyui");
+    expect(production?.content).toContain("mono 16-bit 44100 Hz WAV");
+    expect(production?.content).toContain("instead of inventing audio");
+    expect(production?.content).toContain("does not apply to short drama");
   });
 });
 
@@ -158,6 +166,10 @@ describe("NovelToGame bundled provider", () => {
       expect(skill?.content).toContain("Visual and art assets may be generated through the oh_story_comfyui tool into game-adaptations/<project>/art/");
       expect(skill?.content).toContain("state the limitation instead of pretending media was generated");
       expect(skill?.content).toContain("qa/verification.json remains the sole machine QA truth");
+      expect(skill?.content).toContain("only material-ready, never integration-complete");
+      expect(skill?.content).toContain("explicitly wire each locked-in image into build/app/");
+      expect(skill?.content).toContain("six-item minimum QA");
+      expect(skill?.content).toContain("- ID：ART-*");
       expect(skill?.resourceBase).toEqual({ kind: "directory", path: resolve(gameRoot, candidate.name) });
     }
     const route = await provider.get(listed.find((candidate) => candidate.name === "novel-to-game")!, {});

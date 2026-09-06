@@ -15,11 +15,16 @@ import { fileURLToPath } from "node:url";
  */
 export type DramaAdapterModality = "image" | "video" | "music";
 
+/** Where the meter runs: local ComfyUI is free, cloud providers bill per call. */
+export type DramaAdapterCostModel = "free-local" | "metered-cloud";
+
 export interface DramaAdapterSpec {
   /** Adapter id used both in the config file and in a job's `adapter` field. */
   readonly name: string;
   readonly label: string;
   readonly modality: DramaAdapterModality;
+  /** Local ComfyUI adapters cost nothing; upstream provider adapters bill per call. */
+  readonly costModel: DramaAdapterCostModel;
   /** Host environment variables the bundled adapter refuses to run without. */
   readonly requiredEnv: readonly string[];
   readonly optionalEnv: readonly string[];
@@ -35,6 +40,8 @@ export interface DramaAdapterStatus {
   readonly name: string;
   readonly label: string;
   readonly modality: DramaAdapterModality;
+  /** Frontend cost badge source; mirrors the spec. */
+  readonly costModel: DramaAdapterCostModel;
   readonly configured: boolean;
   readonly missing: readonly string[];
 }
@@ -68,6 +75,7 @@ export const DRAMA_ADAPTERS: readonly DramaAdapterSpec[] = [
     name: "gpt-image-2",
     label: "GPT Image 2",
     modality: "image",
+    costModel: "metered-cloud",
     requiredEnv: ["OPENAI_API_KEY"],
     optionalEnv: ["OPENAI_BASE_URL"],
     timeoutSeconds: 600,
@@ -77,6 +85,7 @@ export const DRAMA_ADAPTERS: readonly DramaAdapterSpec[] = [
     name: "seedance",
     label: "Seedance",
     modality: "video",
+    costModel: "metered-cloud",
     requiredEnv: ["ARK_API_KEY", "SEEDANCE_MODEL"],
     optionalEnv: ["SEEDANCE_BASE_URL", "SEEDANCE_ALLOWED_RATIOS", "SEEDANCE_MIN_DURATION", "SEEDANCE_MAX_DURATION"],
     timeoutSeconds: 3_600,
@@ -86,6 +95,7 @@ export const DRAMA_ADAPTERS: readonly DramaAdapterSpec[] = [
     name: "minimax-h3",
     label: "MiniMax H3",
     modality: "video",
+    costModel: "metered-cloud",
     requiredEnv: ["MINIMAX_API_KEY", "MINIMAX_VIDEO_MODEL", "MINIMAX_VIDEO_RESOLUTIONS"],
     optionalEnv: ["MINIMAX_VIDEO_BASE_URL", "MINIMAX_VIDEO_RATIOS", "MINIMAX_VIDEO_MIN_DURATION", "MINIMAX_VIDEO_MAX_DURATION"],
     timeoutSeconds: 3_600,
@@ -95,6 +105,7 @@ export const DRAMA_ADAPTERS: readonly DramaAdapterSpec[] = [
     name: "minimax-music",
     label: "MiniMax Music",
     modality: "music",
+    costModel: "metered-cloud",
     requiredEnv: ["MINIMAX_API_KEY"],
     optionalEnv: ["MINIMAX_BASE_URL"],
     timeoutSeconds: 600,
@@ -104,6 +115,7 @@ export const DRAMA_ADAPTERS: readonly DramaAdapterSpec[] = [
     name: "comfyui",
     label: "ComfyUI",
     modality: "image",
+    costModel: "free-local",
     requiredEnv: [],
     optionalEnv: [...COMFYUI_OPTIONAL_ENV],
     timeoutSeconds: 600
@@ -112,6 +124,7 @@ export const DRAMA_ADAPTERS: readonly DramaAdapterSpec[] = [
     name: "comfyui-video",
     label: "ComfyUI Video",
     modality: "video",
+    costModel: "free-local",
     requiredEnv: [],
     optionalEnv: [...COMFYUI_OPTIONAL_ENV],
     timeoutSeconds: 3_600
@@ -120,6 +133,7 @@ export const DRAMA_ADAPTERS: readonly DramaAdapterSpec[] = [
     name: "comfyui-music",
     label: "ComfyUI Music",
     modality: "music",
+    costModel: "free-local",
     requiredEnv: [],
     optionalEnv: [...COMFYUI_OPTIONAL_ENV],
     timeoutSeconds: 600
@@ -199,7 +213,7 @@ export async function ensureDramaAdapterConfig(
 export function dramaAdapterStatuses(env: NodeJS.ProcessEnv = process.env): DramaAdapterStatus[] {
   return DRAMA_ADAPTERS.map((adapter) => {
     const missing = adapter.requiredEnv.filter((name) => (env[name] ?? "") === "");
-    return { name: adapter.name, label: adapter.label, modality: adapter.modality, configured: missing.length === 0, missing };
+    return { name: adapter.name, label: adapter.label, modality: adapter.modality, costModel: adapter.costModel, configured: missing.length === 0, missing };
   });
 }
 

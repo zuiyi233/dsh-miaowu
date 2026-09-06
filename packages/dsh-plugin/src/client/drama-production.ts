@@ -1,4 +1,4 @@
-export type DramaProductionSection = "shots" | "assets" | "tasks" | "sequence" | "canvas";
+export type DramaProductionSection = "shots" | "assets" | "tasks" | "sequence" | "playback" | "canvas";
 
 export type DramaAssetKind = "character" | "scene" | "prop" | "state" | "unknown";
 export const PRODUCTION_PROTOCOL_VERSION = "short-drama/v1";
@@ -35,7 +35,28 @@ export interface DramaShot {
   readonly references: readonly string[];
   readonly keyframePrompt?: string | undefined;
   readonly motion?: DramaMotionPrompt | undefined;
+  /**
+   * Per-shot dialogue dubbing resolved from 剧集/<EP>/配音/ audio files via
+   * resolveDramaShotAudios (parseEpisodeProduction fills it when the caller
+   * passes its media file list). Shape stays frozen: workspace-relative path
+   * plus display label; empty/undefined when the shot has no dub.
+   */
+  readonly audio?: readonly DramaShotAudio[] | undefined;
 }
+
+/** Per-shot dubbing entry: workspace-relative audio path plus display label. */
+export interface DramaShotAudio {
+  readonly path: string;
+  readonly label: string;
+}
+
+/**
+ * Dub audio directory segment under an EP: `剧集/<EP>/配音/`. Audios baked
+ * via oh_story_comfyui land as `<SHOT-ID>.wav` (filename must carry the shot
+ * ID), and the playback view resolves them back to shots.
+ */
+export const DRAMA_VOICEOVER_DIRECTORY = "配音";
+const DRAMA_VOICEOVER_AUDIO_EXTENSIONS = new Set([".wav", ".mp3", ".m4a"]);
 
 export interface DramaAsset {
   readonly id: string;
@@ -111,7 +132,43 @@ export function creatorDocumentPaths(files: readonly { readonly path: string }[]
     .sort((left, right) => creatorDocumentOrder(left) - creatorDocumentOrder(right) || left.localeCompare(right, "zh-Hans-CN"));
 }
 
-export function parseEpisodeProduction(documents: Readonly<Record<string, string>>, episodeDirectory: string): DramaEpisodeProduction {
+/**
+ * Resolve one shot's dialogue dubs from the caller-provided media file list:
+ * only audio files directly under `剧集/<EP>/配音/` whose basename carries the
+ * SHOT-ID as a filename token. Token semantics match mediaVersionMatchesJob
+ * (`(?:^|[-_.])ID(?:[-_.]|$)` on the basename, case-insensitive for
+ * agent-generated filenames), so `SHOT-EP001-0010.wav` never matches
+ * `SHOT-EP001-001` (prefix trap) while `SHOT-EP001-001.wav` and
+ * `SHOT-EP001-001-take2.wav` do. Sorted by path; label is the filename.
+ */
+export function resolveDramaShotAudios(
+  shotId: string,
+  mediaFiles: readonly { readonly path: string }[],
+  episodeDirectory: string
+): DramaShotAudio[] {
+  if (shotId.trim() === "") return [];
+  const prefix = `${episodeDirectory}/${DRAMA_VOICEOVER_DIRECTORY}/`;
+  const escaped = shotId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const token = new RegExp(`(?:^|[-_.])${escaped}(?:[-_.]|$)`, "iu");
+  return mediaFiles
+    .filter((file) => file.path.startsWith(prefix) && !file.path.slice(prefix.length).includes("/"))
+    .filter((file) => DRAMA_VOICEOVER_AUDIO_EXTENSIONS.has(voiceoverExtension(file.path)))
+    .filter((file) => token.test(voiceoverBasename(file.path)))
+    .sort((left, right) => left.path.localeCompare(right.path, "zh-Hans-CN"))
+    .map((file) => ({ path: file.path, label: voiceoverBasename(file.path) }));
+}
+
+function voiceoverBasename(path: string): string {
+  return path.split("/").at(-1) ?? path;
+}
+
+function voiceoverExtension(path: string): string {
+  const basename = voiceoverBasename(path);
+  const dot = basename.lastIndexOf(".");
+  return dot < 0 ? "" : basename.slice(dot).toLocaleLowerCase();
+}
+
+export function parseEpisodeProduction(documents: Readonly<Record<string, string>>, episodeDirectory: string, mediaFiles: readonly { readonly path: string }[] = []): DramaEpisodeProduction {
   const storyboardPath = `${episodeDirectory}/分镜.md`;
   const imagePromptPath = `${episodeDirectory}/图片提示词.md`;
   const videoPromptPath = `${episodeDirectory}/视频提示词.md`;
@@ -121,7 +178,10 @@ export function parseEpisodeProduction(documents: Readonly<Record<string, string
   const motions = parseVideoPrompts(videoPromptPath, documents[videoPromptPath] ?? "");
   const visualAssets = parseVisualAssets(visualPath, documents[visualPath] ?? "");
   const motionByShot = new Map(motions.flatMap((motion) => motion.shotId === undefined ? [] : [[motion.shotId, motion] as const]));
-  const linkedShots = shots.map((shot) => ({ ...shot, motion: motionByShot.get(shot.id) }));
+  const linkedShots = shots.map((shot) => {
+    const audio = resolveDramaShotAudios(shot.id, mediaFiles, episodeDirectory);
+    return { ...shot, motion: motionByShot.get(shot.id), ...(audio.length === 0 ? {} : { audio }) };
+  });
   const targets = new Map<string, DramaDocumentTarget>();
   for (const item of [...linkedShots, ...assets, ...motions, ...visualAssets]) {
     targets.set(item.id, { path: item.path, offset: item.offset, id: item.id });

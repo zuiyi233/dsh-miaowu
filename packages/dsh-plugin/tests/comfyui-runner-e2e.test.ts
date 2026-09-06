@@ -10,6 +10,9 @@ const FIXTURE_DIR = resolve(import.meta.dirname, "fixtures");
 const FIXTURE_DRAMA = join(FIXTURE_DIR, "comfyui-drama.json");
 const FIXTURE_TXT2IMG = join(FIXTURE_DIR, "comfyui-txt2img.json");
 const FIXTURE_IMG2IMG = join(FIXTURE_DIR, "comfyui-img2img.json");
+const FIXTURE_VIDEO = join(FIXTURE_DIR, "comfyui-video.json");
+const FIXTURE_MUSIC = join(FIXTURE_DIR, "comfyui-music.json");
+const FIXTURE_TTS = join(FIXTURE_DIR, "comfyui-tts.json");
 
 // PNG: 8 字节签名 + IDAT/IEND 垫底；runner 只校验签名，垫底保证"真实"形状。
 const PNG_BYTES = Buffer.concat([
@@ -17,6 +20,21 @@ const PNG_BYTES = Buffer.concat([
   Buffer.from("IDAT"),
   Buffer.alloc(32, 0),
   Buffer.from("IEND")
+]);
+
+// MP4: 最小 ftyp 盒头即可，对齐 runner 的 mp4 签名判断（content[4:8] == "ftyp")。
+const MP4_BYTES = Buffer.concat([
+  Buffer.from([0x00, 0x00, 0x00, 0x18]),
+  Buffer.from("ftypisom"),
+  Buffer.alloc(16, 0)
+]);
+
+// WAV: 最小 RIFF/WAVE 头即可，对齐 runner 的 wav 签名判断。
+const WAV_BYTES = Buffer.concat([
+  Buffer.from("RIFF"),
+  Buffer.alloc(4, 0),
+  Buffer.from("WAVE"),
+  Buffer.alloc(32, 0)
 ]);
 
 type HistoryDoc = Record<string, unknown>;
@@ -444,5 +462,87 @@ describe("comfyui_runner 端到端（mock server + 真实 python 子进程）", 
     const files = parseStdout(result.stdout)["files"] as Array<Record<string, unknown>>;
     expect(files).toHaveLength(1);
     expect(Buffer.from(await readFile(String(files[0]?.["path"]))).equals(PNG_BYTES)).toBe(true);
+  }, 60_000);
+
+  it("tool 视频：video 工作流 + mp4 签名 → 产物落盘", async () => {
+    const mock = await launch({
+      history: (pid) => ({ [pid]: { status: { status_str: "success", completed: true }, outputs: { "4": { gifs: [{ filename: "ComfyUI_00001_.mp4", subfolder: "", type: "output" }] } } } }),
+      view: MP4_BYTES
+    });
+    const cwd = await makeTemp();
+    const result = await runRunner("tool", {
+      prompt: "a cat walking in the rain",
+      fps: 24,
+      duration_seconds: 3,
+      output_dir: "video",
+      filename_prefix: "shot"
+    }, runnerEnv({ COMFYUI_BASE_URL: mock.baseUrl, COMFYUI_WORKFLOW: FIXTURE_VIDEO }), cwd);
+    expect(result.exitCode).toBe(0);
+    const out = parseStdout(result.stdout);
+    expect(out["prompt_ids"]).toEqual(["pid-1"]);
+    const files = out["files"] as Array<Record<string, unknown>>;
+    expect(files).toHaveLength(1);
+    const landed = String(files[0]?.["path"]);
+    expect(landed.endsWith("shot-1.mp4")).toBe(true);
+    const bytes = Buffer.from(await readFile(landed));
+    expect(bytes.equals(MP4_BYTES)).toBe(true);
+    expect(bytes.subarray(4, 8).toString("ascii")).toBe("ftyp");
+    const submitted = mock.state.prompts[0];
+    expect(nodeInput(submitted, "1", "text")).toBe("a cat walking in the rain");
+    expect(nodeInput(submitted, "4", "frame_rate")).toBe(24);
+    expect(nodeInput(submitted, "5", "length")).toBe(3);
+    expect(typeof nodeInput(submitted, "3", "seed")).toBe("number");
+    expectNoPlaceholders(submitted);
+  }, 60_000);
+
+  it("tool 音乐：music 工作流 wav 路径端到端", async () => {
+    const mock = await launch({
+      history: (pid) => ({ [pid]: { status: { status_str: "success", completed: true }, outputs: { "3": { gifs: [{ filename: "ComfyUI_00001_.wav", subfolder: "", type: "output" }] } } } }),
+      view: WAV_BYTES
+    });
+    const cwd = await makeTemp();
+    const result = await runRunner("tool", {
+      prompt: "lofi piano loop, 90bpm",
+      duration_seconds: 30,
+      output_dir: "music",
+      filename_prefix: "bgm"
+    }, runnerEnv({ COMFYUI_BASE_URL: mock.baseUrl, COMFYUI_WORKFLOW: FIXTURE_MUSIC }), cwd);
+    expect(result.exitCode).toBe(0);
+    const out = parseStdout(result.stdout);
+    const files = out["files"] as Array<Record<string, unknown>>;
+    expect(files).toHaveLength(1);
+    const landed = String(files[0]?.["path"]);
+    expect(landed.endsWith("bgm-1.wav")).toBe(true);
+    const bytes = Buffer.from(await readFile(landed));
+    expect(bytes.equals(WAV_BYTES)).toBe(true);
+    expect(bytes.subarray(0, 4).toString("ascii")).toBe("RIFF");
+    expect(bytes.subarray(8, 12).toString("ascii")).toBe("WAVE");
+    const submitted = mock.state.prompts[0];
+    expect(nodeInput(submitted, "1", "text")).toBe("lofi piano loop, 90bpm");
+    expect(nodeInput(submitted, "2", "duration")).toBe(30);
+    expect(typeof nodeInput(submitted, "2", "seed")).toBe("number");
+    expectNoPlaceholders(submitted);
+  }, 60_000);
+
+  it("tool TTS：tts 工作流 wav 路径端到端", async () => {
+    const mock = await launch({
+      history: (pid) => ({ [pid]: { status: { status_str: "success", completed: true }, outputs: { "3": { gifs: [{ filename: "ComfyUI_00001_.wav", subfolder: "", type: "output" }] } } } }),
+      view: WAV_BYTES
+    });
+    const cwd = await makeTemp();
+    const result = await runRunner("tool", {
+      prompt: "你好，这里是解说配音。",
+      output_dir: "tts",
+      filename_prefix: "narr"
+    }, runnerEnv({ COMFYUI_BASE_URL: mock.baseUrl, COMFYUI_WORKFLOW: FIXTURE_TTS }), cwd);
+    expect(result.exitCode).toBe(0);
+    const files = parseStdout(result.stdout)["files"] as Array<Record<string, unknown>>;
+    expect(files).toHaveLength(1);
+    expect(String(files[0]?.["path"]).endsWith("narr-1.wav")).toBe(true);
+    expect(Buffer.from(await readFile(String(files[0]?.["path"]))).equals(WAV_BYTES)).toBe(true);
+    const submitted = mock.state.prompts[0];
+    expect(nodeInput(submitted, "1", "text")).toBe("你好，这里是解说配音。");
+    expect(typeof nodeInput(submitted, "2", "seed")).toBe("number");
+    expectNoPlaceholders(submitted);
   }, 60_000);
 });

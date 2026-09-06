@@ -2095,7 +2095,7 @@ async function main(): Promise<void> {
       if (await page.locator(".oh-story-shot-card").count() !== 8
         || await page.locator(".oh-story-shot-card img.oh-story-media-preview").count() < 1
         || await page.locator(".oh-story-shot-card video.oh-story-media-preview").count() < 1
-        || await productionTabs.getByRole("tab").allTextContents().then((labels) => JSON.stringify(labels) !== JSON.stringify(["镜头", "素材", "任务", "成片", "画布"]))) {
+        || await productionTabs.getByRole("tab").allTextContents().then((labels) => JSON.stringify(labels) !== JSON.stringify(["镜头", "素材", "任务", "成片", "串播", "画布"]))) {
         throw new Error("Production shot board did not project the creator-first documents and DSH workspace media.");
       }
       if (!useRealDeepSeek && await page.locator(".oh-story-shot-card").filter({ hasText: productionIntentArgs.targetId }).first().getAttribute("data-selected") === null) {

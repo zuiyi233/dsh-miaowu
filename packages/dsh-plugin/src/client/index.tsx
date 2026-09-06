@@ -24,6 +24,7 @@ import {
 } from "./file-activity.js";
 import { buildFileTree, type FileTreeNode } from "./file-tree.js";
 import { isGameArtImage } from "./game-art.js";
+import { GameQa, type GameQaSummary } from "./game-qa.js";
 import { JsonlPreview } from "./jsonl-preview.js";
 import { MarkdownPreview } from "./markdown-preview.js";
 import {
@@ -114,6 +115,7 @@ interface GameProject {
   readonly previewReady: boolean;
   readonly previewUrl?: string | undefined;
   readonly previewVersion: string;
+  readonly qa?: GameQaSummary | undefined;
 }
 interface FilePayload {
   readonly path: string;
@@ -143,7 +145,7 @@ interface WorkbenchMemory {
   expanded: Record<string, boolean>;
   selected: string | undefined;
   workbench: WorkbenchMode;
-  gameTab: "preview" | "design";
+  gameTab: "preview" | "design" | "qa";
   gameProjectId: string | undefined;
   gamePane: "studio" | "chat";
   videoTab: "preview" | "artifacts";
@@ -495,6 +497,16 @@ function GamePreview({ project, building }: { readonly project: GameProject; rea
   </div>;
 }
 
+/**
+ * 游戏音频分组规则:当前项目 audio/ 下递归,仅 .wav/.mp3/.flac。
+ * ComfyUI 音乐工作流产物经 oh_story_comfyui 落在 game-adaptations/<项目>/audio/。
+ * 纯函数,便于 tests/game-audio.test.ts 直接覆盖。
+ */
+export function isGameAudio(path: string, root: string): boolean {
+  if (!/\.(?:wav|mp3|flac)$/iu.test(path)) return false;
+  return path.startsWith(`${root}/audio/`);
+}
+
 function GameDesign({
   project,
   files,
@@ -512,16 +524,18 @@ function GameDesign({
     /\.(?:md|txt|json|jsonl|html|css|[cm]?js|tsx?|jsx)$/iu.test(file.path)
   )), [files, project.root]);
   const artworks = useMemo(() => files.filter((file) => isGameArtImage(file.path, project.root)), [files, project.root]);
-  const preferred = selected !== undefined && (documents.some((file) => file.path === selected) || artworks.some((file) => file.path === selected))
+  const audios = useMemo(() => files.filter((file) => isGameAudio(file.path, project.root)), [files, project.root]);
+  const preferred = selected !== undefined && (documents.some((file) => file.path === selected) || artworks.some((file) => file.path === selected) || audios.some((file) => file.path === selected))
     ? selected
-    : documents.find((file) => file.path === `${project.root}/PRODUCT_BRIEF.md`)?.path ?? documents[0]?.path ?? artworks[0]?.path;
+    : documents.find((file) => file.path === `${project.root}/PRODUCT_BRIEF.md`)?.path ?? documents[0]?.path ?? artworks[0]?.path ?? audios[0]?.path;
   const [path, setPath] = useState(preferred);
   const [content, setContent] = useState<string>();
   const [error, setError] = useState<string>();
   useEffect(() => { setPath(preferred); }, [preferred, project.id]);
   const artwork = path === undefined ? undefined : artworks.find((file) => file.path === path);
+  const audio = artwork === undefined && path !== undefined ? audios.find((file) => file.path === path) : undefined;
   useEffect(() => {
-    if (path === undefined || artwork !== undefined || project.source === "example") { setContent(undefined); return; }
+    if (path === undefined || artwork !== undefined || audio !== undefined || project.source === "example") { setContent(undefined); return; }
     const controller = new AbortController();
     setContent(undefined);
     setError(undefined);
@@ -530,20 +544,21 @@ function GameDesign({
       .then((file) => { setContent(file.content); })
       .catch((reason: unknown) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason)); });
     return () => { controller.abort(); };
-  }, [artwork, path, project.source, sessionId]);
+  }, [artwork, audio, path, project.source, sessionId]);
   if (project.source === "example") return <div className="oh-game-design-empty">
     <strong>内置完整示例</strong>
     <p>《金瓶梅 · 风月总账》的完整可玩构建与 QA 校验结果随插件打包，可直接在左侧试玩。上游的产品简报、分析、概念、设计与源小说不随包分发，可在 novel-to-game 仓库查看完整创作过程。</p>
     <code>novel-to-game/examples/jin-ping-mei</code>
   </div>;
-  if ((documents.length === 0 && artworks.length === 0) || path === undefined) return <div className="oh-game-design-empty">当前项目还没有可检查的设计或源文件。</div>;
+  if ((documents.length === 0 && artworks.length === 0 && audios.length === 0) || path === undefined) return <div className="oh-game-design-empty">当前项目还没有可检查的设计或源文件。</div>;
   const markdown = path.toLocaleLowerCase().endsWith(".md");
   return <div className="oh-game-design">
     <label>项目文件<select value={path} onChange={(event) => {
       setPath(event.target.value);
       onSelect(event.target.value);
-    }}>{documents.map((file) => <option value={file.path} key={file.path}>{file.path.slice(project.root.length + 1)}</option>)}{artworks.length > 0 && <optgroup label="美术">{artworks.map((file) => <option value={file.path} key={file.path}>{file.path.slice(project.root.length + 1)}</option>)}</optgroup>}</select></label>
+    }}>{documents.map((file) => <option value={file.path} key={file.path}>{file.path.slice(project.root.length + 1)}</option>)}{artworks.length > 0 && <optgroup label="美术">{artworks.map((file) => <option value={file.path} key={file.path}>{file.path.slice(project.root.length + 1)}</option>)}</optgroup>}{audios.length > 0 && <optgroup label="音频">{audios.map((file) => <option value={file.path} key={file.path}>{file.path.slice(project.root.length + 1)}</option>)}</optgroup>}</select></label>
     {artwork !== undefined ? <div className="oh-story-media-document"><img src={endpoint("media", sessionId, artwork.path)} alt={artwork.path} loading="lazy" /></div>
+      : audio !== undefined ? <div className="oh-story-media-document"><audio className="oh-game-audio" src={endpoint("media", sessionId, audio.path)} controls preload="metadata" /></div>
       : error !== undefined ? <div className="oh-story-error">{error}</div>
       : content === undefined ? <div className="oh-game-design-empty">正在载入文件…</div>
         : markdown ? <MarkdownPreview content={content} label={path} />
@@ -619,7 +634,7 @@ function GameStudio({  sessionId,
     if (project !== undefined && project.id !== gameProjectId) onGameProject(project.id);
   }, [gameProjectId, onGameProject, project]);
   if (project === undefined) return <main ref={studioRef} id={paneId} className="oh-game-studio" role="tabpanel" aria-labelledby={labelledBy} hidden={hidden}><div className="oh-game-design-empty">游戏能力正在载入…</div></main>;
-  const tabs = ["preview", "design"] as const;
+  const tabs = ["preview", "design", "qa"] as const;
   return <main ref={studioRef} id={paneId} className="oh-game-studio" data-source={project.source} data-oh-floated={floatActive || undefined} role="tabpanel" aria-labelledby={labelledBy} hidden={hidden}>
     <header className="oh-game-toolbar">
       <div className="oh-workbench-cluster">
@@ -652,7 +667,7 @@ function GameStudio({  sessionId,
           aria-controls={`${tabsId}-${tab}-panel`}
           onKeyDown={(event) => { handleTabKey(event, tabs, gameTab, onGameTab); }}
           onClick={() => { onGameTab(tab); }}
-        >{tab === "preview" ? "试玩" : project.source === "example" ? "说明" : "项目文件"}</button>)}
+        >{tab === "preview" ? "试玩" : tab === "qa" ? "质检" : project.source === "example" ? "说明" : "项目文件"}</button>)}
       </div>
     </header>
     <div className="oh-game-panels">
@@ -661,6 +676,9 @@ function GameStudio({  sessionId,
       </div>
       <div className="oh-game-panel" role="tabpanel" id={`${tabsId}-design-panel`} aria-labelledby={`${tabsId}-design-tab`} hidden={gameTab !== "design"}>
         <GameDesign project={project} files={workspace.files} selected={selected} sessionId={sessionId} onSelect={onSelect} />
+      </div>
+      <div className="oh-game-panel" role="tabpanel" id={`${tabsId}-qa-panel`} aria-labelledby={`${tabsId}-qa-tab`} hidden={gameTab !== "qa"}>
+        <GameQa qa={project.qa ?? { present: false }} projectTitle={project.title} />
       </div>
     </div>
   </main>;
@@ -807,9 +825,13 @@ function CreativeWorkbench({
     const current = buffers[path];
     return current === undefined || current.missing === true ? [] : [[path, current.content] as const];
   })), [buffers, episodeDocumentPaths]);
+  const episodeVoiceoverFiles = useMemo(
+    () => (workspace?.files ?? []).filter((file) => file.kind === "media" && file.mimeType?.startsWith("audio/") === true),
+    [workspace?.files]
+  );
   const episodeProduction = useMemo(
-    () => episodeDirectory === undefined ? undefined : parseEpisodeProduction(episodeDocuments, episodeDirectory),
-    [episodeDirectory, episodeDocuments]
+    () => episodeDirectory === undefined ? undefined : parseEpisodeProduction(episodeDocuments, episodeDirectory, episodeVoiceoverFiles),
+    [episodeDirectory, episodeDocuments, episodeVoiceoverFiles]
   );
   const productionLibrary = useMemo(() => (workspace?.files ?? []).flatMap((file): ProductionMediaVersion[] => {
     if (file.kind !== "media" || file.mimeType?.startsWith("audio/") === true) return [];

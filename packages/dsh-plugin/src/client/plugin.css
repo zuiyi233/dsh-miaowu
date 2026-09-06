@@ -347,6 +347,29 @@
 .oh-game-design > label { display: flex; min-height: 42px; flex: none; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--os-border); color: var(--os-muted); font-size: 11px; }
 .oh-game-design select { max-width: min(560px, 75%); }
 .oh-game-source { box-sizing: border-box; min-height: 0; flex: 1; overflow: auto; margin: 0; padding: 18px 22px 48px; color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-markdown-code-block); white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.oh-game-audio { width: min(520px, 100%); }
+
+.oh-story-game-qa { display: flex; min-height: 0; flex: 1; overflow: auto; flex-direction: column; gap: 10px; padding: 14px 16px 32px; }
+.oh-story-game-qa-header { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 8px; }
+.oh-story-game-qa-verdict { padding: 3px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.oh-story-game-qa-verdict[data-state="pass"] { color: var(--dsw-alias-state-success-primary); background: rgb(69 185 111 / 14%); }
+.oh-story-game-qa-verdict[data-state="fail"] { color: var(--dsw-alias-state-error-primary); background: rgb(224 82 82 / 12%); }
+.oh-story-game-qa-verdict[data-state="partial"] { color: var(--game-warning); background: rgb(224 168 82 / 14%); }
+.oh-story-game-qa-verdict[data-state="none"] { color: var(--os-muted); background: var(--dsw-alias-button-ghost-active-fill); }
+.oh-story-game-qa-binding { color: var(--os-muted); font-size: 11px; }
+.oh-story-game-qa-checks { display: grid; margin: 0; padding: 0; gap: 8px; list-style: none; }
+.oh-story-game-qa-check { border: 1px solid var(--os-border); border-radius: 8px; background: var(--dsw-alias-bg-base); }
+.oh-story-game-qa-check-toggle { display: flex; width: 100%; min-height: 36px; align-items: center; gap: 8px; border: 0; border-radius: 8px; background: transparent; color: inherit; padding: 8px 12px; cursor: pointer; font: inherit; text-align: left; }
+.oh-story-game-qa-check-toggle:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
+.oh-story-game-qa-check-icon { width: 18px; flex: none; text-align: center; font-weight: 700; }
+.oh-story-game-qa-check[data-status="PASS"] .oh-story-game-qa-check-icon { color: var(--dsw-alias-state-success-primary); }
+.oh-story-game-qa-check[data-status="FAIL"] .oh-story-game-qa-check-icon { color: var(--dsw-alias-state-error-primary); }
+.oh-story-game-qa-check[data-status="NOT_RUN"] .oh-story-game-qa-check-icon { color: var(--os-muted); }
+.oh-story-game-qa-check-name { flex: 1; font-size: 13px; font-weight: 500; }
+.oh-story-game-qa-check-status { flex: none; color: var(--os-muted); font-size: 11px; }
+.oh-story-game-qa-evidence { padding: 0 12px 12px 38px; color: var(--os-muted); font-size: 12px; line-height: 1.65; }
+.oh-story-game-qa-evidence p { margin: 4px 0; }
+.oh-story-game-qa-evidence-text { color: var(--dsw-alias-label-secondary); }
 
 .oh-game-mobile-switcher { display: none; }
 
@@ -1304,3 +1327,24 @@
 .oh-settings-section button:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .oh-settings-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--dsw-alias-label-primary); font-size: 12px; }
 .oh-settings-toggle input { width: 15px; height: 15px; accent-color: var(--dsw-alias-state-business-primary); }
+/* 短剧串播:单镜头舞台 + 台词说明 + 控制器,沿用生产视图的 DSW 语义 token。 */
+.oh-story-playback { display: flex; flex-direction: column; gap: 10px; padding: 12px; outline: none; }
+.oh-story-playback-stage { display: grid; min-height: 240px; place-items: center; overflow: hidden; border: 1px solid var(--os-border); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); }
+.oh-story-playback-media { display: block; width: 100%; max-height: 420px; object-fit: contain; background: var(--dsw-alias-bg-base); }
+.oh-story-playback-dub { width: 100%; }
+.oh-story-playback-placeholder { display: grid; min-height: 240px; place-content: center; gap: 6px; padding: 24px; text-align: center; color: var(--os-muted); }
+.oh-story-playback-placeholder strong { color: var(--dsw-alias-label-secondary); font-size: 22px; font-variant-numeric: tabular-nums; }
+.oh-story-playback-caption strong { display: block; font-size: 13px; }
+.oh-story-playback-caption p { margin: 5px 0 0; color: var(--os-muted); }
+.oh-story-playback-prompt { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; }
+.oh-story-playback-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.oh-story-playback-controls label { display: flex; align-items: center; gap: 5px; color: var(--os-muted); }
+.oh-story-playback-controls input { width: 56px; box-sizing: border-box; border: 1px solid var(--os-border); border-radius: 6px; padding: 4px 6px; color: inherit; background: var(--dsw-alias-bg-base); font: inherit; }
+.oh-story-playback-hint { color: var(--os-muted); font-size: 10px; }
+.oh-story-playback-filmstrip { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.oh-story-playback-filmstrip button { min-width: 40px; font-variant-numeric: tabular-nums; }
+.oh-story-playback-filmstrip button[data-current] { border-color: var(--dsw-alias-state-business-primary); color: var(--dsw-alias-state-business-primary); }
+/* 本 EP 产出汇总行:复用生成环境条的条块语义,圆点沿用业务主色。 */
+.oh-story-output-ledger { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 5px 10px; margin: 8px 12px 0; padding: 7px 9px; border: 1px solid var(--os-border); border-radius: 7px; color: var(--os-muted); background: var(--dsw-alias-bg-layer-1); font-size: 10px; }
+.oh-story-output-ledger strong { color: var(--dsw-alias-label-secondary); font-size: 11px; }
+.oh-story-output-ledger span::before { content: "●"; margin-right: 4px; color: var(--dsw-alias-state-business-primary); }

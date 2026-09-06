@@ -11,6 +11,7 @@ import type { SandboxPolicyService } from "@deepseek-ai/dsh-sandbox-policy";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import type {} from "@deepseek-ai/dsh-typert-registry";
 import { type GameVerificationBinding, WorkspaceVerificationTracker } from "./game-verification.js";
+import type { GameQaCheckId, GameQaCheckSummary, GameQaSummary } from "./client/game-qa.js";
 import { comfyuiWorkflowStatus, probeComfyui, parseWorkspaceComfyuiConfig, comfyuiConfigResponse, validateWorkspaceComfyuiConfigBody, writeWorkspaceComfyuiConfigFile, COMFYUI_CONFIG_RELATIVE_PATH, type ComfyuiPreflightSummary, type WorkspaceComfyuiConfig } from "./comfyui-status.js";
 import { dramaAdapterStatuses, ensureDramaAdapterConfig, type DramaAdapterStatus } from "./drama-adapters.js";
 import { commandOutput, hostPython } from "./host-python.js";
@@ -38,7 +39,7 @@ const VIDEO_EDITABLE_EXTENSIONS = new Set([...EDITABLE_EXTENSIONS, ".srt", ".ass
 const MEDIA_TYPES: ReadonlyMap<string, string> = new Map([
   [".png", "image/png"], [".jpg", "image/jpeg"], [".jpeg", "image/jpeg"], [".webp", "image/webp"], [".gif", "image/gif"],
   [".mp4", "video/mp4"], [".webm", "video/webm"], [".mov", "video/quicktime"], [".mkv", "video/x-matroska"],
-  [".mp3", "audio/mpeg"], [".wav", "audio/wav"], [".m4a", "audio/mp4"]
+  [".mp3", "audio/mpeg"], [".wav", "audio/wav"], [".m4a", "audio/mp4"], [".flac", "audio/flac"]
 ]);
 const MEDIA_MAX_BYTES = 256 * 1_024 * 1_024;
 const FILE_LIMIT = 1_000;
@@ -87,6 +88,7 @@ interface GameProjectSummary {
   readonly previewUrl?: string | undefined;
   readonly previewVersion: string;
   readonly verification: GameVerificationSummary;
+  readonly qa: GameQaSummary;
 }
 
 export interface WorkspaceRealm {
@@ -593,6 +595,47 @@ export function gameRoot(path: string): boolean {
     && !name.startsWith(".") && !name.includes("\\");
 }
 
+const GAME_QA_CHECK_IDS: readonly GameQaCheckId[] = ["launch", "render", "input", "coreLoop", "outcome", "restart"];
+
+const GAME_QA_CHECK_LABELS: Readonly<Record<GameQaCheckId, string>> = {
+  launch: "启动",
+  render: "渲染",
+  input: "输入",
+  coreLoop: "核心循环",
+  outcome: "设计结果",
+  restart: "重开"
+};
+
+export function summarizeGameQa(value: unknown, binding?: GameVerificationBinding): GameQaSummary {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return { present: false };
+  const record = value as Record<string, unknown>;
+  const status = record.status === "PASS" || record.status === "FAIL" ? record.status : undefined;
+  if (status === undefined) return { present: false };
+  const rawChecks = typeof record.checks === "object" && record.checks !== null && !Array.isArray(record.checks)
+    ? record.checks as Record<string, unknown>
+    : {};
+  const completeRun = typeof record.completeRun === "object" && record.completeRun !== null && !Array.isArray(record.completeRun)
+    ? record.completeRun as Record<string, unknown>
+    : {};
+  const runEvidence = typeof completeRun.evidence === "string" && completeRun.evidence !== "" ? completeRun.evidence : undefined;
+  // qa 契约(schemas/game-qa/references/qa-contract.md):checks 只是六键状态字符串,
+  // 逐项证据不在 checks 里,而是 completeRun.evidence 指向的同次运行观察清单。
+  // 摘要沿用该映射:每项证据文本标注状态来源,run 级证据统一指向 evidence 路径,不伪造逐项证据。
+  const checks: GameQaCheckSummary[] = GAME_QA_CHECK_IDS.map((id) => {
+    const check = rawChecks[id];
+    const checkStatus = check === "PASS" || check === "FAIL" ? check : "NOT_RUN";
+    return {
+      id,
+      status: checkStatus,
+      evidence: checkStatus === "NOT_RUN"
+        ? `${GAME_QA_CHECK_LABELS[id]}尚未验证`
+        : `${GAME_QA_CHECK_LABELS[id]}${checkStatus === "PASS" ? "通过" : "未通过"}（见运行证据${runEvidence === undefined ? "（本次运行未记录 evidence 路径）" : ` ${runEvidence}`}）`
+    };
+  });
+  const summary: GameQaSummary = { present: true, verdict: status, checks };
+  return binding === undefined ? summary : { ...summary, binding };
+}
+
 function normalizedVerification(
   value: unknown,
   binding: GameVerificationBinding,
@@ -666,7 +709,7 @@ function headingTitle(content: string | undefined, fallback: string): string {
   return heading?.replace(/^#\s+/u, "").replace(/^PRODUCT_BRIEF\s*[·・:]?\s*/iu, "").trim() || fallback;
 }
 
-async function workspaceGameProjects(
+export async function workspaceGameProjects(
   realm: WorkspaceRealm,
   files: readonly WorkspaceFile[],
   sessionId: string,
@@ -692,6 +735,7 @@ async function workspaceGameProjects(
     try { verification = qa === undefined ? undefined : JSON.parse(qa) as unknown; }
     catch { verification = undefined; }
     const freshness = workspaceVerificationTracker.observe(`${sessionId}\0${root}`, qaFile?.version, preview.version);
+    const resolvedVerification = normalizedVerification(verification, freshness.binding, freshness.verifiedPreviewVersion);
     return {
       id: `workspace:${id}`,
       root,
@@ -702,7 +746,8 @@ async function workspaceGameProjects(
         ? `/oh-story/game-preview/workspace/${token(sessionId)}/${token(root)}/index.html`
         : undefined,
       previewVersion: preview.version,
-      verification: normalizedVerification(verification, freshness.binding, freshness.verifiedPreviewVersion)
+      verification: resolvedVerification,
+      qa: summarizeGameQa(verification, resolvedVerification.binding)
     };
   }));
 }
@@ -746,6 +791,8 @@ async function bundledGameExample(): Promise<GameProjectSummary> {
   const exampleJson = JSON.parse(example) as { readonly title?: unknown };
   const manifestJson = JSON.parse(manifest) as { readonly upstream?: { readonly commit?: unknown } };
   const previewVersion = typeof manifestJson.upstream?.commit === "string" ? manifestJson.upstream.commit.slice(0, 16) : "bundled";
+  const parsedVerification = JSON.parse(verification) as unknown;
+  const resolvedVerification = normalizedVerification(parsedVerification, "PINNED", previewVersion);
   return {
     id: `example:${BUNDLED_GAME_EXAMPLE}`,
     root: `examples/${BUNDLED_GAME_EXAMPLE}`,
@@ -754,7 +801,8 @@ async function bundledGameExample(): Promise<GameProjectSummary> {
     previewReady: true,
     previewUrl: `/oh-story/game-preview/example/${BUNDLED_GAME_EXAMPLE}/index.html`,
     previewVersion,
-    verification: normalizedVerification(JSON.parse(verification) as unknown, "PINNED", previewVersion)
+    verification: resolvedVerification,
+    qa: summarizeGameQa(parsedVerification, resolvedVerification.binding)
   };
 }
 

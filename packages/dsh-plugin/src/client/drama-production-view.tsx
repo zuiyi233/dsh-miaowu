@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { productionCompleteness, type DramaDocumentTarget, type DramaEpisodeProduction, type DramaProductionSection } from "./drama-production.js";
 import { endpoint } from "./workbench-ui.js";
 import { nativeBatchPrompt, nativeCompositionPrompt, nativeProductionPrompt } from "./production-prompts.js";
-import { activeProductionJobId, createPendingJob, queuedItemForJob, reconcileProductionJobs, reconcileSequence, referencesForTarget, reorderSequence, sequenceIssues, selectedVersionForTarget, type CanvasPoint, type ProductionJob, type ProductionMediaVersion, type ProductionQueueEntry, type ProductionSequenceItem } from "./production-runtime.js";
+import { activeProductionJobId, createPendingJob, queuedItemForJob, reconcileProductionJobs, reconcileSequence, referencesForTarget, reorderSequence, sequenceIssues, selectedVersionForTarget, summarizeEpisodeOutput, type CanvasPoint, type EpisodeOutputKind, type ProductionJob, type ProductionMediaVersion, type ProductionQueueEntry, type ProductionSequenceItem } from "./production-runtime.js";
+import { DramaPlayback } from "./drama-playback.js";
 
 interface Props {
   readonly sessionId: string;
@@ -35,7 +36,7 @@ interface Props {
   readonly onRefresh: () => void;
 }
 
-const SECTION_LABELS: Readonly<Record<DramaProductionSection, string>> = { shots: "镜头", assets: "素材", tasks: "任务", sequence: "成片", canvas: "画布" };
+const SECTION_LABELS: Readonly<Record<DramaProductionSection, string>> = { shots: "镜头", assets: "素材", tasks: "任务", sequence: "成片", playback: "串播", canvas: "画布" };
 const SECTION_ORDER = Object.keys(SECTION_LABELS) as DramaProductionSection[];
 const STATUS_LABELS: Readonly<Record<ProductionJob["status"], string>> = { awaiting_confirmation: "等待确认", pending: "已提交", running: "DSH 执行中", dispatched_unknown: "待核对", succeeded: "已完成", failed: "失败", canceled: "已取消" };
 const ASSET_KIND_LABEL = { character: "人物", scene: "场景", prop: "道具", state: "状态", unknown: "设定" } as const;
@@ -45,7 +46,7 @@ const JOB_KIND_LABEL = { image: "图片", video: "视频", composition: "成片"
 export interface DramaPreflight {
   readonly python: { readonly ok: boolean; readonly version?: string };
   readonly adapterConfig: { readonly path: string; readonly generated: boolean; readonly ok: boolean };
-  readonly adapters: readonly { readonly name: string; readonly label: string; readonly modality: "image" | "video" | "music"; readonly configured: boolean; readonly missing: readonly string[] }[];
+  readonly adapters: readonly { readonly name: string; readonly label: string; readonly modality: "image" | "video" | "music"; readonly costModel?: "free-local" | "metered-cloud" | undefined; readonly configured: boolean; readonly missing: readonly string[] }[];
   /** Local-ComfyUI probe, added after the adapter summary; older hosts omit it: render nothing then. */
   readonly comfyui?: DramaPreflightComfyui | undefined;
 }
@@ -115,6 +116,13 @@ export interface DramaPreflightComfyui {
 }
 
 const MODALITY_LABEL = { image: "图片", video: "视频", music: "音乐" } as const;
+const OUTPUT_KIND_LABEL: Readonly<Record<EpisodeOutputKind, string>> = { image: "图片", video: "视频", music: "音乐" };
+
+function adapterCostSuffix(costModel: "free-local" | "metered-cloud" | undefined): string {
+  if (costModel === "free-local") return " · 本地免费";
+  if (costModel === "metered-cloud") return " · 云计费";
+  return "";
+}
 
 function comfyuiWorkflowSourceLabel(source: DramaPreflightComfyui["workflow"]["source"]): string | undefined {
   if (source === "env-file") return "环境变量文件";
@@ -223,12 +231,26 @@ export function ComfyuiEnvironmentStatus({ comfyui, pythonOk, sessionId, onConfi
   </>;
 }
 
+const OUTPUT_COST_LABEL: Readonly<Record<EpisodeOutputKind, string>> = { image: "本地 ComfyUI 免费", video: "云按次计费", music: "云按次计费" };
+
+/** 本 EP 产出汇总行:从 runtime 状态聚合,不发新请求;成本模型按 image=本地免费 / video+music=云计费标注。 */
+export function EpisodeOutputLedger({ jobs, versions }: {
+  readonly jobs: readonly ProductionJob[];
+  readonly versions: readonly ProductionMediaVersion[];
+}) {
+  const summary = summarizeEpisodeOutput(jobs, versions);
+  return <div className="oh-story-output-ledger" role="status" aria-label="本 EP 产出">
+    <strong>本 EP 产出</strong>
+    {summary.map((row) => <span key={row.kind}>{OUTPUT_KIND_LABEL[row.kind]} {row.produced} 件 · 进行中 {row.running} · {OUTPUT_COST_LABEL[row.kind]}</span>)}
+  </div>;
+}
+
 /**
  * DeepSeek writes the prompts; the pictures, videos and music come from provider
  * APIs that the produce Skill calls. Nothing in the conversation says so, and the
  * keys live in the host environment, so the 生产 view states it up front.
  */
-function ProductionEnvironment({ sessionId }: { readonly sessionId: string }) {
+function ProductionEnvironment({ sessionId, jobs, versions }: { readonly sessionId: string; readonly jobs: readonly ProductionJob[]; readonly versions: readonly ProductionMediaVersion[] }) {
   const [preflight, setPreflight] = useState<DramaPreflight | "failed">();
   const [attempt, setAttempt] = useState(0);
   // The summary is host-wide (the route ignores sessionId); the id only keeps
@@ -251,7 +273,8 @@ function ProductionEnvironment({ sessionId }: { readonly sessionId: string }) {
     {preflight === "failed" && <button type="button" onClick={() => { setPreflight(undefined); setAttempt((value) => value + 1); }}>环境检查失败 · 重试</button>}
     {typeof preflight === "object" && <>
       <span data-ready={preflight.python.ok || undefined}>Python {preflight.python.version ?? "未找到"}</span>
-      {preflight.adapters.map((adapter) => <span key={adapter.name} data-ready={adapter.configured || undefined} title={adapter.configured ? `${adapter.name} 已配置` : `缺少环境变量 ${adapter.missing.join("、")}`}>{MODALITY_LABEL[adapter.modality]} {adapter.label}{adapter.configured ? "" : ` · 缺 ${adapter.missing.join("、")}`}</span>)}
+      {preflight.adapters.map((adapter) => <span key={adapter.name} data-ready={adapter.configured || undefined} title={adapter.configured ? `${adapter.name} 已配置` : `缺少环境变量 ${adapter.missing.join("、")}`}>{MODALITY_LABEL[adapter.modality]} {adapter.label}{adapterCostSuffix(adapter.costModel)}{adapter.configured ? "" : ` · 缺 ${adapter.missing.join("、")}`}</span>)}
+      <EpisodeOutputLedger jobs={jobs} versions={versions} />
       <ComfyuiEnvironmentStatus
         comfyui={preflight.comfyui}
         pythonOk={preflight.python.ok}
@@ -344,13 +367,14 @@ export function DramaProductionView(props: Props) {
 
   return <div className="oh-story-production">
     <div className="oh-story-production-bar"><div className="oh-story-production-tabs" role="tablist" aria-label="短剧生产视图">{SECTION_ORDER.map((item) => <button type="button" role="tab" tabIndex={props.section === item ? 0 : -1} aria-selected={props.section === item} key={item} onKeyDown={(event) => { handleSectionKey(event, item, props.onSectionChange); }} onClick={() => { props.onSectionChange(item); }}>{SECTION_LABELS[item]}</button>)}</div><div className="oh-story-production-meta"><span className="oh-story-production-summary">{props.production.shots.length} 镜 · {props.production.assets.length + props.production.visualAssets.length} 素材 · {props.jobs.filter((job) => job.status === "awaiting_confirmation" || job.status === "running" || job.status === "pending").length} 任务</span><button type="button" onClick={props.onRefresh}>刷新</button></div></div>
-    <ProductionEnvironment sessionId={props.sessionId} />
+    <ProductionEnvironment sessionId={props.sessionId} jobs={props.jobs} versions={props.versions} />
     {notice !== undefined && <div className="oh-story-production-notice" role="status"><span>{notice}</span><button type="button" aria-label="关闭提示" onClick={() => { setNotice(undefined); }}>×</button></div>}
     {props.production.diagnostics.length > 0 && <details className="oh-story-production-diagnostics"><summary>{protocolErrors > 0 ? `${String(protocolErrors)} 个协议错误` : `${String(props.production.diagnostics.length)} 个格式提醒`}</summary><ul>{props.production.diagnostics.slice(0, 8).map((item) => <li data-severity={item.severity} key={`${item.path}:${String(item.offset)}:${item.code}`}><button type="button" onClick={() => { props.onNavigate({ path: item.path, offset: item.offset, id: item.targetId ?? item.code }); }}>{item.path.split("/").at(-1)}:{item.line}</button><span>{item.message}</span></li>)}</ul>{props.production.diagnostics.length > 8 && <p>另有 {props.production.diagnostics.length - 8} 项，请按文档位置修复。</p>}</details>}
     {props.section === "shots" && <ShotBoard {...props} onCreateJob={createJob} onBatch={createBatch} />}
     {props.section === "assets" && <AssetBoard {...props} onCreateJob={createJob} />}
     {props.section === "tasks" && <TaskBoard jobs={props.jobs} queue={props.queue} sessionRunning={props.sessionRunning} onCancel={cancelJob} onRemoveQueued={removeQueuedJob} />}
     {props.section === "sequence" && <SequenceBoard {...props} onCompose={composeSequence} />}
+    {props.section === "playback" && <DramaPlayback sessionId={props.sessionId} production={props.production} versions={props.versions} selections={props.selections} episodeName={props.production.episodeDirectory.split("/").at(-1) ?? props.production.episodeDirectory} />}
     {props.section === "canvas" && <ProductionCanvas {...props} />}
   </div>;
 }
