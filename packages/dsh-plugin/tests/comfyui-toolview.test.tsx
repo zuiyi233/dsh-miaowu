@@ -4,6 +4,8 @@ import type { ToolCallBlock } from "@deepseek-ai/dsh-client-ui-conversation/clie
 import type { ToolCallViewProps } from "@deepseek-ai/dsh-client-ui-tool/client";
 import {
   ComfyuiToolView,
+  countComfyuiFilesByKind,
+  formatComfyuiSummaryCount,
   isComfyuiImagePath,
   parseComfyuiResultText,
   resolveComfyuiToolResult
@@ -51,6 +53,7 @@ describe("comfyui toolview", () => {
   it("renders one lazy img per image file with the media endpoint url", () => {
     const html = renderToStaticMarkup(<ComfyuiToolView {...viewProps(settledBlock(SUCCESS_TEXT))} />);
     expect(html).toContain("ComfyUI 生成");
+    expect(html).toContain("图片 2 张");
     expect(html).toContain("2 个文件");
     expect(html).toContain("耗时 12.3s");
     const imgs = html.match(/<img/g) ?? [];
@@ -61,11 +64,55 @@ describe("comfyui toolview", () => {
   });
 
   it("renders non-image paths as file links instead of img", () => {
-    const text = "ComfyUI 生成完成：共 1 个文件，落在 video，耗时 3.0s。\n- video/clip.mp4（512 字节）";
+    const text = "ComfyUI 生成完成：共 1 个文件，落在 other，耗时 3.0s。\n- other/notes.txt（512 字节）";
     const html = renderToStaticMarkup(<ComfyuiToolView {...viewProps(settledBlock(text))} />);
     expect(html).not.toContain("<img");
-    expect(html).toContain("video/clip.mp4");
+    expect(html).toContain("other/notes.txt");
     expect(html).toContain("<a ");
+  });
+
+  it("summarizes mixed image and audio results by kind", () => {
+    const text = [
+      "ComfyUI 生成完成：共 2 个文件，落在 mix，耗时 3.0s。",
+      "- mix/cover.png（1024 字节）",
+      "- mix/voice.wav（2048 字节）"
+    ].join("\n");
+    const html = renderToStaticMarkup(<ComfyuiToolView {...viewProps(settledBlock(text))} />);
+    expect(html).toContain("图片 1 张 · 音频 1 个");
+    expect(html).toContain("<img");
+    expect(html).toContain("<audio");
+    expect(html).toContain("mix/voice.wav");
+  });
+
+  it("renders pure video results with an inline video player", () => {
+    const text = "ComfyUI 生成完成：共 1 个文件，落在 video，耗时 3.0s。\n- video/clip.mp4（512 字节）";
+    const html = renderToStaticMarkup(<ComfyuiToolView {...viewProps(settledBlock(text))} />);
+    expect(html).toContain("视频 1 个");
+    expect(html).not.toContain("<img");
+    expect(html).toContain("<video");
+    expect(html).toContain("preload=\"metadata\"");
+    expect(html).toContain("video/clip.mp4");
+  });
+
+  it("renders pure audio results with an inline audio player", () => {
+    const text = "ComfyUI 生成完成：共 2 个文件，落在 audio，耗时 3.0s。\n- audio/a.mp3（512 字节）\n- audio/b.flac（1024 字节）";
+    const html = renderToStaticMarkup(<ComfyuiToolView {...viewProps(settledBlock(text))} />);
+    expect(html).toContain("音频 2 个");
+    expect(html).not.toContain("<img");
+    const audios = html.match(/<audio/g) ?? [];
+    expect(audios).toHaveLength(2);
+    expect(html).toContain("preload=\"metadata\"");
+  });
+
+  it("counts file kinds and falls back to file count for unknown extensions", () => {
+    expect(countComfyuiFilesByKind([
+      { path: "cover/a.png", bytes: 1 },
+      { path: "video/b.MP4", bytes: 2 },
+      { path: "audio/c.OGG", bytes: 3 },
+      { path: "other/notes.txt", bytes: 4 },
+      { path: "other/noext", bytes: 5 }
+    ])).toEqual({ images: 1, videos: 1, audios: 1, other: 2 });
+    expect(formatComfyuiSummaryCount([{ path: "other/notes.txt", bytes: 1 }])).toBe("1 个文件");
   });
 
   it("falls back to raw text when the structure is abnormal", () => {

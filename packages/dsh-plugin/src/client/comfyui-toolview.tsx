@@ -24,12 +24,65 @@ export interface ComfyuiToolResult {
 }
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif"]);
+const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mov"]);
+const AUDIO_EXTENSIONS = new Set([".wav", ".mp3", ".flac", ".m4a", ".ogg", ".opus"]);
 
-export function isComfyuiImagePath(path: string): boolean {
+function getComfyuiExtension(path: string): string {
   const basename = path.split("/").at(-1) ?? path;
   const dot = basename.lastIndexOf(".");
-  if (dot <= 0) return false;
-  return IMAGE_EXTENSIONS.has(basename.slice(dot).toLocaleLowerCase());
+  if (dot <= 0) return "";
+  return basename.slice(dot).toLocaleLowerCase();
+}
+
+export function isComfyuiImagePath(path: string): boolean {
+  const ext = getComfyuiExtension(path);
+  return ext !== "" && IMAGE_EXTENSIONS.has(ext);
+}
+
+export function isComfyuiVideoPath(path: string): boolean {
+  const ext = getComfyuiExtension(path);
+  return ext !== "" && VIDEO_EXTENSIONS.has(ext);
+}
+
+export function isComfyuiAudioPath(path: string): boolean {
+  const ext = getComfyuiExtension(path);
+  return ext !== "" && AUDIO_EXTENSIONS.has(ext);
+}
+
+export interface ComfyuiFileKindCounts {
+  readonly images: number;
+  readonly videos: number;
+  readonly audios: number;
+  readonly other: number;
+}
+
+/** 按扩展名统计产物类型：未知扩展名归 other，绝不抛错。 */
+export function countComfyuiFilesByKind(files: readonly ComfyuiToolFile[]): ComfyuiFileKindCounts {
+  let images = 0;
+  let videos = 0;
+  let audios = 0;
+  let other = 0;
+  for (const file of files) {
+    if (isComfyuiImagePath(file.path)) images += 1;
+    else if (isComfyuiVideoPath(file.path)) videos += 1;
+    else if (isComfyuiAudioPath(file.path)) audios += 1;
+    else other += 1;
+  }
+  return { images, videos, audios, other };
+}
+
+/**
+ * summary 分类文案：非零类别才显示；全零（纯 other）时回退 `N 个文件`；
+ * 混合 other 时追加 `N 个文件` 一段，避免漏数。
+ */
+export function formatComfyuiSummaryCount(files: readonly ComfyuiToolFile[]): string {
+  const counts = countComfyuiFilesByKind(files);
+  const parts: string[] = [];
+  if (counts.images > 0) parts.push(`图片 ${String(counts.images)} 张`);
+  if (counts.videos > 0) parts.push(`视频 ${String(counts.videos)} 个`);
+  if (counts.audios > 0) parts.push(`音频 ${String(counts.audios)} 个`);
+  if (counts.other > 0) parts.push(`${String(counts.other)} 个文件`);
+  return parts.length > 0 ? parts.join(" · ") : `${String(files.length)} 个文件`;
 }
 
 const FILE_LINE_PATTERN = /^-\s+(.+?)\s*（(\d+)\s*字节）$/gmu;
@@ -102,6 +155,16 @@ export function ComfyuiToolCard({ files, durationMs, outputDir, sessionId }: Com
           <img src={endpoint("media", sessionId, file.path)} alt={file.path} loading="lazy" />
           <figcaption title={file.path}>{file.path}</figcaption>
         </figure>
+        : isComfyuiVideoPath(file.path)
+        ? <figure key={file.path} className="oh-story-comfyui-item">
+          <video controls preload="metadata" src={endpoint("media", sessionId, file.path)} />
+          <figcaption title={file.path}>{file.path}</figcaption>
+        </figure>
+        : isComfyuiAudioPath(file.path)
+        ? <figure key={file.path} className="oh-story-comfyui-item">
+          <audio controls preload="metadata" src={endpoint("media", sessionId, file.path)} />
+          <figcaption title={file.path}>{file.path}</figcaption>
+        </figure>
         : <p key={file.path} className="oh-story-comfyui-file">
           <a href={endpoint("media", sessionId, file.path)} target="_blank" rel="noreferrer">{file.path}</a>
           <span>（{file.bytes} 字节）</span>
@@ -127,7 +190,7 @@ export function ComfyuiToolView({ block, sessionId, inspect }: ToolCallViewProps
     }).join("\n");
   const parsed = resolveComfyuiToolResult(block);
   return <details className="oh-story-role" data-state={state}>
-    <summary><span>🎨 ComfyUI</span><strong>{parsed === undefined ? "生成结果" : `${String(parsed.files.length)} 张图片`}</strong><em>{state === "running" ? "生成中" : state === "error" ? "失败" : "完成"}</em></summary>
+    <summary><span>🎨 ComfyUI</span><strong>{parsed === undefined ? "生成结果" : formatComfyuiSummaryCount(parsed.files)}</strong><em>{state === "running" ? "生成中" : state === "error" ? "失败" : "完成"}</em></summary>
     {!settled || block.isError || parsed === undefined
       ? <pre>{fallback === "" ? "等待生成结果…" : fallback}</pre>
       : <ComfyuiToolCard files={parsed.files} durationMs={parsed.durationMs} outputDir={parsed.outputDir} sessionId={sessionId} />}

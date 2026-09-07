@@ -401,7 +401,7 @@ export function DramaProductionView(props: Props) {
     {props.section === "assets" && <AssetBoard {...props} onCreateJob={createJob} />}
     {props.section === "tasks" && <TaskBoard jobs={props.jobs} queue={props.queue} sessionRunning={props.sessionRunning} onCancel={cancelJob} onRemoveQueued={removeQueuedJob} />}
     {props.section === "sequence" && <SequenceBoard {...props} onCompose={composeSequence} />}
-    {props.section === "playback" && <DramaPlayback sessionId={props.sessionId} production={props.production} versions={props.versions} selections={props.selections} episodeName={props.production.episodeDirectory.split("/").at(-1) ?? props.production.episodeDirectory} />}
+    {props.section === "playback" && <DramaPlayback sessionId={props.sessionId} production={props.production} versions={props.versions} selections={props.selections} episodeName={props.production.episodeDirectory.split("/").at(-1) ?? props.production.episodeDirectory} onSelectionsChange={props.onSelectionsChange} />}
     {props.section === "canvas" && <ProductionCanvas {...props} />}
   </div>;
 }

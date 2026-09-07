@@ -265,6 +265,33 @@ export function reorderSequence(sequence: readonly ProductionSequenceItem[], sou
   return next;
 }
 
+export type PlaybackTakeKind = "image" | "video";
+
+export interface PlaybackTakeGroup {
+  readonly kind: PlaybackTakeKind;
+  readonly versions: readonly ProductionMediaVersion[];
+  readonly selectedId: string | undefined;
+}
+
+/**
+ * Group same-shot takes by media kind for the 串播 take switcher. Pure
+ * grouping over the passed EP-scoped version list; selection marking reuses
+ * `selectedVersionForTarget` (explicit pick wins, otherwise latest). Callers
+ * hide groups with fewer than two takes.
+ */
+export function playbackTakeGroups(
+  targetId: string,
+  versions: readonly ProductionMediaVersion[],
+  selections: Readonly<Record<string, string>>
+): readonly PlaybackTakeGroup[] {
+  const kinds: readonly PlaybackTakeKind[] = ["image", "video"];
+  return kinds.map((kind) => ({
+    kind,
+    versions: versions.filter((version) => version.targetId === targetId && version.kind === kind),
+    selectedId: selectedVersionForTarget(targetId, versions, selections, kind)?.id
+  }));
+}
+
 /**
  * Assemble one playback entry per shot, in document order. Media resolution
  * reuses the same rule as the 镜头 board (`selectedVersionForTarget`, latest

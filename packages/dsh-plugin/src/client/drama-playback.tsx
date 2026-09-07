@@ -9,10 +9,12 @@ import {
   playbackNextIndex,
   playbackPromptSnippet,
   playbackShouldStop,
+  playbackTakeGroups,
   schedulePlaybackImageAdvance,
   selectedVersionForTarget,
   type PlaybackAdvanceReason,
   type PlaybackShot,
+  type PlaybackTakeGroup,
   type ProductionMediaVersion
 } from "./production-runtime.js";
 import { endpoint } from "./workbench-ui.js";
@@ -24,6 +26,7 @@ interface Props {
   readonly versions: readonly ProductionMediaVersion[];
   readonly selections: Readonly<Record<string, string>>;
   readonly episodeName: string;
+  readonly onSelectionsChange: (selections: Record<string, string>) => void;
 }
 
 /**
@@ -33,17 +36,19 @@ interface Props {
  * <audio controls>;自动播放时图片镜头的配音随切镜自动播放,视频镜头不叠
  * 加配音(视频自带声音优先);无配音镜头静默。
  */
-export function DramaPlayback({ sessionId, production, versions, selections, episodeName }: Props) {
+export function DramaPlayback({ sessionId, production, versions, selections, episodeName, onSelectionsChange }: Props) {
   const shots = usePlaybackShots(production, versions, selections);
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [imageSeconds, setImageSeconds] = useState(PLAYBACK_IMAGE_SECONDS_DEFAULT);
+  const [dubPick, setDubPick] = useState<Readonly<Record<string, string>>>({});
   const total = shots.length;
   const current: PlaybackShot | undefined = shots[Math.min(index, Math.max(0, total - 1))];
 
   useEffect(() => {
     setIndex(0);
     setPlaying(false);
+    setDubPick({});
   }, [production.episodeDirectory]);
 
   const advance = (reason: PlaybackAdvanceReason): void => {
@@ -78,7 +83,10 @@ export function DramaPlayback({ sessionId, production, versions, selections, epi
   }
   const shot = current ?? shots[0]!;
   const position = Math.min(index, total - 1);
-  const dubUrl = shot.video === undefined && shot.audio !== undefined && shot.audio.length > 0 ? endpoint("media", sessionId, shot.audio[0]!.path) : undefined;
+  const dubTracks = shot.video === undefined ? shot.audio ?? [] : [];
+  const dubPath = dubTracks.find((track) => track.path === dubPick[shot.shotId])?.path ?? dubTracks[0]?.path;
+  const dubUrl = dubPath === undefined ? undefined : endpoint("media", sessionId, dubPath);
+  const takeGroups = playbackTakeGroups(shot.shotId, versions, selections).filter((group) => group.versions.length > 1);
   return <section className="oh-story-playback" aria-label="短剧串播" tabIndex={0} onKeyDown={(event) => {
     if (event.key === "ArrowRight") { event.preventDefault(); advance("next"); }
     else if (event.key === "ArrowLeft") { event.preventDefault(); advance("prev"); }
@@ -90,12 +98,17 @@ export function DramaPlayback({ sessionId, production, versions, selections, epi
           ? <img className="oh-story-playback-media" key={shot.image.id} src={shot.image.url} alt={shot.shotId} />
           : <div className="oh-story-playback-placeholder"><strong>{shot.shotId}</strong><span>{playbackPromptSnippet(shot.promptSummary) ?? "该镜头暂无已生成产物"}</span></div>}
     </div>
-    {dubUrl !== undefined && <audio className="oh-story-playback-dub" key={`${shot.shotId}:${shot.audio![0]!.path}`} src={dubUrl} controls autoPlay={playing} preload="metadata" aria-label={`${shot.shotId} 台词配音`} />}
+    {dubUrl !== undefined && <audio className="oh-story-playback-dub" key={`${shot.shotId}:${dubPath}`} src={dubUrl} controls autoPlay={playing} preload="metadata" aria-label={`${shot.shotId} 台词配音`} />}
+    {dubTracks.length > 1 && <div className="oh-story-playback-dub-switch" aria-label={`${shot.shotId} 配音版本`}>
+      <span>配音</span>
+      {dubTracks.map((track, trackIndex) => <button type="button" key={track.path} aria-pressed={track.path === dubPath} aria-label={`选择配音 ${track.label}`} data-selected={track.path === dubPath || undefined} onClick={() => { setDubPick((value) => ({ ...value, [shot.shotId]: track.path })); }}>P{String(trackIndex + 1)}</button>)}
+    </div>}
     <div className="oh-story-playback-caption">
       <strong>{String(position + 1).padStart(2, "0")} / {String(total)} · {shot.shotId} {shot.title}</strong>
       {shot.caption !== undefined && <p>{shot.caption}</p>}
       {shot.promptSummary !== undefined && <p className="oh-story-playback-prompt">{playbackPromptSnippet(shot.promptSummary, 96)}</p>}
     </div>
+    {takeGroups.length > 0 && <PlaybackTakeSwitcher shotId={shot.shotId} groups={takeGroups} selections={selections} onSelectionsChange={onSelectionsChange} />}
     <div className="oh-story-playback-controls">
       <button type="button" aria-label="上一个镜头" disabled={position === 0} onClick={() => { advance("prev"); }}>← 上一镜</button>
       <button type="button" aria-pressed={playing} onClick={() => { setPlaying((value) => total > 1 && !value); }} disabled={total < 2}>{playing ? "暂停" : "自动播放"}</button>
@@ -110,6 +123,22 @@ export function DramaPlayback({ sessionId, production, versions, selections, epi
       {shots.map((item, itemIndex) => <li key={item.shotId}><button type="button" aria-current={itemIndex === position} aria-label={`跳到镜头 ${item.shotId}`} data-current={itemIndex === position || undefined} onClick={() => { setIndex(itemIndex); }}>{String(itemIndex + 1).padStart(2, "0")}</button></li>)}
     </ol>
   </section>;
+}
+
+/** 当前镜头的多 take 切换条:按图片/视频分组,单 take 组由调用方过滤掉。 */
+export function PlaybackTakeSwitcher({ shotId, groups, selections, onSelectionsChange }: {
+  readonly shotId: string;
+  readonly groups: readonly PlaybackTakeGroup[];
+  readonly selections: Readonly<Record<string, string>>;
+  readonly onSelectionsChange: (selections: Record<string, string>) => void;
+}) {
+  const labels = { image: "关键帧", video: "视频" } as const;
+  return <div className="oh-story-playback-takes" aria-label={`${shotId} 版本切换`}>
+    {groups.map((group) => <div className="oh-story-playback-take-group" key={group.kind} aria-label={`${shotId} ${labels[group.kind]}版本`}>
+      <span>{labels[group.kind]}</span>
+      {group.versions.map((version, versionIndex) => <button type="button" key={version.id} aria-pressed={version.id === group.selectedId} aria-label={`选择 ${shotId} ${labels[group.kind]}版本 ${String(versionIndex + 1)}`} data-selected={version.id === group.selectedId || undefined} onClick={() => { onSelectionsChange({ ...selections, [shotId]: version.id }); }}>V{String(versionIndex + 1)}</button>)}
+    </div>)}
+  </div>;
 }
 
 /** 分镜文档顺序即播放顺序;产物用镜头板的已选版本规则,不重写 token 匹配。 */
