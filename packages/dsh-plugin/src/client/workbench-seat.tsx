@@ -4,6 +4,8 @@ import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client";
 import type { IConversation } from "@deepseek-ai/dsh-client-ui-conversation/client";
 import type { PropsRenderSlots, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
 import type { ToolCallViewProps } from "@deepseek-ai/dsh-client-ui-tool/client";
+import { useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { OH_STORY_PRODUCTION_TOOL_NAME } from "../production-intent.js";
 import { createWorkbenchStore } from "./workbench-state.js";
 import { CreativeSplitBridge } from "./workbench-bridge.js";
@@ -23,8 +25,40 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
 
 export type WorkbenchSeatProps = PropsRuntime<"shell.overlay"> & PropsRenderSlots<"oh-story.workspace">;
 
+/** The session-scoped workbench cannot mount on a fresh DSH home page. */
+function WorkbenchWelcome() {
+  const marker = useRef<HTMLSpanElement>(null);
+  const [target, setTarget] = useState<HTMLElement>();
+  useLayoutEffect(() => {
+    const document = marker.current?.ownerDocument;
+    if (document === undefined) return;
+    const locate = (): void => {
+      const anchor = document.querySelector<HTMLElement>("[data-conversation-scroll]");
+      setTarget((current) => current === anchor ? current : anchor ?? undefined);
+    };
+    locate();
+    const observer = new MutationObserver(locate);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => { observer.disconnect(); };
+  }, []);
+  return <>
+    <style>{styles}</style>
+    <span ref={marker} className="oh-story-bridge-marker" aria-hidden />
+    {target === undefined ? null : createPortal(<section className="oh-story-welcome" aria-label="Oh Story 使用引导">
+      <h2>Oh Story 已加载</h2>
+      <p>作品目录中有创作文件时，小说、短剧、游戏、视频工作台会自动显示。</p>
+      <ol>
+        <li>点击左侧「添加工作区 / Add workspace」的 ＋，选择存放作品的文件夹。</li>
+        <li>在下方「选择工作区 / Choose workspace」中选中该目录，或打开已有会话。</li>
+        <li>空目录先在 Chat 中开始创作，生成第一个创作文件后，工作台会自动出现。</li>
+      </ol>
+      <p>查看已有作品无需 API Key。开始 AI 创作前，在「设置 → 模型」配置模型，再输入 <code>/story</code>、<code>/short-drama</code>、<code>/novel-to-game quick</code> 或 <code>/video-recap</code>。</p>
+    </section>, target)}
+  </>;
+}
+
 export function WorkbenchSeat({ SessionProvider, renderSlot }: WorkbenchSeatProps) {
-  return <SessionProvider>{renderSlot("oh-story.workspace", {})}</SessionProvider>;
+  return <SessionProvider empty={() => <WorkbenchWelcome />}>{renderSlot("oh-story.workspace", {})}</SessionProvider>;
 }
 
 export function argsOf(block: ToolCallViewProps["block"]): Record<string, unknown> {
