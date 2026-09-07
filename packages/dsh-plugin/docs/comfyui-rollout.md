@@ -65,6 +65,6 @@
 
 - [ ] 一致性参考图自动装配验证：图生图 `input_image`（`__INPUT_IMAGE__`）在真实多参考场景下只选主角色一张的约定是否成立（见 `docs/comfyui.md` 4 节角色一致性）。
 - [ ] 串播带声验证：视频 + TTS/音乐合成后的串播带是否有声、音画是否同步。
-- [ ] 音频工作流默认输出多为 mp3/flac 段：runner 的 `_collect_media` 只收 `images` / `gifs` 键、
->   `_media_ok` 只认 `.png/.jpg/.webp/.mp4/.wav` —— 真机若输出键名或扩展名不在此列，
->   先记为 V2 缺口再改 runner，不要在 ComfyUI 侧硬凑。
+- [ ] 音频工作流真实输出验证：runner 已收 `images`/`gifs`/`audio`/`videos` 键、`_media_ok` 已认
+>   `.png/.jpg/.webp/.mp4/.wav/.mp3/.flac/.m4a` —— 真机若仍出现未覆盖的键名或扩展名（ComfyUI
+>   节点更新引入），先记为 V2 缺口再改 runner，不要在 ComfyUI 侧硬凑。

@@ -2131,10 +2131,10 @@ async function main(): Promise<void> {
         || videoMetadata.width < 500 || videoMetadata.height < 900 || videoMetadata.duration < 4) {
         throw new Error(`Production mock media was not realistic: ${JSON.stringify({ keyframeMetadata, videoMetadata })}`);
       }
-      // 001 卡两个真实图片版本 + 可能随 demo fixtures 带入的配音/成片版本(2026-09 起媒体库收录 audio),
-      // 影像主预览仍优先 image/video;此处只断言两个图片版本都在版本条里。
-      const firstShotVersions = page.locator(".oh-story-shot-card").first().locator(".oh-story-version-strip").getByRole("button");
-      if (await firstShotVersions.count() < 2) throw new Error("Production image versions were not grouped under their shot.");
+      // 001 卡两个真实图片版本 + 可能随 demo fixtures 带入的配音/成片版本(2026-09 起媒体库收录 audio)。
+      // 影像主预览仍优先 image/video;此处按版本条内的图片预览个数断言(下界 2),音频/视频版本不参与计数。
+      const firstShotImages = page.locator(".oh-story-shot-card").first().locator(".oh-story-version-strip img.oh-story-media-preview");
+      if (await firstShotImages.count() < 2) throw new Error("Production image versions were not grouped under their shot.");
       await firstShotVersions.first().click();
       if (await firstShotVersions.first().getAttribute("data-selected") === null) throw new Error("Production version selection did not update the Session projection.");
       await page.locator(".oh-story-shot-card").first().locator("h3").click();

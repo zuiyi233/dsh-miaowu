@@ -802,7 +802,7 @@ const GAME_EXPORT_DIRECTORY = "交付";
 
 function gameExportStamp(now: Date): string {
   const pad = (value: number): string => String(value).padStart(2, "0");
-  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 }
 
 /** node 侧递归复制(dsh-fs 无 copy/递归 mkdir;导出目标是冻结快照,绕过版本链直接落盘)。 */

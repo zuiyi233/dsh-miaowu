@@ -266,8 +266,8 @@ def _media_ok(suffix: str, content: bytes) -> bool:
     if suffix == ".wav":
         return len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"WAVE"
     if suffix == ".mp3":
-        # ID3v2 标签头，或 MPEG 音频帧同步字（首字节 0xFF + 次字节高 3 位全 1）。
-        return content.startswith(b"ID3") or (
+        # ID3v2 标签头（10 字节头），或 MPEG 音频帧同步字（首字节 0xFF + 次字节高 3 位全 1）。
+        return (len(content) >= 10 and content.startswith(b"ID3")) or (
             len(content) >= 2 and content[0] == 0xFF and content[1] & 0xE0 == 0xE0)
     if suffix == ".flac":
         return content.startswith(b"fLaC")
