@@ -29,10 +29,14 @@ const GAME_DIRECTORY = "game-adaptations";
 const CREATIVE_DIRECTORIES = [VIDEO_DIRECTORY, GAME_DIRECTORY, ...STORY_DIRECTORIES, ...DRAMA_DIRECTORIES] as const;
 const ROOT_FILES = new Set(["short-drama.json"]);
 /**
- * 书名目录标记:一级子目录直接包含 正文/ 或 追踪/ 子目录者即小说工程根
- * (对齐上游 oh-story 定义)。只做一层 stat 探测,不深递归。
+ * 书名目录标记:强 marker 为一级子目录直接包含 正文/ 或 追踪/ 子目录
+ * (对齐上游 oh-story 定义)。弱启发式见 isBookDirectory:无强 marker 时,
+ * STORY_DIRECTORIES 中 ≥BOOK_DIRECTORY_MIN_STORY_DIRS 个直接子目录者亦视为
+ * 工程根(兼容 novel-writer 等不建 正文//追踪/ 的预设)。只做一层 stat 探测,不深递归。
  */
 const BOOK_MARKER_DIRECTORIES = ["正文", "追踪"] as const;
+/** 弱启发式阈值:一级候选目录下至少 2 个 STORY_DIRECTORIES 直接子目录即视为工程根(单个不触发,防误报)。 */
+const BOOK_DIRECTORY_MIN_STORY_DIRS = 2;
 const BOOK_NAME_MAX_LENGTH = 128;
 const EDITABLE_EXTENSIONS = new Set([".md", ".txt", ".json", ".jsonl"]);
 const GAME_EDITABLE_EXTENSIONS = new Set([...EDITABLE_EXTENSIONS, ".html", ".css", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"]);
@@ -40,7 +44,8 @@ const VIDEO_EDITABLE_EXTENSIONS = new Set([...EDITABLE_EXTENSIONS, ".srt", ".ass
 const MEDIA_TYPES: ReadonlyMap<string, string> = new Map([
   [".png", "image/png"], [".jpg", "image/jpeg"], [".jpeg", "image/jpeg"], [".webp", "image/webp"], [".gif", "image/gif"],
   [".mp4", "video/mp4"], [".webm", "video/webm"], [".mov", "video/quicktime"], [".mkv", "video/x-matroska"],
-  [".mp3", "audio/mpeg"], [".wav", "audio/wav"], [".m4a", "audio/mp4"], [".flac", "audio/flac"]
+  [".mp3", "audio/mpeg"], [".wav", "audio/wav"], [".m4a", "audio/mp4"], [".flac", "audio/flac"],
+  [".ogg", "audio/ogg"], [".opus", "audio/opus"]
 ]);
 const MEDIA_MAX_BYTES = 256 * 1_024 * 1_024;
 const FILE_LIMIT = 1_000;
@@ -426,18 +431,34 @@ export function isBookNestedStoryPath(path: string): boolean {
   return parts.length >= 2 && isBookName(parts[0]) && STORY_DIRECTORIES.some((directory) => directory === parts[1]);
 }
 
-/** 书名目录存在性:一级子目录且直接包含 正文/ 或 追踪/ 子目录(各一次 stat,不深递归)。 */
+/**
+ * 书名目录存在性:强 marker(直接包含 正文/ 或 追踪/ 子目录)或弱启发式
+ * (STORY_DIRECTORIES 中 ≥BOOK_DIRECTORY_MIN_STORY_DIRS 个直接子目录)任一成立
+ * 即视为工程根,二者为 OR 关系。单个创作目录(如只有"设定")不触发。各一次 stat,不深递归。
+ */
 async function isBookDirectory(realm: WorkspaceRealm, name: string): Promise<boolean> {
   for (const marker of BOOK_MARKER_DIRECTORIES) {
     const target = await realm.fs.resolve(`${name}/${marker}`, { cwd: realm.cwd });
     if (!realm.fs.contains(realm.root, target)) continue;
     if ((await realm.fs.stat(target).catch(() => undefined))?.type === "directory") return true;
   }
+  // 弱启发式:兼容 novel-writer 等不建 正文//追踪/ 的预设(如只有 大纲/+设定/)。
+  // 强 marker 上轮已确认均不存在,此处只数非强 marker 的 STORY 子目录,达阈值即成立。
+  let storyDirCount = 0;
+  for (const directory of STORY_DIRECTORIES) {
+    if (BOOK_MARKER_DIRECTORIES.some((marker) => marker === directory)) continue;
+    const target = await realm.fs.resolve(`${name}/${directory}`, { cwd: realm.cwd });
+    if (!realm.fs.contains(realm.root, target)) continue;
+    if ((await realm.fs.stat(target).catch(() => undefined))?.type !== "directory") continue;
+    storyDirCount += 1;
+    if (storyDirCount >= BOOK_DIRECTORY_MIN_STORY_DIRS) return true;
+  }
   return false;
 }
 
 /**
  * 书名目录发现:只枚举 cwd 一级子目录,根白名单目录与点文件除外;
+ * 判定口径见 isBookDirectory(强 marker 或弱启发式);
  * 单个候选探测失败只跳过该候选,不中断整轮发现。
  */
 export async function discoverBookDirectories(realm: WorkspaceRealm): Promise<string[]> {

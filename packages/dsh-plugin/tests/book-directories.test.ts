@@ -6,6 +6,7 @@ import {
   discoverBookDirectories,
   isBookNestedStoryPath,
   listFiles,
+  mediaMimeTypeForPath,
   type WorkspaceRealm,
 } from "../src/workspace-route.js";
 import { discoverWorks } from "../src/services/bookshelf.js";
@@ -100,6 +101,33 @@ describe("书名目录探测边界", () => {
   it("根白名单目录即使含标记也不算书名目录", async () => {
     const realm = setup({ "正文/追踪/嵌套.md": "x" });
     expect(await discoverBookDirectories(realm)).toEqual([]);
+  });
+
+  it("弱启发式:大纲+设定(无正文/追踪)认作工程根并列出创作文件", async () => {
+    const realm = setup({
+      "九阶段书/大纲/主线.md": "# 主线",
+      "九阶段书/设定/人物.md": "# 人物",
+    });
+    expect(await discoverBookDirectories(realm)).toEqual(["九阶段书"]);
+    const paths = (await listFiles(realm)).map((file) => file.path);
+    expect(paths).toContain("九阶段书/大纲/主线.md");
+    expect(paths).toContain("九阶段书/设定/人物.md");
+  });
+
+  it("防误报:单个设定目录不认作工程根", async () => {
+    const realm = setup({ "单设定书/设定/人物.md": "# 人物" });
+    expect(await discoverBookDirectories(realm)).toEqual([]);
+  });
+
+  it("根白名单目录含弱启发式组合也不算书名目录(isBookName 保护仍生效)", async () => {
+    const realm = setup({ "大纲/设定/嵌套.md": "x", "大纲/对标/比较.md": "x" });
+    expect(await discoverBookDirectories(realm)).toEqual([]);
+  });
+
+  it("媒体类型补 ogg/opus(现有条目不变)", () => {
+    expect(mediaMimeTypeForPath("剧集/EP001/配音.ogg")).toBe("audio/ogg");
+    expect(mediaMimeTypeForPath("剧集/EP001/配音.OPUS")).toBe("audio/opus");
+    expect(mediaMimeTypeForPath("剧集/EP001/对白.wav")).toBe("audio/wav");
   });
 
   it("isBookNestedStoryPath 只认两段形状,不做存在性判定", () => {
