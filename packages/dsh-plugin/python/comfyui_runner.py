@@ -275,6 +275,8 @@ def _media_ok(suffix: str, content: bytes) -> bool:
         # ftyp box 且 major brand 含 M4A（如 "M4A "）。
         return (len(content) >= 12 and content[4:8] == b"ftyp"
                 and b"M4A" in content[8:12])
+    if suffix in {".opus", ".ogg"}:
+        return len(content) >= 4 and content.startswith(b"OggS")
     return False
 
 
@@ -328,14 +330,49 @@ def _poll_history(base: str, prompt_id: str, timeout_seconds: int) -> dict[str, 
         time.sleep(POLL_INTERVAL_SECONDS)
 
 
+# Suffixes _media_ok can validate; the wildcard fallback only fills gaps with these.
+_MEDIA_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".mp4", ".wav",
+                             ".mp3", ".flac", ".m4a", ".opus", ".ogg"})
+
+
 def _collect_media(outputs: dict[str, Any]) -> list[dict[str, str]]:
-    """Collect images/gifs/audio/videos across all nodes; type output wins, else keep all."""
+    """Collect media across all nodes: images/gifs/audio/videos keys plus a wildcard
+    fallback for unknown keys; dedupe by (filename, subfolder) with output winning."""
     found = [{"filename": item["filename"], "subfolder": str(item.get("subfolder", "")),
               "type": str(item.get("type", "output"))}
              for node_output in outputs.values() if isinstance(node_output, dict)
              for key in ("images", "gifs", "audio", "videos") if isinstance(node_output.get(key), list)
              for item in node_output[key]
              if isinstance(item, dict) and isinstance(item.get("filename"), str)]
+    unique = []
+    seen: dict[tuple[str, str], int] = {}
+    for item in found:
+        key = (item["filename"], item["subfolder"])
+        index = seen.get(key)
+        if index is None:
+            seen[key] = len(unique)
+            unique.append(item)
+        elif item["type"] == "output" and unique[index]["type"] != "output":
+            unique[index] = item
+    found = unique
+    for node_output in outputs.values():
+        if not isinstance(node_output, dict):
+            continue
+        for key, value in node_output.items():
+            if key in ("images", "gifs", "audio", "videos") or not isinstance(value, list):
+                continue
+            for item in value:
+                if not isinstance(item, dict) or not isinstance(item.get("filename"), str):
+                    continue
+                entry = {"filename": item["filename"],
+                         "subfolder": str(item.get("subfolder", "")),
+                         "type": str(item.get("type", "output"))}
+                key = (entry["filename"], entry["subfolder"])
+                if (key in seen
+                        or Path(entry["filename"]).suffix.casefold() not in _MEDIA_SUFFIXES):
+                    continue
+                seen[key] = len(found)
+                found.append(entry)
     preferred = [item for item in found if item["type"] == "output"]
     return preferred or found
 
@@ -768,6 +805,27 @@ class SelfTests(unittest.TestCase):
         }
         found = _collect_media(outputs)
         self.assertEqual([item["filename"] for item in found], ["a.flac", "b.mp4"])
+
+    def test_media_signatures_opus_ogg(self) -> None:
+        for suffix in (".opus", ".ogg"):
+            self.assertTrue(_media_ok(suffix, b"OggS" + b"\x00" * 8), suffix)
+            self.assertFalse(_media_ok(suffix, b"not ogg....."), suffix)
+            self.assertFalse(_media_ok(suffix, b""), suffix)
+
+    def test_collect_media_unknown_key(self) -> None:
+        outputs = {
+            "9": {"audio": [{"filename": "x.opus", "subfolder": "",
+                             "type": "output"}]},
+            "11": {"render": [{"filename": "x.opus", "subfolder": "",
+                               "type": "output"},
+                              {"filename": "y.ogg", "subfolder": "sub",
+                               "type": "output"}]},
+            "12": {"notes": [{"filename": "readme.txt", "subfolder": "",
+                              "type": "output"}]},
+        }
+        found = _collect_media(outputs)
+        self.assertEqual([(item["filename"], item["subfolder"]) for item in found],
+                         [("x.opus", ""), ("y.ogg", "sub")])
 
     def test_error_envelope(self) -> None:
         failure = ComfyFailure("node blew up", code="node_error", http_status=400,
