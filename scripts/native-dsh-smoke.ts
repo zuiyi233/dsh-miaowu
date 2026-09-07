@@ -2135,8 +2135,9 @@ async function main(): Promise<void> {
       // 影像主预览仍优先 image/video;此处按版本条内的图片预览个数断言(下界 2),音频/视频版本不参与计数。
       const firstShotImages = page.locator(".oh-story-shot-card").first().locator(".oh-story-version-strip img.oh-story-media-preview");
       if (await firstShotImages.count() < 2) throw new Error("Production image versions were not grouped under their shot.");
-      await firstShotVersions.first().click();
-      if (await firstShotVersions.first().getAttribute("data-selected") === null) throw new Error("Production version selection did not update the Session projection.");
+      const firstShotVersionButtons = page.locator(".oh-story-shot-card").first().locator(".oh-story-version-strip").getByRole("button");
+      await firstShotVersionButtons.first().click();
+      if (await firstShotVersionButtons.first().getAttribute("data-selected") === null) throw new Error("Production version selection did not update the Session projection.");
       await page.locator(".oh-story-shot-card").first().locator("h3").click();
       await productionTabs.getByRole("tab", { name: "素材", exact: true }).click();
       if (await page.locator(".oh-story-asset-card").count() < 6) throw new Error("Production asset board omitted creator-facing assets.");
