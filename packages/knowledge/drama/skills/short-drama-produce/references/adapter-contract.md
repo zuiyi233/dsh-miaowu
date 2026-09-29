@@ -99,6 +99,12 @@ Keep this file outside the project:
 `command` is an argv array, never a shell string. Timeout is 1–3600 seconds. Do not put credentials in this file;
 let the adapter read its environment or operating-system credential store.
 
+## Capability sources
+
+Use the provider's current API reference for roles, limits and supported combinations.
+A relay can expose a different subset, reject inputs itself or transform requests.
+Record the tested execution path and distinguish its observations from the native API contract.
+
 ## Adapter stdin
 
 The adapter receives one UTF-8 JSON document as raw stdin bytes. Read the
@@ -113,6 +119,22 @@ on the machine locale. The document contains the confirmed job plus:
   production tool. Every adapter output source must be a direct regular-file
   child of this directory. The whole directory is deleted after success or
   failure.
+- `handle_path`: absolute path where the adapter records the provider's task id
+  **as soon as it has one, before it starts polling** — write
+  `{"provider_job_id": "<id>"}`, atomically. Unlike `output_root` this path
+  survives the attempt.
+- `collect_provider_job_id`: present only on a collect call. When it is set the
+  adapter must **not submit anything**; it polls and downloads that existing
+  task and returns its outputs as usual.
+
+## Recovering a submitted task
+
+Record the provider task ID before polling so an interrupted task can be collected without resubmission.
+A local handle-write failure is non-fatal after submission. The tool copies the handle into the attempt
+record on success or failure; `audit` reports unfinished tasks as `orphaned_provider_job` with
+`action: collect_before_retry`.
+
+`production_tool.py collect` retrieves the existing task without new submission or confirmation.
 
 It may translate provider-neutral parameters into its chosen SDK/API. Optional
 provider adapters under `scripts/` document and implement known translations;

@@ -31,6 +31,12 @@ required and are only accepted when the runtime profile above permits their valu
 optional for reference-conditioned jobs and **required** for text-to-video, where `adaptive` is
 refused because there is no reference frame to adapt to.
 
+The adapter validates and forwards `duration`; it does not estimate speech length or retime dialogue.
+Before preparing a speaking shot, compare the accepted shot duration, the prompt's spoken timeline,
+and the job's `duration`. Resolve insufficient speaking time in the storyboard and regenerate the
+dependent prompt before preparing the job. Prompt timestamps alone do not change the request duration.
+The official video API has no separate speech-rate parameter.
+
 The prompt is compiled into one `text` item of the multimodal `content` array and is refused above
 7000 characters. Each declared reference becomes one further `content` item carrying an explicit
 `role`: `first_frame`, `last_frame`, `reference_image`, `reference_video`, or `reference_audio`.
@@ -68,18 +74,13 @@ structured: base/first-frame/first-last-frame tasks use `integrated_multimodal_d
 form. Chinese dialogue remains exact inside `<d>[Chinese] ...</d>`. Full details live in the
 video-prompt skill's `references/minimax-h3.md`.
 
-Audio generation is a **capability**, not a style:
-what changes upstream is only which axes of the target-model profile a project declares — see the
-video-prompt skill's target-model profile. Two consequences are worth stating here because they
-show up as production defects rather than as API errors:
+State the intended sound layers in the prompt. For no non-diegetic music, the
+H3 dialect uses `non_diegetic_music: N/A`; small probes observed unwanted music
+when this layer was omitted. They did not establish that omitted speech or
+negative clauses cause extra dialogue.
 
-- an unstated audio channel is not a silent one. A shot that says nothing about music or speech can
-  come back with invented score and invented lines, so the shot's own sound intent, including what
-  must **not** be produced, has to be in the copyable body;
-- readable on-screen text is likewise produced unless it is excluded, so a shot with no readable-text
-  obligation states that exclusion instead of relying on the model to omit it.
-
-Neither is written here as a fixed phrase, and this suite never injects one. The wording belongs to
-the shot and to the project's declared prompt language.
+Follow the project's subtitle and in-scene-text policy. Prompt wording belongs
+to the video-prompt skill and the declared language, not to adapter-generated
+boilerplate.
 
 Protocol reference: [MiniMax video generation API](https://platform.minimax.io/docs/api-reference/video-generation-v2-create).

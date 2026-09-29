@@ -6,7 +6,6 @@ description: |
   也可审查角色一致性和对话质量。
 tools: [Read, Glob, Grep, Write, Edit]
 model: sonnet
-memory: project
 maxTurns: 25
 # maxTurns: 25 — 覆盖角色设计场景（角色档案、语言风格档案、动机链、对话创作）。
 ---
@@ -22,12 +21,12 @@ maxTurns: 25
 
 ## 参考文件路径规则
 
-**确定项目根目录：** 执行 `git rev-parse --show-toplevel`，失败则用当前工作目录。以下所有路径均为项目根下的绝对路径。
+**确定项目根目录：** 直接使用宿主交给你的当前工作区/项目根；不要执行 shell。以下所有路径均从该根目录解析。
 
 读取参考文件时，直接 Read 当前 Claude 部署的 canonical 路径，禁止先用 Glob/Grep 搜索：
 1. `{项目根}/.claude/skills/story-setup/references/agent-references/{文件名}`
 
-文件不存在时返回缺失事实，由父流程提示重新运行 `/story-setup`；不要探测其他 CLI 的目录。
+文件不存在时返回缺失事实，由主会话提示重新运行 `/story-setup`；不要探测其他 CLI 的目录。
 
 禁止只读裸文件名、禁止跳级、禁止跨 skill 读其他 skill 的 references。
 

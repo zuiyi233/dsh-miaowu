@@ -7,6 +7,7 @@
 - [Keyframe](#frozen-keyframe)
 - [Motion](#motion)
 - [Continuity](#cross-shot-continuity)
+- [Rhythm profile](#rhythm-profile-shots)
 - [Findings](#common-findings)
 - [Production risks and authorized observations](#production-risk-and-authorized-observation-checklist-rev-08)
 
@@ -31,6 +32,11 @@
 - Why is this a new shot?
 - Do framing and camera behavior serve attention, alignment, pressure, reveal, or
   rhythm rather than decorate the prose?
+- Does each shot's `运镜` line state a behavior and a reason chosen from the shot's
+  purpose (`SHT-04`)? A stated lock-off with its reason passes. An episode locked on
+  nearly every shot while its peak gets no movement is a finding; so is a missing line,
+  which leaves the choice to the video-prompt stage; a bare 「运镜：固定」 with no reason
+  is also a finding.
 - Are Location/View, axis, screen direction, eyelines, entrances, positions,
   hands, and props coherent?
 - Are exact asset variants bound?
@@ -38,6 +44,15 @@
   facts the source withholds until a later action or cut?
 - Do crop, occlusion, focus, back view, and offscreen space serve that information
   permission rather than accidentally reveal or conceal it?
+
+## Rhythm profile: shots
+
+Under the `REV-12` conditions in the [story rubric](rubric-story-script.md#rhythm-profile-rev-12),
+measure two storyboard fields: the average shot length per scene (scene duration divided
+by its shot count) against `target_avg_shot_seconds`, and the share of close-range shots
+across the episode, as the profile field defines them, against `close_shot_share_min`. The average is a
+scene-level target; one long or short shot is not a finding. Also report durations folded
+from screenplay word counts instead of the scene's sound timeline (`SHT-28`).
 
 ## Frozen keyframe
 
@@ -85,6 +100,16 @@
   text surfaces, and spatial anchors keep their required position, count, and state?
 - Does each media reference state its exact purpose, what may be copied, and what
   must not be copied, rather than treating all visible pixels as authority?
+
+For a copyable body (`VID-22`, `VID-23`), check that actions and sound match the
+source and that the timeline accounts for the intended ambience or silence.
+A summary must not introduce a layer absent from the shot. H3's
+`non_diegetic_music: N/A` is a valid empty music layer.
+
+Report a concrete contradiction, omission or ambiguity. A negative clause is
+not a defect by itself; do not impose a clause count or assume that negation
+causes the model to generate the excluded content. Keep model-specific
+observations scoped to their tested model and execution path.
 
 For a pickup or alternate, ask these separately:
 

@@ -62,7 +62,9 @@ export function WorkbenchSeat({ SessionProvider, renderSlot }: WorkbenchSeatProp
 }
 
 export function argsOf(block: ToolCallViewProps["block"]): Record<string, unknown> {
-  const raw = ("kind" in block ? block.call?.argsRaw : block.argsRaw) ?? "{}";
+  // 0.2.0 types: Preparing carries no args, Started exposes argsRaw, a result keeps the call head.
+  const raw = "argsRaw" in block ? block.argsRaw : "kind" in block ? block.call?.argsRaw : undefined;
+  if (raw === undefined) return {};
   try {
     const value = JSON.parse(raw) as unknown;
     return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};

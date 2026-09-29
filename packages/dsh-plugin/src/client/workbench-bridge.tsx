@@ -3,9 +3,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import type { PropsRuntime, PropsStore } from "@deepseek-ai/dsh-client-ui-slots";
 import { endpoint } from "./workbench-ui.js";
-import { json, type createWorkbenchStore, type WorkspacePayload } from "./workbench-state.js";
-import { latestSettledMutation, streamingAssistant } from "./file-activity.js";
+import { json, type createWorkbenchStore, type WorkbenchMemory, type WorkspacePayload } from "./workbench-state.js";
+import { latestSettledMutation, latestSettledMutationTurn, openTurn, sameUndispatchedCalls, streamingAssistant, undispatchedCalls, type UndispatchedCall } from "./file-activity.js";
 import { settledProductionIntents } from "./production-intents.js";
+import { productionQueueFromInbox } from "./production-runtime.js";
 import {
   hasCreativeProject,
   readWorkbenchPreference,
@@ -55,23 +56,79 @@ export interface ProductionConversationFace {
 
 export type WorkbenchSlotProps = PropsRuntime<"oh-story.workspace"> & PropsStore<ReturnType<typeof createWorkbenchStore>> & ProductionConversationFace;
 
+/**
+ * DSH 0.1.7 binds session-scoped Store instances to the Session binding's generation and drops
+ * them when that generation is released or rebound, which a Session switch is enough to do, and
+ * a mounted slot can be handed a fresh instance. The workbench keeps unsaved drafts, production
+ * jobs and layout in its Store, and those lived for the page before, so the plugin holds its own
+ * page-lifetime copy and restores it into every fresh instance.
+ */
+const workbenchMemoryBySession = new Map<string, WorkbenchMemory>();
+
+const NO_UNDISPATCHED_CALLS: readonly UndispatchedCall[] = [];
+
+/**
+ * DSH 0.1.7's SessionProvider stopped keying its subtree by Session, so switching Sessions
+ * would carry one Session's selection, drafts and dedup guards into the next. Keep the
+ * one-mount-per-Session contract the workbench was written against.
+ */
+export function CreativeSplitBridge(props: WorkbenchSlotProps) {
+  return <SessionWorkbenchMemory key={props.sessionId} {...props} />;
+}
+
+/** Restore this Session's workbench memory into a fresh Store before anything reads it. */
+function SessionWorkbenchMemory(props: WorkbenchSlotProps) {
+  const { sessionId, useStore, actions } = props;
+  const hydrated = useStore((state) => state.hydrated);
+  // Nothing renders from a fresh instance: its initial state would be mirrored over the saved
+  // copy, and the workbench's own effects would act on an empty selection.
+  useLayoutEffect(() => {
+    if (!hydrated) actions.restore(workbenchMemoryBySession.get(sessionId));
+  }, [actions, hydrated, sessionId]);
+  return hydrated ? <>
+    <WorkbenchMemoryMirror sessionId={sessionId} useStore={useStore} />
+    <SessionWorkbenchBridge {...props} />
+  </> : null;
+}
+
+/** Keeps the page-lifetime copy current without re-rendering the workbench on every edit. */
+function WorkbenchMemoryMirror({ sessionId, useStore }: Pick<WorkbenchSlotProps, "sessionId" | "useStore">) {
+  const memory = useStore((state) => state);
+  useEffect(() => {
+    workbenchMemoryBySession.set(sessionId, memory);
+  }, [memory, sessionId]);
+  return null;
+}
+
 /** Mount beside the official conversation without replacing Chat or Composer. */
-export function CreativeSplitBridge({ sessionId, useSession, useChat, useStore, actions, sendProductionPrompt, cancelProduction, removeQueuedProduction }: WorkbenchSlotProps) {
+function SessionWorkbenchBridge({ sessionId, useSession, useProjection, useChat, useStore, actions, sendProductionPrompt, cancelProduction, removeQueuedProduction }: WorkbenchSlotProps) {
   const marker = useRef<HTMLSpanElement>(null);
   const [target, setTarget] = useState<HTMLElement>();
   const runningCalls = useChat((snapshot) => snapshot.legacy.runningCalls);
   const partial = useChat((snapshot) => streamingAssistant(snapshot.timeline));
+  const undispatched = useChat((snapshot) => undispatchedCalls(snapshot), sameUndispatchedCalls);
   const settledMutation = useChat((snapshot) => latestSettledMutation(snapshot));
+  const settledMutationTurn = useChat((snapshot) => latestSettledMutationTurn(snapshot));
+  const liveTurn = useChat((snapshot) => openTurn(snapshot));
   const workbench = useStore((memory) => memory.workbench);
   const gamePane = useStore((memory) => memory.gamePane);
   const videoPane = useStore((memory) => memory.videoPane);
   const sessionRunning = useSession((snapshot) => snapshot.running);
-  const productionQueue = useSession((snapshot) => snapshot.queue.map((item) => ({ id: item.id, preview: item.preview })));
+  const inboxRows = useProjection("inbox", (inbox) => inbox?.["next-turn"]);
+  const pendingSubmissions = useSession((snapshot) => snapshot.pendingSubmissions);
+  const productionQueue = useMemo(() => productionQueueFromInbox(
+    inboxRows,
+    new Set(pendingSubmissions.filter((item) => item.placement === "transcript").map((item) => item.requestId))
+  ), [inboxRows, pendingSubmissions]);
   const chat = useChat((snapshot) => snapshot);
   const productionIntents = useMemo(() => settledProductionIntents(chat), [chat]);
   const { workspace, error, loading: workspaceLoading, reload } = useWorkspace(sessionId);
   const chosenPreference = useStore((memory) => memory.workbenchPreference);
   const creativeProject = hasCreativeProject(workspace);
+  // DSH 0.1.7 opens a fresh home straight into a blank Session in its default workspace, so
+  // "no Session yet" no longer marks a first launch. Blank-session guidance is covered by
+  // the EmptyStateOnboarding overlay (cherry workbench's !open branch), so upstream's welcome
+  // guide is not duplicated here.
   // The Session Store holds this Session's choice; localStorage carries the workspace's
   // last choice across restarts. Reading it here keeps the decision in the same render
   // that learns the workspace, so a collapsed workbench never flashes the layout open.
@@ -242,7 +299,10 @@ export function CreativeSplitBridge({ sessionId, useSession, useChat, useStore, 
       sessionId={sessionId}
       runningCalls={runningCalls}
       partial={partial}
+      undispatched={sessionRunning ? undispatched : NO_UNDISPATCHED_CALLS}
       settledMutation={settledMutation}
+      settledMutationTurn={settledMutationTurn}
+      liveTurn={liveTurn}
       sessionRunning={sessionRunning}
       productionQueue={productionQueue}
       productionIntents={productionIntents}

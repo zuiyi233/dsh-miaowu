@@ -44,7 +44,7 @@ describe("bundled Drama media adapters", () => {
     }
   });
 
-  it("registers the ComfyUI adapters with no required credentials and documents their env in the plugin doc", async () => {
+it("registers the ComfyUI adapters with no required credentials and documents their env in the plugin doc", async () => {
     const comfyui = DRAMA_ADAPTERS.filter((adapter) => adapter.name.startsWith("comfyui"));
     expect(comfyui.map((adapter) => [adapter.name, adapter.label, adapter.modality, adapter.requiredEnv, adapter.timeoutSeconds])).toEqual([
       ["comfyui", "ComfyUI", "image", [], 600],
@@ -62,6 +62,44 @@ describe("bundled Drama media adapters", () => {
 
   it("resolves the ComfyUI runner path to the plugin-owned python script", () => {
     expect(comfyuiRunnerPath()).toBe(resolve(import.meta.dirname, "../python/comfyui_runner.py"));
+  });
+
+  it("requires exactly the environment each pinned upstream provider reference lists as required", async () => {
+    const envName = /`([A-Z][A-Z0-9]*_[A-Z0-9_]+)`/gu;
+    for (const adapter of DRAMA_ADAPTERS) {
+      if (adapter.reference === undefined) continue;
+      const lines = (await readFile(join(dramaRoot, adapter.reference), "utf8")).split(/\r?\n/u);
+      const start = lines.findIndex((line) => line.startsWith("Required environment:"));
+      expect(start, adapter.name).toBeGreaterThanOrEqual(0);
+      const inline = lines[start]!.slice("Required environment:".length).trim();
+      // Either one sentence on the heading line, or a list that ends at "Optional environment:".
+      const text = inline !== ""
+        ? inline.split(". ", 1)[0]!
+        : lines.slice(start + 1, lines.findIndex((line, index) => index > start && line.startsWith("Optional environment:"))).join("\n");
+      const required = [...new Set([...text.matchAll(envName)].map((match) => match[1]!))];
+      expect(required.sort(), adapter.name).toEqual([...adapter.requiredEnv].sort());
+    }
+  });
+
+  it("takes each adapter's timeout and job modality from its pinned upstream provider reference", async () => {
+    for (const adapter of DRAMA_ADAPTERS) {
+      if (adapter.reference === undefined) continue;
+      const reference = await readFile(join(dramaRoot, adapter.reference), "utf8");
+      // Every provider reference opens with the adapter-config entry upstream expects.
+      const command = /\{"command": \[[^\]]*"([^"]+)"\], "timeout_seconds": (\d+)\}/u.exec(reference);
+      expect(command?.slice(1), adapter.name).toEqual([adapter.name, String(adapter.timeoutSeconds)]);
+      const modality = /modality `([a-z]+)`|`([a-z]+)` modality/u.exec(reference);
+      expect(modality?.[1] ?? modality?.[2], adapter.name).toBe(adapter.modality);
+    }
+  });
+
+  it("registers MiniMax Speech as the tts adapter in the generated config and the Skill summary", () => {
+    expect(DRAMA_ADAPTERS.find((adapter) => adapter.name === "minimax-speech")).toMatchObject({ label: "MiniMax Speech", modality: "tts" });
+    expect(dramaAdapterConfigDocument(dramaRoot, "python").adapters["minimax-speech"]).toEqual({
+      command: ["python", resolve(dramaRoot, "short-drama-produce/scripts/provider_adapters.py"), "minimax-speech"],
+      timeout_seconds: 600
+    });
+    expect(dramaAdapterSummary()).toContain("minimax-speech (tts: MINIMAX_API_KEY)");
   });
 
   it("writes an upstream-shaped adapter config that points at the bundled script and carries no credentials", async () => {
@@ -92,11 +130,12 @@ describe("bundled Drama media adapters", () => {
 
   it("reports presence per adapter without exposing values", () => {
     const statuses = dramaAdapterStatuses({ OPENAI_API_KEY: "sk-secret", MINIMAX_API_KEY: "mm", MINIMAX_VIDEO_MODEL: "", ARK_API_KEY: "ark" });
-    expect(statuses.map((status) => [status.name, status.configured, status.missing, status.costModel])).toEqual([
+expect(statuses.map((status) => [status.name, status.configured, status.missing, status.costModel])).toEqual([
       ["gpt-image-2", true, [], "metered-cloud"],
       ["seedance", false, ["SEEDANCE_MODEL"], "metered-cloud"],
-      ["minimax-h3", false, ["MINIMAX_VIDEO_MODEL", "MINIMAX_VIDEO_RESOLUTIONS"], "metered-cloud"],
+      ["minimax-h3", false, ["MINIMAX_VIDEO_MODEL", "MINIMAX_VIDEO_RESOLUTIONS", "MINIMAX_VIDEO_MIN_DURATION", "MINIMAX_VIDEO_MAX_DURATION"], "metered-cloud"],
       ["minimax-music", true, [], "metered-cloud"],
+      ["minimax-speech", true, [], "metered-cloud"],
       ["comfyui", true, [], "free-local"],
       ["comfyui-video", true, [], "free-local"],
       ["comfyui-music", true, [], "free-local"]
@@ -110,6 +149,7 @@ describe("bundled Drama media adapters", () => {
       ["seedance", "metered-cloud"],
       ["minimax-h3", "metered-cloud"],
       ["minimax-music", "metered-cloud"],
+      ["minimax-speech", "metered-cloud"],
       ["comfyui", "free-local"],
       ["comfyui-video", "free-local"],
       ["comfyui-music", "free-local"]
@@ -135,6 +175,7 @@ describe("bundled Drama media adapters", () => {
     const skill = await provider.get(listed.find((candidate) => candidate.name === "short-drama-produce")!, {});
     expect(skill?.content).toContain(dramaAdapterConfigPath(dramaRoot).path);
     expect(skill?.content).toContain(dramaAdapterSummary());
+    expect(skill?.content).toContain("minimax-speech (tts: MINIMAX_API_KEY)");
     expect(skill?.content).toContain("DeepSeek generates no media");
     expect(skill?.content).toContain("Never read, print, or write credential values");
   });

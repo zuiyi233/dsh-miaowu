@@ -11,6 +11,88 @@
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-09-28
+
+### Changed
+
+- 适配 [DeepSeek Harness 0.2.0-rc.1](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.1)（自 `0.1.7-rc.2`）。插件声明的 DSH 兼容范围从 `>=0.1.7-rc.2 <0.1.8-0` 改为 `>=0.2.0-rc.1 <0.2.1-0`，只兼容 DSH 0.2.0 这一条补丁线：**安装与启动命令都要换成 `@deepseek-ai/dsh@0.2.0-rc.1`**，还在 DSH 0.1.7 上的请继续用插件 0.1.11。0.2.0-rc.1 在 npm 上是 `next` 标签，不带版本号的 `npx @deepseek-ai/dsh` 仍解析到 `latest`（`0.1.7-rc.2`），两条命令都要写明版本。插件用到的 DSH 接口在这一版没有破坏性变化，工作台代码不变；四套随包 Skills 的版本也不变（Oh Story 0.8.4、Drama Skills 0.8.0、NovelToGame 0.4.0、video-recap-skills 0.6.0）。
+
+## [0.1.11] - 2026-09-27
+
+### Added
+
+- 同步 [video-recap-skills 0.6.0](https://github.com/zenstory-ai/video-recap-skills/releases/tag/v0.6.0)（`e7eb0a8`，自 0.5.0 `ec369e7`）：新增资源库与模板（`library.py check|list|show` 只读校验，`--project recap_project.json` 把字幕样式、音色、BGM 或包装模板绑定到一次运行，每次运行写 `resource_lock.json`）、静态包装图层、`--audio-mode narration|source-mix|adopted-packet-copy`（不写解说、保留原声的剪辑）、自建 TTS `--tts-provider index-tts`（`INDEX_TTS_ENDPOINT` + `INDEX_TTS_VOICE`）与 `--require-final-qc`；ffmpeg 9 上的长剪辑渲染重新可用，dub 模式不再要求 libass。「视频」工作台列出剪后片质检、项目绑定与资源锁定三份新产物，技能桥写明项目绑定放在 `video-recaps/<project>/recap_project.json`。
+- 同步 [Drama Skills 0.8.0](https://github.com/zenstory-ai/drama-skills/releases/tag/v0.8.0)（`0afa4ea`）：改编爽点先行，新增节奏档案（`short-drama.json` 可选的 `rhythm_profile`）、系统流 / 逆袭 / 重生穿越题材卡与年代锚点；分镜每镜新增「运镜」行；剪辑单新增「画面文字」与「音效」行，`render` 在同一场景内自动接镜、混入音效、叠加画面文字，`verify` 额外报告切点亮度变化、疑似坏帧与画面文字 / 音效落点；新增 Wan 3.0 视频提示词方言（没有随包 adapter，只作提示词写法）。内置 adapter 与所需环境变量不变。
+- 写正文守卫对齐 Oh Story 0.8.1：长篇新章的细纲如果只是空壳（去掉 BOM、行首 `#` 与空白后不到 30 字，全角空格也算空白），写正文会被拦下，提示先把细纲写完整；同一章有多份细纲时任一份有内容即放行，读不出或不是 UTF-8 的细纲按已写处理，与上游一致。
+
+### Changed
+
+- 同步 [Oh Story 0.8.4](https://github.com/zenstory-ai/oh-story-claudecode/releases/tag/v0.8.4)（`4a50d55`，`agents_version` 32 → 34，跨过 0.8.1–0.8.3）：每一步只加载用得上的规矩（单次加载压到 35K 字以内），开书按「定方向 → 定设定 → 卷纲 → 细纲」分段、每段落盘后可以新开对话接着做；导入改为按确认点分时刻，全程保留 `.story/work/导入记录.md`，细纲按 10–20 章一批反推；拆文每个 Stage 独立成文件，长篇拆文批次多了按字数折算的情节点下限；扫榜结论落盘到 `扫榜/{日期}/`；细纲可以写 `字数范围：A-B`；章节检查缺 Node.js 时报「工具不可用」而不再当作通过。在 DSH 里所有 Role 都用会话模型，上游把写手改用 Opus 的调整不适用。
+- `story-explorer` Role 可以读随包的 agent 参考资料：上游 0.8.2 把写前对标文风召回的流程挪进 `agent-references/benchmark-style-load.md`，Role 需要 `oh_story_bundled_reference` 才能读到。
+- 长篇拆文与导入的批次派发按上游照抄计划字段，多了 `min_plot_points` 与计划给出的 `handoff_cache`；提交被拒时带上全部字段和错误码重新派发同一批，让 chapter-extractor 只改出错处。
+- 导入覆盖层跟随上游新顺序：Phase 3-L 的 Step 2 复制正文、Step 10 分批反推细纲、Phase 4 初始化追踪，`.story/work/导入中.md` 在 Phase 4 的 `tracking_commit.py init` 与 `check` 都通过后删除；需要的脚本改为 `build_outline_brief.py`、`tracking_commit.py`（Python 3）与 `check-outline-contract.js`（Node）。上游新增的「先装写作环境」选项在 DSH 里不出现，导入记录直接记为已装。
+- 写后提醒指向上游新的位置：新书第一章的追踪初始化现在在 `workflow-chapter.md` 开头，旧的「首次初始化」一节已不存在。
+- 原生扫榜 Skill 把结论写进 `扫榜/{YYYYMMDD}/`：长篇写 `选题决策.md`（带「扫榜日期」），短篇写 `短篇扫榜结论.md`，与上游 story-long-write 开书、story-short-write 构思的接续一致；原生 `story` 路由在整理作者记忆或迁移「本书：」条目时加载新的 `author-memory-maintenance.md`。
+- 短剧剪辑覆盖层与「成片」页指令按 Drama Skills 0.8.0 重写 `render` 的职责：切段、同场景自动接镜（CUT 写「画面」校正即替代，`- 画面：不校` 跳过，交付规格 `- 接镜匹配：无` 整集关闭）、拼接、混入「音效」行、烧字幕与画面文字、可选颗粒、统一响度；「音效」行之外的混音仍是经审批的外部 ffmpeg 步骤。**剪辑单里只要有「画面文字」就必须用 Remotion**，它装在项目外的 `~/.cache/short-drama-edit/remotion`，只有创作者同意安装时才走，未同意就不写「画面文字」行。**0.8 之前装过 Remotion 的，要在该目录重新 `npm install`**（新增两套字体包）；叠层文件从 `字幕叠层.webm` 改名为 `叠层.webm`。**重新渲染已有剧集时画面会变**：同场景自动接镜默认开启，字幕样式也换了；想保持旧画面，在交付规格写 `- 接镜匹配：无`。重新审查可能对已有项目新报 STY-07、STY-29、AST-14。
+- **video-recap-skills 0.5.0 时停在中途的视频项目不能续跑**：运行清单的 `source_video_fingerprint` 换成了 `source_video_identity`，还新增了 `audio` 一段，续跑旧 `work/` 会报 `source_video_identity: expected …`。新开一个 `work/` 目录，或从第一阶段重跑。`recap.py --allow-sparse-cut` 与 `cut.py --narration`、`--no-narration-map`、`--allow-sparse-cut` 已删除，剪辑一律先剪片、再对着剪后片写解说；`recap.py` 不再接受缩写参数；字幕渲染版本升到 9，已有字幕会重新渲染。
+- 「视频」工作台对 `--audio-mode source-mix` 与 `adopted-packet-copy` 的运行不再显示「等待解说词」：剪完直接进入合成，整段模式没有暂停点。
+- 「视频」工作台的配音环境检查改用上游认的供应商名（`auto`、`mimo-tts`、`fish-audio`、`index-tts`，默认 `auto`）。此前按 `fish` 判断，设了合法的 `TTS_PROVIDER=fish-audio` 反而不显示 Fish Key 状态；现在 `fish-audio`、或 `auto` 且没有 MiMo Key 时显示 Fish Key，`index-tts` 时显示 `INDEX_TTS_ENDPOINT` / `INDEX_TTS_VOICE` 是否都已设置。
+- 短剧演示 fixture 换成上游 0.8.0 的示例：同一集从 8 镜扩到 22 镜、11 项素材，README 的示例片段与报错行号随之更新。NovelToGame 在 0.4.0 之后没有新发布，保持 `d76cdca`。
+
+### Removed
+
+- 随包资产不再包含上游新增的独立 dashboard：video-recap-skills 的 `dashboard_server.py`、`dashboard_*.py` 与 `assets/dashboard/`，Drama Skills 创作台 v2 只被 dashboard 引用的 `creator_views.py`，以及 Oh Story `story-setup/references/` 下 8 份按宿主拆分的 `deploy-*.md`。DSH 的「视频」「短剧」工作台与原生 `story-setup` 取代它们；技能桥写明 dashboard 请求指向「视频」工作台，查看资源库改用只读的 `library.py`。视频流水线实际引用的 `library.py`、`project_binding.py` 与 `resource_lock.py` 照常随包。
+
+## [0.1.10] - 2026-09-25
+
+### Added
+
+- 同步 [Drama Skills 0.7.1](https://github.com/zenstory-ai/drama-skills/releases/tag/v0.7.1)（`795cb80`），新增第五个内置 adapter MiniMax Speech（`minimax-speech`，语音）：必需 `MINIMAX_API_KEY`，可选 `MINIMAX_BASE_URL`，超时 600 秒。它自动登记进不含凭据的 adapter 配置，`short-drama-produce` 的 DSH 覆盖层会列出它，「生产」视图的「生成环境」条多出「语音 · MiniMax Speech」一项，同样只报告变量是否存在。模型与 `voice_id` 要由账号与文档显式给出，上游不内置音色清单。**自己用 `OH_STORY_DRAMA_ADAPTER_CONFIG` 维护 adapter 配置的，要补上 `minimax-speech` 一项，否则语音任务在 run 时报「adapter profile is missing」。**
+
+### Fixed
+
+- 修复工作台在 DeepSeek Harness 0.1.7 上整体空白（[#50](https://github.com/zenstory-ai/oh-story-dsh/issues/50)）。DSH 0.1.7 删除了 `SessionSnapshot.queue`，插件读它时抛出 `TypeError`，`oh-story.workspace` 整个 Slot 被错误边界收走，面板和「创作工作台」按钮都不出现；升级到 `0.1.7-rc.2` 也一样。DSH Queue 现在改读宿主的 `inbox` 投影（`next-turn` 列），按不可信的线上数据逐项校验，并与 DSH 自己的 QueueDock 一样，跳过已被 Transcript 认领、只是尚未退场的行。任务 ID 改在整条排队文本里匹配，不再受旧版 200 字预览截断影响。
+- 切换会话不再丢失工作台状态。DSH 0.1.7 会在会话切走时释放该会话的 Store 实例，未保存的手写草稿、短剧生产任务、镜序与画布布局都会跟着消失；它的 `SessionProvider` 也不再按会话重新挂载子树，切回时聊天记录要重新加载，历史里最后一次 Agent 写入又会被当成新写入，把编辑器拉走并改回预览。插件现在按会话保留一份页面生命周期内的工作台记忆，任何新的 Store 实例在渲染前先还原，已跟随过的 Agent 写入也记在其中，并自行按会话重新挂载。
+- Agent 写新文件时，工作台在 DSH 0.1.7 上重新跟到那个文件。0.1.7 在模型写完参数到工具真正派发之间（pre-execute hooks、需要批准时的等待）会把这次调用从所有实时视图里隐去，编辑器里的实时预览随之消失，文件落盘前选中也被退回第一章。现在从该步骤已完成的消息里取回参数，并在 Turn 结束前保留 Agent 的预览。
+- 首次启动的使用引导在 DSH 0.1.7 上重新出现。0.1.7 的新主目录会直接进入「默认工作区」里的一个空白会话，不再有「尚无会话」的状态，0.1.8 加的引导因此永远不显示；现在只要当前会话仍是空白、所在工作区也没有创作项目，就在会话首页显示引导，发出第一句话后自动收起。
+- MiniMax H3 的「生成环境」状态不再在缺少时长上下限时显示就绪。上游要求每个 H3 任务都带整数时长，没有 `MINIMAX_VIDEO_MIN_DURATION` / `MINIMAX_VIDEO_MAX_DURATION` 时 adapter 直接拒绝，这两个变量此前被错标为可选；新增测试按各供应商参考文档的「Required environment」逐项核对必需变量。
+- 工作台只挂到当前会话的主对话列。DSH 0.1.7 会在右侧栏的子 Agent 对话里复用同一套对话内容，此前的选择器可能把工作台挂进子 Agent 对话；Chat 底部留白也只加在顶层对话流上，不再加到每个折叠的步骤分组里。
+- 成片任务的 DSH Turn 结束却没有成片时，不再提示「避免重复计费」——装配是本地 ffmpeg，不产生费用；改为提示去 Chat 查看 `edit_tool check` 的阻断项（未采用镜头理由、画幅/帧率不一致等）。较新的成片任务真正开始执行时，同一集上一条悬而未决的成片任务才标为失败并保留原因，不会被新成片一起标成「已完成」；新任务派发失败或被移出 DSH Queue 时，旧任务仍可在 Chat 里完成。
+
+### Changed
+
+- 固定的 DeepSeek Harness 从 `0.1.5-rc.1` 升到 `0.1.7-rc.2`（npm `next`）。除上面几处修复外，插件跟进了三处接口变化：运行中的工具调用新增没有参数的 `preparing` 阶段，只在 `start` 阶段读取 `argsRaw`；消息来源取消了共用的 `plugin` 类型，写后提醒改为插件自己声明的 `oh-story-post-write`（`notice` 形式）；`@deepseek-ai/cordis` 升到 `4.0.4`、`schemastery` 升到 `3.18.4`。0.1.7 会把会话记录升级到新格式，升级后不能再用同一个 DSH 目录退回 0.1.5。**0.1.9 及更早的插件不要装在 DSH 0.1.7 上。**
+- 对 DSH 的 `peerDependencies` 收紧为 `>=0.1.7-rc.2 <0.1.8-0`。此前写的是 `^0.1.5-rc.1`，在 0.x 下等于声明兼容整个 0.1 系列，DSH 在补丁版本之间删掉 `queue` 时插件仍被当作兼容而加载。DSH 0.1.7 会在加载插件时按 peer 范围检查运行时版本，不在范围内时给出明确的不兼容提示（可用 `dsh plugin allow-version` 自担风险放行），而不是渲染出一个空白工作台。
+- 同步 [Oh Story 0.8.0](https://github.com/zenstory-ai/oh-story-claudecode/releases/tag/v0.8.0)（`2bb1da1`，`agents_version` 30 → 32，跨过 0.7.11）：长篇单章流程瘦身，追踪先用 `tracking_commit.py draft` 生成草稿再由 `storyctl.py chapter commit` 提交；规划与正文分开授权，写大纲、卷纲、细纲不再顺带写正文；追踪只在第一章正文前初始化，开书与规划阶段不再生成 `追踪/`；长篇拆文改为 Python 3 驱动的单状态运行时，并新增可选灵感库。0.1.9 记录的细纲情节点表「分辨率」一列在 0.8.0 改为可选。
+- `chapter-extractor` 按上游改为可写（`write` / `edit`，仍无 `bash`），自己把整批结果写进 `{拆文目录}/_analysis_cache/输入-{批次ID}.md`。DSH 侧新增写入围栏，只放行上游 `analysis-input-guard` 认可的这一类文件；子 Agent 身份取自 DSH 写进子会话 `subagent/descriptor` 的 Role 标签，其他 Role 与主 Agent 不受影响。长篇拆文与导入的覆盖层写明批次派发、逐个提交与 Python 3 缺失时的提示。
+- 写正文守卫对齐上游的细纲门禁：长篇书（有 `大纲/` 或 `追踪/`）新建章节前必须有对应细纲，不再因为 `追踪/_tracking-state.json` 缺失而放行；书放在工作区子目录时同样受保护，改写已有章节不再要求细纲，拦截提示给出补零的细纲文件名。DSH 单书布局下上游的导入放行条件几乎对不上，`/story-import` 复制既有书稿时会被拦下，所以导入覆盖层改为先建 `.story/work/导入中.md` 导入标记、追踪初始化并检查通过后删除，守卫只在尚无追踪状态、且存在导入标记（或上游的 `拆文库/{书目录名}`）时放行。长篇写作覆盖层要求正文只用 write/edit 工具写入，不经 shell 重定向或脚本，好让守卫、写后提醒与小说视图都看得到。
+- 写后提醒只在长篇书的主会话里出现，`oh_story_role` 子 Agent 不再收到；它说明一章写到一半也会出现，新书尚未初始化追踪时先按「首次初始化」运行 `tracking_commit.py init` 与 `check`，本章收尾时用 `tracking_commit.py draft` 与 `storyctl.py chapter commit` 提交，绝不手改追踪状态或派生视图。
+- `story` 原生路由新增灵感库入口；只说 `/story` 时给四个白话选项；作者记忆改为工作区与书两级，单书布局下书级条目在 `.story/作者记忆/书级/`。**升级前写在工作区的「本书：」条目要对每本书运行一次 `author_memory_commit.py migrate --workspace {工作区} --book-root {书目录}`（DSH 单书布局下两个参数都是工作区本身）才会重新参与查询，也可以对 Agent 说「整理作者记忆」。**已在写的长篇不用迁移；已有正文却没有追踪状态的旧项目，写下一章前先走 `story-import` 的「旧追踪项目迁移」。
+- 技能桥禁止经任何通用子代理工具（DSH 的 `subagent`、`subagent_fork`，或按 `subagent_type` / `agent_type` / `agent` / `TypeName` 传 Role 名）启动 Oh Story Role，只能用 `oh_story_role`。上游 0.7.11 起只写在部署模板里的「与作者协作」约定（用写书的话说、作者报告不带代码块围栏、写作习惯只经 `author_memory_commit.py` 记录、不改随包 Skill 文件、脚本出错时停下并给出命令与报错）补进技能桥，`story-setup` 的收尾报告改为「现在可以做什么 → 你还需要做的事」。审稿降级为单人时，只说明是本会话的 `oh_story_role` 或子 Agent 运行时不可用，不再照上游模板让作者去跑 `/story-setup`。扫榜报告按上游只讲结论与可写方向，短篇扫榜「市场概况」新增可信度。
+- Drama Skills 0.7.1 的剪辑检查双向核对镜头覆盖：《视频提示词.md》里的每个 `## MOTION-*` 要么成为某个 CUT 的「来源」，要么写进《剪辑单.md》第一个 `## CUT-` 之前的一行 `- 未采用镜头：MOTION-…（理由：…）；MOTION-…（理由：…）`，否则 `edit_tool.py check` 阻断。**0.7.0 写的剪辑单漏写未采用镜头的，需要补上这一行。**`check` / `render` 还会拒绝画幅或帧率不一致的素材；DSH 覆盖层与「成片」页的指令写明：经审批用 ffmpeg 统一到交付规格，输出放在剪辑阶段自己的 `制作成果/成片/规格统一/` 下，「来源」改指新文件后重跑 `check`。
+- 字幕说明不再称「零依赖」：默认硬字幕路线需要带 libass 的 ffmpeg。「声音」行只是记录，内置 render 不执行它；混音、配乐或格式转换是另一步经审批的外部 ffmpeg 处理，先写临时文件，按交付响度重新做整片响度标准化，再替换 `成片/成片.mp4`，最后对交付文件运行 `verify`。《剪辑单.md》的定位随上游更新为记录素材取舍、入出点、后期处理与交付规格。
+- `short-drama-produce` 覆盖层写明 `oh_story_production track_job` 只登记图片与视频任务，语音和音乐任务照样走预检与确认，但不进任务板，在本插件里也不会成为视频任务的参考。单项与批量生产提示词把工作台列出的参考标为补充，起始帧、结束帧的角色只取自来源条目「输入参考图」记录的用途；目标方言要求整组以参考图送入（如 MiniMax H3）时按方言翻译并在预览中说明。媒体库里的按钮改为「设为补充参考」。
+- 同步 [NovelToGame 0.4.0](https://github.com/zenstory-ai/novel-to-game)（`d76cdca`）：Skill 目录与产物协议不变；新增可选的 Blender 资产路线，《金瓶梅》示例重做了标题、开场与夜访呈现并重新录制验证。随包示例不再附带只供上游部署测试用的 `build/app/test/`，同步也不再把本地检出里被忽略的 `.omc/` 状态带进包。video-recap-skills 在 0.5.0 之后没有新发布，保持 `ec369e7`。
+
+## [0.1.9] - 2026-09-10
+
+### Added
+
+- 同步 [Drama Skills 0.7.0](https://github.com/zenstory-ai/drama-skills/releases/tag/v0.7.0)（`bc96c5e`），新增第 11 个 Skill `short-drama-edit`：把已生产的逐镜素材装配成成片。它把每一刀的入出点、镜序、字幕、声音与接镜校正写进《剪辑单.md》，再由 `edit_tool.py` 的 `check` / `render` / `verify` 核对文档、渲染成片、测量交付数字，输出落在 `剧集/<EP>/制作成果/成片/`。《剪辑单.md》不是第六份创作文档——五文档仍是创作真相，剪辑只记录「已有的这些素材，哪些帧进成片」，改台词、镜头职责或时长仍回到拥有它们的文档。
+- `short-drama-produce` 的 DSH 覆盖层写明中断任务的取回路径：视频任务在提交那一刻就已计费，`audit` 报出 `orphaned_provider_job` 时用 `collect` 取回结果——传的是 `--job-id`，即报告里那个 drama 任务 ID，供应商任务 ID 由 `collect` 自己从 run handle 读出。`collect` 不花钱，因而不走确认闸门；直接重投同一个任务会让创作者付两次。
+
+### Changed
+
+- 短剧「成片」页改为把排定的镜序交给 `/short-drama-edit`，而不再让 `/short-drama-produce` 用临时的媒体/命令工具自行拼接。上游 0.7.0 之前套件没有装配阶段，成片只能由插件即兴合成到 `制作成果/成片-<任务 ID>.mp4`；现在装配由上游拥有，插件只负责把镜序、剪辑单路径和 DSH 权限边界交代清楚。成片任务因此改按交付物路径（`制作成果/成片/成片.mp4`）关联——上游用固定文件名，文件名里不会带工作台的任务 ID——并记下派发时已存在的版本，避免上一版成片把新任务直接标成已完成。固定文件名不带任务 ID，一条成片就能对上同一集的每个成片任务，所以已取消或已失败的成片任务不再被后来的成片改写成「已完成」（失败任务的报错也不会被抹掉），已完成的任务继续指向它自己渲出的那条；「合成成片」在上一个成片任务落定前不可点，避免第二个任务被第一条成片直接判完、连带失去从 DSH Queue 移除它的入口。
+- 固定的 DeepSeek Harness 从 `0.1.2-rc.1` 升到 `0.1.5-rc.1`（npm `next`）。插件源码不需要改动：Queue、`updateQueue` / `QueueAction` 与工作台依赖的 Slot、锚点和快照字段都保持不变。`pnpm-workspace.yaml` 的 `overrides` / `minimumReleaseAgeExclude`、npm 包 peer/dev 依赖、README 与发布文档的安装命令，以及两条原生测试脚本里的 `dshVersion` 同步更新——最后一项才决定 `pnpm test:dsh` 真正装进来的 DSH 版本。
+- 同步 [Oh Story 0.7.10](https://github.com/zenstory-ai/oh-story-claudecode/releases/tag/v0.7.10)（`abe9663`，`agents_version` 29 → 30）：长篇新增排纲供给自查、A/B/C 创作授权与写手自由区，新增物按后续义务分三档（细纲情节点表因此多出「分辨率」一列），写手 prompt 改由脚本组装并按当前单元读取卷纲；短篇新增写前交付参数预检；长短篇按需分阶段加载参考，去味仅执行指定 Gate。
+- 同步 [NovelToGame 0.3.1](https://github.com/zenstory-ai/novel-to-game)（`e13a6fb`）与 [video-recap-skills 0.5.0](https://github.com/zenstory-ai/video-recap-skills)（`ec369e7`）：两者均为上游的边界校验收敛与冗余代码清理，Skill 目录与产物协议不变。
+
+### Fixed
+
+- 打包与 lint 的两条护栏此前把上游资产误当成本仓库的代码。`short-drama-edit` 随包附带一条可选的 Remotion 字幕排版路线，它带自己的 `src/` 与 TSX 文件：发布包的「不得包含源码」检查改为只拒绝本插件自己的 `package/src/` 与 `package/tests/`，ESLint 与 `tsconfig.lint.json` 则整体排除 `packages/knowledge/**`——上游资产逐字随包交付并由 parity 校验哈希，本仓库不该改它的写法。
+- 原生集成测试定位插件 Browser 模块的方式改为容忍压缩与未压缩两种注册写法。合并后的 Browser bundle 两种形式都有，此前只按压缩写法找下一个模块边界，切片会一路越过插件、把紧随其后的 DSH 模块也算成插件代码（`MutableSessionEventSource` 因此被当成遗留的 `EventSource` 接口）。
+
 ## [0.1.8] - 2026-09-06
 
 ### Fixed
@@ -182,7 +264,11 @@
 - 提供 13 个 Oh Story 小说 Skills、7 个专业 Roles 与 10 个 Drama Skills。
 - 提供文件树、Markdown/JSONL 编辑预览与官方 DSH Chat 同屏的三栏工作台。
 
-[Unreleased]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.11...v0.1.12
+[0.1.11]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.10...v0.1.11
+[0.1.10]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.9...v0.1.10
+[0.1.9]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.5...v0.1.6

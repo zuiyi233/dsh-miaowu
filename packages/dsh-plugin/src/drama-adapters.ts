@@ -6,14 +6,16 @@ import { fileURLToPath } from "node:url";
 
 /**
  * Drama Skills generates no media by itself and neither does DeepSeek: every
- * image, video, or music result comes from a provider adapter that
+ * image, video, speech, or music result comes from a provider adapter that
  * `short-drama-produce` runs through `production_tool.py run --adapter-config`.
  * Upstream deliberately leaves that config file and its credentials outside
- * every project. This module names the bundled adapters, registers them for the
+ * every project. This module names the bundled adapters (five as of Drama
+ * Skills 0.7.1, one per `provider_adapters.py` choice), registers them for the
  * current DSH host so the Agent has a file to pass, and reports which host
  * environment variables are present — never their values.
  */
-export type DramaAdapterModality = "image" | "video" | "music";
+/** Upstream job modalities with a bundled adapter; `tts` is spoken dialogue (MiniMax Speech). */
+export type DramaAdapterModality = "image" | "video" | "tts" | "music";
 
 /** Where the meter runs: local ComfyUI is free, cloud providers bill per call. */
 export type DramaAdapterCostModel = "free-local" | "metered-cloud";
@@ -96,8 +98,9 @@ export const DRAMA_ADAPTERS: readonly DramaAdapterSpec[] = [
     label: "MiniMax H3",
     modality: "video",
     costModel: "metered-cloud",
-    requiredEnv: ["MINIMAX_API_KEY", "MINIMAX_VIDEO_MODEL", "MINIMAX_VIDEO_RESOLUTIONS"],
-    optionalEnv: ["MINIMAX_VIDEO_BASE_URL", "MINIMAX_VIDEO_RATIOS", "MINIMAX_VIDEO_MIN_DURATION", "MINIMAX_VIDEO_MAX_DURATION"],
+    // Every H3 job carries an integer duration, and the adapter refuses it without this range.
+    requiredEnv: ["MINIMAX_API_KEY", "MINIMAX_VIDEO_MODEL", "MINIMAX_VIDEO_RESOLUTIONS", "MINIMAX_VIDEO_MIN_DURATION", "MINIMAX_VIDEO_MAX_DURATION"],
+    optionalEnv: ["MINIMAX_VIDEO_BASE_URL", "MINIMAX_VIDEO_RATIOS"],
     timeoutSeconds: 3_600,
     reference: "short-drama-produce/references/providers/minimax-h3-video.md"
   },
@@ -110,6 +113,16 @@ export const DRAMA_ADAPTERS: readonly DramaAdapterSpec[] = [
     optionalEnv: ["MINIMAX_BASE_URL"],
     timeoutSeconds: 600,
     reference: "short-drama-produce/references/providers/minimax-music.md"
+  },
+  {
+    name: "minimax-speech",
+    label: "MiniMax Speech",
+    modality: "tts",
+    costModel: "metered-cloud",
+    requiredEnv: ["MINIMAX_API_KEY"],
+    optionalEnv: ["MINIMAX_BASE_URL"],
+    timeoutSeconds: 600,
+    reference: "short-drama-produce/references/providers/minimax-speech.md"
   },
   {
     name: "comfyui",

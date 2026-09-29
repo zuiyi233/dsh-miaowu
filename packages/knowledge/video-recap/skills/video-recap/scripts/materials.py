@@ -15,13 +15,14 @@ written into scenes/ASR/VLM/summary JSON.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+from lib import load_json
 
 ALLOWED_ARTIFACTS = {
     "scenes.json",
@@ -66,80 +67,47 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-_FILE_FINGERPRINT_MEMO = {}
-
-
-def _file_identity(path):
-    """(device, inode, size, mtime_ns) — changes whenever the bytes could have changed."""
+def file_identity(path: str | Path) -> dict:
+    """``{size, mtime_ns}`` of a file: the identity recap records and compares for a source
+    video or adopted artifact. A file rewritten in place gets a new mtime_ns."""
     st = os.stat(os.fspath(path))
-    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
 
 
-def file_fingerprint(path: str | Path, chunk_size: int = 1024 * 1024) -> str:
-    """Return a full-content fingerprint for cache-correct identity checks.
-
-    The digest covers CONTENT only — never the path or mtime — so a copied video or
-    artifact is still recognised as the same asset, while any byte change invalidates
-    the cache even if timestamps, size, head, or tail bytes are misleading.
-
-    Identity metadata is used ONLY to memoize within a single process. One understanding
-    run fingerprints the same source video 8-10 times and the whole extracted frame set
-    2-3 times; on a 40-minute video at fps=1 that is gigabytes of redundant reads before
-    any real work starts. A file rewritten in place gets a new (size, mtime_ns) and is
-    re-hashed, so the memo can never serve a stale digest.
-    """
-    key = _file_identity(path)
-    memoized = _FILE_FINGERPRINT_MEMO.get(key)
-    if memoized is not None:
-        return memoized
-    h = hashlib.sha256()
-    with open(os.fspath(path), "rb") as f:
-        for chunk in iter(lambda: f.read(chunk_size), b""):
-            h.update(chunk)
-    digest = h.hexdigest()
-    _FILE_FINGERPRINT_MEMO[key] = digest
-    return digest
+def _slug(text: str, max_len: int = 48) -> str:
+    raw = Path(text).stem.lower()
+    raw = re.sub(r"[^a-z0-9\u4e00-\u9fff._-]+", "-", raw).strip("-._")
+    return (raw or "material")[:max_len].strip("-._") or "material"
 
 
-def stable_json_dumps(value) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+def _id_stem(source_path: str | Path, max_len: int = 32) -> str:
+    raw = re.sub(r"[^a-z0-9]+", "-", Path(source_path).stem.lower()).strip("-")
+    return (raw or "source")[:max_len].strip("-") or "source"
 
 
-def settings_fingerprint(settings) -> str:
-    return hashlib.sha256(stable_json_dumps(settings or {}).encode("utf-8")).hexdigest()
-
-
-def source_id_from_fingerprint(fingerprint: str) -> str:
-    return f"src_{str(fingerprint)[:12]}"
+def source_id_for(source_path: str | Path) -> str:
+    """``src_<stem>_<size>``: readable, stable across runs, and distinct for a different cut
+    of the same title (the size changes)."""
+    return f"src_{_id_stem(source_path)}_{os.stat(os.fspath(source_path)).st_size}"
 
 
 def assign_source_ids(sources: list[dict]) -> list[dict]:
     """Assign deterministic source_id values to manifest source records.
 
-    Base id is ``src_<sha256[:12]>``. When the same fingerprint appears more than
-    once in one project, the first keeps the base id and later distinct paths get
-    ``_<pathhash6>`` suffixes. Input order does not affect the id for unique
-    fingerprints, and duplicate suffixes are derived from resolved path text.
+    Base id is ``source_id_for(source_path)``. When two records in one project share a
+    base id, the first keeps it and later ones get ``_2``, ``_3``… suffixes in input order.
     """
-    seen: dict[str, set[str]] = {}
+    used: set[str] = set()
     assigned = []
     for raw in sources:
         item = dict(raw)
-        fp = str(item.get("source_video_fingerprint") or item.get("fingerprint") or "")
-        if not fp:
-            raise ValueError("source fingerprint is required")
-        base = source_id_from_fingerprint(fp)
-        path = str(Path(item.get("source_path") or item.get("path") or "").resolve())
-        used = seen.setdefault(fp, set())
-        if not used:
-            sid = base
-        else:
-            suffix = hashlib.sha256(path.encode("utf-8")).hexdigest()[:6]
-            sid = f"{base}_{suffix}"
-        # Avoid accidental path-hash collisions within one manifest.
+        path = str(Path(item["source_path"]).resolve())
+        base = source_id_for(path)
+        sid = base
+        suffix = 2
         while sid in used:
-            suffix = hashlib.sha256((path + sid).encode("utf-8")).hexdigest()[:6]
             sid = f"{base}_{suffix}"
+            suffix += 1
         used.add(sid)
         item["source_id"] = sid
         item["source_path"] = path
@@ -147,35 +115,16 @@ def assign_source_ids(sources: list[dict]) -> list[dict]:
     return assigned
 
 
-def _slug(text: str, max_len: int = 48) -> str:
-    raw = Path(str(text or "material")).stem.lower()
-    raw = re.sub(r"[^a-z0-9\u4e00-\u9fff._-]+", "-", raw).strip("-._")
-    return (raw or "material")[:max_len].strip("-._") or "material"
-
-
-def material_id_for(source_path: str | Path, source_fingerprint: str) -> str:
-    return f"{_slug(str(source_path))}-{str(source_fingerprint)[:12]}"
+def material_id_for(source_path: str | Path, source_identity: dict) -> str:
+    return f"{_slug(str(source_path))}-{source_identity['size']}"
 
 
 def material_dir(library_dir: str | Path, material_id: str) -> Path:
     return Path(library_dir) / "materials" / material_id
 
 
-def _load_json(path: Path):
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        return None
-
-
-def _safe_text(value, limit: int = 600) -> str:
-    text = str(value or "").replace("\x00", " ").strip()
-    return _redact_text(text)[:limit]
-
-
 def _redact_text(text: str) -> str:
     """Redact credential value shapes only; leave ordinary words (secret/token/…) intact."""
-    text = str(text or "")
     for rx in SECRET_VALUE_RES:
         text = rx.sub("[redacted-token]", text)
     return SECRET_ASSIGN_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}[redacted-key]{m.group(4)}", text)
@@ -185,13 +134,12 @@ def _redact_json(value):
     if isinstance(value, dict):
         out = {}
         for key, item in value.items():
-            key_text = str(key)
             # Drop only the value of an exact credential-named key; keep the key name and
             # never coalesce distinct keys (so benign fields like token_economy survive).
-            if key_text.strip().lower() in SECRET_KEY_NAMES:
-                out[key_text] = "[redacted]"
+            if key.strip().lower() in SECRET_KEY_NAMES:
+                out[key] = "[redacted]"
             else:
-                out[key_text] = _redact_json(item)
+                out[key] = _redact_json(item)
         return out
     if isinstance(value, list):
         return [_redact_json(item) for item in value]
@@ -202,54 +150,35 @@ def _redact_json(value):
 
 def copy_artifact_redacted(src: Path, dst: Path) -> None:
     """Copy an allowed JSON/MD artifact without persisting obvious secret markers."""
-    try:
-        text = src.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        raise ValueError(f"refusing to persist non-text material artifact: {src.name}") from exc
+    text = src.read_text(encoding="utf-8")
     if src.suffix.lower() == ".json":
-        try:
-            data = json.loads(text)
-        except ValueError:
-            dst.write_text(_redact_text(text), encoding="utf-8")
-        else:
-            dst.write_text(json.dumps(_redact_json(data), ensure_ascii=False, indent=2), encoding="utf-8")
+        dst.write_text(json.dumps(_redact_json(json.loads(text)), ensure_ascii=False, indent=2), encoding="utf-8")
     else:
         dst.write_text(_redact_text(text), encoding="utf-8")
 
 
 def summarize_work_dir(work_dir: str | Path, *, source_name: str = "") -> dict:
-    """Best-effort small summary for material.md/index grep."""
+    """Grep-friendly tags for material.md/index: character and entity names plus artifact counts."""
     work = Path(work_dir)
-    summary_parts = []
+    summary = f"Analyzed video material: {source_name or work.name}"
     tags = []
-    idx = _load_json(work / "understanding_index.json")
-    if isinstance(idx, dict):
-        for key in ("summary", "story_summary", "overall_summary", "one_sentence"):
-            if idx.get(key):
-                summary_parts.append(_safe_text(idx.get(key)))
-                break
-        for key in ("characters", "entities", "keywords", "tags"):
-            vals = idx.get(key)
-            if isinstance(vals, list):
-                tags.extend(_safe_text(v, 80) for v in vals[:12])
-    vlm = _load_json(work / "vlm_analysis.json")
-    if isinstance(vlm, dict):
-        for key in ("summary", "overall_summary", "video_summary"):
-            if vlm.get(key):
-                summary_parts.append(_safe_text(vlm.get(key)))
-                break
-    scenes = _load_json(work / "scenes.json")
-    if isinstance(scenes, list):
-        tags.append(f"scenes:{len(scenes)}")
-    asr = _load_json(work / "asr_result.json")
-    if isinstance(asr, list):
-        tags.append(f"asr:{len(asr)}")
-    summary = " | ".join(p for p in summary_parts if p) or f"Analyzed video material: {source_name or work.name}"
-    dedup_tags = []
-    for tag in tags:
-        if tag and tag not in dedup_tags:
-            dedup_tags.append(tag)
-    return {"summary": summary, "tags": dedup_tags[:20]}
+    index_path = work / "understanding_index.json"
+    if index_path.exists():
+        # consolidate.py writes {characters, relationships, plot_points, entities,
+        # research_glossary} and no prose summary. The list ITEMS are MiMo output that
+        # consolidate only list-checks, so their shape is still tolerated here.
+        index = load_json(index_path)
+        for key in ("characters", "entities"):
+            for item in index[key][:12]:
+                text = item.get("name", "") if isinstance(item, dict) else item
+                tags.append(_redact_text(str(text))[:80])
+    for name, label in (("scenes.json", "scenes"), ("asr_result.json", "asr")):
+        if (work / name).exists():
+            tags.append(f"{label}:{len(load_json(work / name))}")
+    return {
+        "summary": summary,
+        "tags": list(dict.fromkeys(tag for tag in tags if tag))[:20],
+    }
 
 
 def allowed_artifact_paths(work_dir: str | Path) -> list[Path]:
@@ -258,19 +187,19 @@ def allowed_artifact_paths(work_dir: str | Path) -> list[Path]:
 
 
 def write_material_md(path: Path, metadata: dict, summary: str, tags: list[str]) -> None:
-    artifact_lines = "\n".join(f"- `{a.get('name')}` → `{a.get('path')}`" for a in metadata.get("artifacts", []))
+    artifact_lines = "\n".join(f"- `{a['name']}` → `{a['path']}`" for a in metadata["artifacts"])
     tags_text = ", ".join(tags) if tags else "(none)"
-    text = f"""# Material: {metadata.get('source_name') or metadata.get('material_id')}
+    text = f"""# Material: {metadata['source_name']}
 
-- material_id: `{metadata.get('material_id')}`
-- source: `{metadata.get('source_path')}`
-- source_fingerprint: `{metadata.get('source_video_fingerprint')}`
-- settings_fingerprint: `{metadata.get('settings_fingerprint')}`
-- updated_at: `{metadata.get('updated_at')}`
+- material_id: `{metadata['material_id']}`
+- source: `{metadata['source_path']}`
+- source_identity: `{json.dumps(metadata['source_video_identity'], sort_keys=True)}`
+- settings: `{json.dumps(metadata['settings'], ensure_ascii=False, sort_keys=True)}`
+- updated_at: `{metadata['updated_at']}`
 - tags: {tags_text}
 
 ## Summary
-{_safe_text(summary, 2000)}
+{summary}
 
 ## Artifacts
 {artifact_lines or '- (none)'}
@@ -278,12 +207,32 @@ def write_material_md(path: Path, metadata: dict, summary: str, tags: list[str])
     path.write_text(text, encoding="utf-8")
 
 
+def _read_material_metadata(path: Path) -> dict | None:
+    try:
+        data = load_json(path)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _material_cache_entry(path: Path) -> dict | None:
+    data = _read_material_metadata(path)
+    if not data or not all(data.get(key) for key in (
+        "source_path", "updated_at", "material_id",
+    )) or not isinstance(data.get("artifacts"), list):
+        return None
+    if not isinstance(data.get("source_video_identity"), dict) \
+            or not isinstance(data.get("settings"), dict):
+        return None
+    return data
+
+
 def save_material(
     library_dir: str | Path,
     work_dir: str | Path,
     source_path: str | Path,
-    source_fingerprint: str,
-    settings_fp: str,
+    source_identity: dict,
+    settings: dict,
     *,
     duration: float | None = None,
     source_id: str | None = None,
@@ -292,7 +241,7 @@ def save_material(
 ) -> dict:
     """Persist small reusable analysis artifacts into the filesystem library."""
     lib = Path(library_dir)
-    mid = material_id or material_id_for(source_path, source_fingerprint)
+    mid = material_id or material_id_for(source_path, source_identity)
     dest = material_dir(lib, mid)
     artifacts_dir = dest / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -302,17 +251,20 @@ def save_material(
     fresh_names = {src.name for src in sources}
     # Reconcile: drop allowed artifacts left from a previous (larger) save so the on-disk
     # artifacts/ dir always matches material.json — a stale orphan must not surface in greps.
-    for stale in artifacts_dir.iterdir() if artifacts_dir.exists() else []:
+    for stale in artifacts_dir.iterdir():
         if stale.is_file() and stale.name in ALLOWED_ARTIFACTS and stale.name not in fresh_names:
             stale.unlink()
     copied = []
     for src in sources:
         dst = artifacts_dir / src.name
         copy_artifact_redacted(src, dst)
-        copied.append({"name": src.name, "path": f"artifacts/{src.name}", "sha256": file_fingerprint(dst)})
+        copied.append({"name": src.name, "path": f"artifacts/{src.name}", "bytes": dst.stat().st_size})
 
-    existing = _load_json(dest / "material.json")
-    created_at = existing.get("created_at") if isinstance(existing, dict) and existing.get("created_at") else now
+    meta_path = dest / "material.json"
+    previous = _read_material_metadata(meta_path)
+    created_at = previous.get("created_at") if previous else None
+    if not isinstance(created_at, str) or not created_at:
+        created_at = now
     source_path = Path(source_path).resolve()
     summary_info = summarize_work_dir(work_dir, source_name=source_path.name)
     metadata = {
@@ -321,14 +273,14 @@ def save_material(
         "source_id": source_id,
         "source_name": source_path.name,
         "source_path": str(source_path),
-        "source_video_fingerprint": source_fingerprint,
+        "source_video_identity": dict(source_identity),
         "duration": duration,
-        "settings_fingerprint": settings_fp,
+        "settings": dict(settings),
         "artifacts": copied,
         "created_at": created_at,
         "updated_at": now,
     }
-    (dest / "material.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     write_material_md(dest / "material.md", metadata, summary_info["summary"], summary_info["tags"])
 
     index_record = {
@@ -337,8 +289,7 @@ def save_material(
         "material_id": mid,
         "source_name": metadata["source_name"],
         "source_path": metadata["source_path"],
-        "source_video_fingerprint": source_fingerprint,
-        "settings_fingerprint": settings_fp,
+        "source_video_identity": dict(source_identity),
         "summary": summary_info["summary"],
         "tags": summary_info["tags"],
         "material_dir": str(dest),
@@ -350,21 +301,29 @@ def save_material(
     return metadata
 
 
-def find_material_by_fingerprint(library_dir: str | Path, source_fingerprint: str) -> dict | None:
+def find_material_by_source(
+    library_dir: str | Path, source_path: str | Path, source_identity: dict
+) -> dict | None:
+    """The newest material saved for this exact source file (resolved path + identity)."""
     root = Path(library_dir) / "materials"
     if not root.exists():
         return None
+    resolved = str(Path(source_path).resolve())
     candidates = []
     for meta_path in root.glob("*/material.json"):
-        data = _load_json(meta_path)
-        if isinstance(data, dict) and data.get("source_video_fingerprint") == source_fingerprint:
+        data = _material_cache_entry(meta_path)
+        if (
+            data is not None
+            and data["source_path"] == resolved
+            and data["source_video_identity"] == source_identity
+        ):
             data["material_dir"] = str(meta_path.parent)
             candidates.append(data)
     if not candidates:
         return None
     # Deterministic fallback policy for legacy/manual callers that do not know
     # the expected material_id: newest wins, then material_id for stable ties.
-    candidates.sort(key=lambda d: (str(d.get("updated_at") or ""), str(d.get("material_id") or "")), reverse=True)
+    candidates.sort(key=lambda d: (d["updated_at"], d["material_id"]), reverse=True)
     return candidates[0]
 
 
@@ -372,13 +331,14 @@ def restore_material(
     library_dir: str | Path,
     work_dir: str | Path,
     *,
-    source_fingerprint: str,
-    settings_fp: str,
+    source_path: str | Path,
+    source_identity: dict,
+    settings: dict,
     material_id: str | None = None,
     overwrite: bool = True,
     prune_stale_allowed: bool = True,
 ) -> dict:
-    """Restore allowed artifacts when fingerprint/settings match.
+    """Restore allowed artifacts when source path, identity and settings all match.
 
     Returns a status dict and never partially restores on mismatch.
 
@@ -391,51 +351,40 @@ def restore_material(
     """
     lib = Path(library_dir)
     if material_id:
-        meta = _load_json(material_dir(lib, material_id) / "material.json")
-        if isinstance(meta, dict):
-            meta["material_dir"] = str(material_dir(lib, material_id))
+        meta_path = material_dir(lib, material_id) / "material.json"
+        meta = _material_cache_entry(meta_path)
+        if meta is None:
+            return {"restored": False, "reason": "material missing or invalid"}
+        meta["material_dir"] = str(meta_path.parent)
     else:
-        meta = find_material_by_fingerprint(lib, source_fingerprint)
-    if not isinstance(meta, dict):
-        return {"restored": False, "reason": "material not found"}
-    if meta.get("source_video_fingerprint") != source_fingerprint:
-        return {"restored": False, "reason": "source fingerprint mismatch", "material_id": meta.get("material_id")}
-    if meta.get("settings_fingerprint") != settings_fp:
-        return {"restored": False, "reason": "settings fingerprint mismatch", "material_id": meta.get("material_id")}
+        meta = find_material_by_source(lib, source_path, source_identity)
+        if meta is None:
+            return {"restored": False, "reason": "material not found"}
+    if meta["source_path"] != str(Path(source_path).resolve()) \
+            or meta["source_video_identity"] != source_identity:
+        return {"restored": False, "reason": "source identity mismatch", "material_id": meta["material_id"]}
+    if meta["settings"] != settings:
+        return {"restored": False, "reason": "settings mismatch", "material_id": meta["material_id"]}
 
-    src_dir = Path(meta.get("material_dir") or material_dir(lib, meta["material_id"])) / "artifacts"
+    src_dir = Path(meta["material_dir"]) / "artifacts"
     if not src_dir.exists():
-        return {"restored": False, "reason": "material artifacts missing", "material_id": meta.get("material_id")}
+        return {"restored": False, "reason": "material artifacts missing", "material_id": meta["material_id"]}
     dest = Path(work_dir)
     dest.mkdir(parents=True, exist_ok=True)
-    staged = []
     with tempfile.TemporaryDirectory(prefix=".material_restore_", dir=str(dest)) as tmp_name:
         tmp = Path(tmp_name)
-        for artifact in meta.get("artifacts") or []:
-            name = artifact.get("name") if isinstance(artifact, dict) else None
-            if name not in ALLOWED_ARTIFACTS:
-                continue
-            src = src_dir / name
-            if not src.exists():
-                continue
-            copy_artifact_redacted(src, tmp / name)
-            staged.append(name)
-        if not staged:
-            return {
-                "restored": False,
-                "reason": "material artifacts empty",
-                "material_id": meta.get("material_id"),
-            }
+        staged = [artifact["name"] for artifact in meta["artifacts"]]  # save_material's own list
+        if not staged or any(not (src_dir / name).is_file() for name in staged):
+            return {"restored": False, "reason": "material artifacts missing", "material_id": meta["material_id"]}
+        for name in staged:
+            copy_artifact_redacted(src_dir / name, tmp / name)
 
         pruned = []
         if prune_stale_allowed:
-            staged_set = set(staged)
-            for name in sorted(ALLOWED_ARTIFACTS):
-                # Never prune an artifact we are about to restore: the restore loop below
-                # honors `overwrite`, so pruning a staged name would (with overwrite=False)
-                # delete it and then skip the copy, losing the file.
-                if name in staged_set:
-                    continue
+            # Never prune an artifact we are about to restore: the restore loop below honors
+            # `overwrite`, so pruning a staged name would (with overwrite=False) delete it and
+            # then skip the copy, losing the file.
+            for name in sorted(ALLOWED_ARTIFACTS - set(staged)):
                 out = dest / name
                 if out.exists():
                     out.unlink()
@@ -450,7 +399,7 @@ def restore_material(
             restored.append(name)
     return {
         "restored": bool(restored),
-        "material_id": meta.get("material_id"),
+        "material_id": meta["material_id"],
         "artifacts": restored,
         "pruned_artifacts": pruned,
         "material": meta,

@@ -1,91 +1,49 @@
 """Self-contained config + utilities for this skill (no cross-skill imports)."""
+import functools
+import math
 import os
+import shutil
 import subprocess
-from pathlib import Path
+import tempfile
 
 
 # ── 配置 ──────────────────────────────────────────────────────────────
 _EXISTING_CONFIG_REF = globals().get("CONFIG")
 
-DEFAULT_MIMO_API_URL = "https://api.xiaomimimo.com/v1"
-DEFAULT_MIMO_TOKEN_PLAN_CLUSTER = "cn"
-MIMO_TOKEN_PLAN_API_URLS = {
-    "cn": "https://token-plan-cn.xiaomimimo.com/v1",
-    "sgp": "https://token-plan-sgp.xiaomimimo.com/v1",
-    "ams": "https://token-plan-ams.xiaomimimo.com/v1",
-}
-DEFAULT_MIMO_MODEL = "mimo-v2.5"          # VLM / chat (vision understanding)
-DEFAULT_MIMO_ASR_MODEL = "mimo-v2.5-asr"  # speech-to-text
-DEFAULT_MIMO_TTS_MODEL = "mimo-v2.5-tts"  # text-to-speech
-
-
-def normalize_api_url(raw_url):
-    """Normalize a MiMo (OpenAI-compatible) base URL or chat/completions endpoint."""
-    url = (raw_url or DEFAULT_MIMO_API_URL).rstrip("/")
-    if url.endswith("/chat/completions"):
-        return url
-    return f"{url}/chat/completions"
-
-
-def is_mimo_token_plan_key(api_key):
-    """Return True for Xiaomi MiMo Token Plan keys, which use token-plan base URLs."""
-    return str(api_key or "").strip().startswith("tp-")
-
-
-def default_mimo_api_url(api_key="", cluster=None):
-    """Pick the correct MiMo base URL for pay-as-you-go vs Token Plan keys.
-
-    MiMo uses independent credentials for pay-as-you-go (`sk-*`) and Token Plan
-    (`tp-*`). Token Plan keys must be sent to the Token Plan cluster base URL,
-    not the pay-as-you-go `api.xiaomimimo.com` endpoint.
-    """
-    if is_mimo_token_plan_key(api_key):
-        cluster_name = (cluster or os.environ.get("MIMO_TOKEN_PLAN_CLUSTER") or DEFAULT_MIMO_TOKEN_PLAN_CLUSTER)
-        cluster_name = str(cluster_name).strip().lower()
-        return MIMO_TOKEN_PLAN_API_URLS.get(cluster_name, MIMO_TOKEN_PLAN_API_URLS[DEFAULT_MIMO_TOKEN_PLAN_CLUSTER])
-    return DEFAULT_MIMO_API_URL
-
 
 def env_int(name, default, *, minimum=None):
-    """Read an integer env var; ignore malformed values instead of crashing import."""
-    raw = os.environ.get(name)
-    if raw is None or raw == "":
+    """Read an integer env var; an unset/empty value yields `default`, a malformed one is an error."""
+    raw = os.environ.get(name, "")
+    if raw == "":
         return default
     try:
         value = int(raw)
-    except (TypeError, ValueError):
-        return default
-    if minimum is not None:
-        value = max(minimum, value)
-    return value
+    except ValueError as exc:
+        raise ValueError(f"环境变量 {name}={raw!r} 不是整数") from exc
+    return value if minimum is None else max(minimum, value)
 
 
 def env_bool(name, default=False):
     """Read common boolean env var forms."""
-    raw = os.environ.get(name)
-    if raw is None or raw == "":
+    raw = os.environ.get(name, "")
+    if raw == "":
         return default
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def env_float(name, default, *, minimum=None):
-    """Read a float env var; ignore malformed values instead of crashing import."""
-    raw = os.environ.get(name)
-    if raw is None or raw == "":
+    """Read a float env var; an unset/empty value yields `default`, a malformed one is an error."""
+    raw = os.environ.get(name, "")
+    if raw == "":
         return default
     try:
         value = float(raw)
-    except (TypeError, ValueError):
-        return default
-    if minimum is not None:
-        value = max(minimum, value)
-    return value
+    except ValueError as exc:
+        raise ValueError(f"环境变量 {name}={raw!r} 不是数字") from exc
+    if not math.isfinite(value):
+        raise ValueError(f"环境变量 {name}={raw!r} 必须是有限数")
+    return value if minimum is None else max(minimum, value)
 
-
-# Single MiMo credential powers ASR + VLM + TTS. Per-capability overrides
-# (MIMO_VIDEO_API_KEY / MIMO_TTS_API_KEY / MIMO_ASR_API_KEY and their *_API_URL forms)
-# are optional and fall back to MIMO_API_KEY / MIMO_API_URL. Token-Plan keys (tp-*) auto-
-# route to the Token-Plan cluster base URL; pay-as-you-go keys use api.xiaomimimo.com.
 
 # Cross-language source: when the original audio is in a language the narration is NOT in
 # (e.g. a Japanese drama recapped in Chinese), the original speech bleeding under the narration
@@ -97,7 +55,6 @@ _foreign_under_narration_volume = 0.05  # original volume under narration when s
 
 CONFIG = {
     "fade_ms": env_int("FADE_MS", 120, minimum=0),  # 每段 TTS 淡入淡出(ms)；过大会让紧凑的句子一顿一顿，120ms 防爆音又不发闷
-    "breath_ms": 250,  # 段间呼吸空间(ms)；block recap 块内连贯、块间留原声呼吸
     "ducking_mode": "fixed",  # fixed | sidechaincompress | none
     "ducking_threshold": 0.15,
     "ducking_ratio": 3,
@@ -117,6 +74,7 @@ CONFIG = {
     "duck_bridge_seconds": env_float("DUCK_BRIDGE_SECONDS", 1.5, minimum=0.0),  # 仅把间隔小于此值的相邻解说窗口并成一段压低；超过则视为作者特意留的"原声块"，原声放回满音量。默认 1.5s：解说块内部连续压低，块与块之间的留白放出满音量原声。该值只控制短间隔合并，不设定旁白/原声配额。调大→更连续铺底、原声块更少；调小→更碎
     "bgm_path": os.environ.get("BGM_PATH", "").strip(),  # 背景音乐文件(可选)，留空则不加 BGM
     "source_video": os.environ.get("SOURCE_VIDEO", "").strip(),  # 剪辑模式下的原始视频(可选)，用于时间线/剪映导出引用原片片段
+    "source_video_explicit": False,  # 仅 assemble.py --source-video 显式传入时为 True；环境变量 SOURCE_VIDEO 不算显式
     "export_jianying": env_bool("EXPORT_JIANYING", False),  # 渲染后可选导出剪映草稿(默认关；与核心解耦)
     "jianying_draft_dir": os.environ.get("JIANYING_DRAFT_DIR", "").strip(),  # 剪映草稿输出父目录(留空=work_dir)
     "jianying_bundle_media": env_bool("JIANYING_BUNDLE_MEDIA", True),  # 默认开：macOS 剪映沙箱读不到外部路径，须把素材拷进草稿目录
@@ -161,6 +119,8 @@ CONFIG = {
     "target_lra": env_float("TARGET_LRA", 11.0),          # 目标响度范围 (LU)
     "final_limiter_peak": env_float("FINAL_LIMITER_PEAK", 0.98, minimum=0.1),  # loudnorm 后峰值保护 limiter
     "subtitle_font_name": os.environ.get("SUBTITLE_FONT_NAME", "Arial"),
+    # 可选字体文件：ASS 烧录经 fontsdir 加载，画面文字经 drawtext fontfile 使用；family 名仍由 SUBTITLE_FONT_NAME 指定
+    "subtitle_font_file": os.environ.get("SUBTITLE_FONT_FILE", "").strip(),
     "subtitle_font_size": env_int("SUBTITLE_FONT_SIZE", 42, minimum=8),
     "subtitle_primary_color": os.environ.get("SUBTITLE_PRIMARY_COLOR", "&H00FFFFFF"),
     "subtitle_outline_color": os.environ.get("SUBTITLE_OUTLINE_COLOR", "&H00000000"),
@@ -180,10 +140,7 @@ if isinstance(_EXISTING_CONFIG_REF, dict):
     _EXISTING_CONFIG_REF.update(CONFIG)
     CONFIG = _EXISTING_CONFIG_REF
 
-SCRIPT_DIR = Path(__file__).parent
-PROMPTS_DIR = SCRIPT_DIR.parent / "references"
-
-def narration_tempo_budget(tts_rate_offset=0.0, *, config=None):
+def narration_tempo_budget(tts_rate_offset=0.0):
     """Return the canonical tempo budget shared by voiceover and assemble.
 
     `effective_tempo` is the user-perceived cumulative compression:
@@ -192,13 +149,13 @@ def narration_tempo_budget(tts_rate_offset=0.0, *, config=None):
     offset; callers must fail/shorten instead of time-trimming speech when the
     needed ratio exceeds `segment_tempo_max`.
     """
-    cfg = config or CONFIG
-    global_speed = max(0.01, float(cfg.get("narration_speed", 1.0) or 1.0))
-    rate_factor = max(0.01, 1.0 + float(tts_rate_offset or 0.0))
-    cumulative_max = max(1.0, float(cfg.get("narration_cumulative_tempo_max", 1.35) or 1.35))
-    hard_max = max(cumulative_max, float(cfg.get("narration_cumulative_tempo_hard_max", 1.40) or 1.40))
-    legacy_segment_cap = max(1.0, float(cfg.get("tts_segment_tempo_max", 1.20) or 1.20))
-    segment_tempo_max = max(1.0, min(legacy_segment_cap, cumulative_max / (global_speed * rate_factor)))
+    global_speed = CONFIG["narration_speed"]
+    rate_factor = max(0.01, 1.0 + float(tts_rate_offset))
+    cumulative_max = CONFIG["narration_cumulative_tempo_max"]
+    hard_max = max(cumulative_max, CONFIG["narration_cumulative_tempo_hard_max"])
+    segment_tempo_max = max(1.0, min(
+        CONFIG["tts_segment_tempo_max"], cumulative_max / (global_speed * rate_factor)
+    ))
     return {
         "global_narration_speed": global_speed,
         "tts_rate_factor": rate_factor,
@@ -213,18 +170,43 @@ def log(msg):
 
 def run_cmd(cmd, **kwargs):
     """运行命令，返回 CompletedProcess"""
-    if isinstance(cmd, list):
-        display_parts = []
-        for part in cmd:
-            text = str(part)
-            display_parts.append(text if len(text) <= 240 else text[:237] + "...")
-        display = " ".join(display_parts)
-    else:
-        display = str(cmd)
-        if len(display) > 2000:
-            display = display[:1997] + "..."
+    display = " ".join(
+        text if len(text) <= 240 else text[:237] + "..."
+        for text in map(str, cmd)
+    )
     log(f"运行: {display}")
     return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+
+
+# ffmpeg 7 added `-/option path` to read any option's value from a file; ffmpeg 9 removed the
+# older `-filter_complex_script` / `-filter_script` spellings, which are all ffmpeg <= 6 knows.
+_LEGACY_FILTER_FILE_OPTIONS = {
+    "filter_complex": "-filter_complex_script",
+    "filter:v:0": "-filter_script:v:0",
+}
+
+
+@functools.lru_cache(maxsize=None)
+def _ffmpeg_reads_option_files():
+    """Whether the ffmpeg on PATH accepts `-/option path` (asked once per process)."""
+    if shutil.which("ffmpeg") is None:
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        graph = os.path.join(tmp, "probe_filter.txt")
+        with open(graph, "w", encoding="utf-8") as fh:
+            fh.write("null")
+        result = subprocess.run(["ffmpeg", "-hide_banner", "-/filter_complex", graph],
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                timeout=20)
+    return "Unrecognized option" not in result.stderr
+
+
+def filter_file_args(option, path):
+    """ffmpeg arguments that load `option`'s filtergraph from `path`, spelled for this ffmpeg."""
+    if _ffmpeg_reads_option_files():
+        return [f"-/{option}", str(path)]
+    return [_LEGACY_FILTER_FILE_OPTIONS[option], str(path)]
+
 
 def get_video_duration(video_path):
     """获取视频时长（秒）"""
@@ -232,8 +214,5 @@ def get_video_duration(video_path):
            "-of", "csv=p=0", str(video_path)]
     result = run_cmd(cmd)
     if result.returncode != 0:
-        return 0.0
-    try:
-        return float(result.stdout.strip())
-    except (TypeError, ValueError):
-        return 0.0
+        raise RuntimeError(f"ffprobe 无法读取时长 {video_path}: {result.stderr}")
+    return float(result.stdout.strip())

@@ -1,6 +1,10 @@
 """Self-contained utilities for the video-cut skill (no cross-skill imports)."""
+import functools
+import math
 import os
+import shutil
 import subprocess
+import tempfile
 
 
 def log(msg):
@@ -12,20 +16,27 @@ def env_bool(name, default):
     val = os.environ.get(name)
     if val is None:
         return default
-    return val.strip().lower() in ("1", "true", "yes")
+    text = val.strip().lower()
+    if text in ("1", "true", "yes"):
+        return True
+    if text in ("0", "false", "no"):
+        return False
+    raise ValueError(f"{name} must be 1/true/yes or 0/false/no, got {val!r}")
 
 
 def env_float(name, default, min_val=None):
-    """Read an env var as a float, with an optional minimum clamp."""
+    """Read an env var as a float, rejecting malformed or below-minimum values."""
     val = os.environ.get(name)
     if val is None:
         return default
     try:
-        result = float(val.strip())
-    except (ValueError, AttributeError):
-        return default
-    if min_val is not None:
-        result = max(min_val, result)
+        result = float(val)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number, got {val!r}") from exc
+    if not math.isfinite(result):
+        raise ValueError(f"{name} must be finite, got {val!r}")
+    if min_val is not None and result < min_val:
+        raise ValueError(f"{name} must be >= {min_val}, got {val!r}")
     return result
 
 
@@ -48,30 +59,56 @@ CONFIG = {
 }
 
 
+def file_identity(path):
+    """{size, mtime_ns} — the cache identity of an input file (no content read)."""
+    st = os.stat(os.fspath(path))
+    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
+
+
 def run_cmd(cmd, **kwargs):
-    """Run a command and return the CompletedProcess (stdout/stderr captured)."""
-    if isinstance(cmd, list):
-        display_parts = []
-        for part in cmd:
-            text = str(part)
-            display_parts.append(text if len(text) <= 240 else text[:237] + "...")
-        display = " ".join(display_parts)
-    else:
-        display = str(cmd)
-        if len(display) > 2000:
-            display = display[:1997] + "..."
+    """Run a command list and return the CompletedProcess (stdout/stderr captured)."""
+    display = " ".join(
+        str(part) if len(str(part)) <= 240 else str(part)[:237] + "..." for part in cmd
+    )
     log(f"运行: {display}")
     return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
 
 
+# ffmpeg 7 added `-/option path` to read any option's value from a file; ffmpeg 9 removed the
+# older `-filter_complex_script` / `-filter_script` spellings, which are all ffmpeg <= 6 knows.
+_LEGACY_FILTER_FILE_OPTIONS = {
+    "filter_complex": "-filter_complex_script",
+    "filter:v:0": "-filter_script:v:0",
+}
+
+
+@functools.lru_cache(maxsize=None)
+def _ffmpeg_reads_option_files():
+    """Whether the ffmpeg on PATH accepts `-/option path` (asked once per process)."""
+    if shutil.which("ffmpeg") is None:
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        graph = os.path.join(tmp, "probe_filter.txt")
+        with open(graph, "w", encoding="utf-8") as fh:
+            fh.write("null")
+        result = subprocess.run(["ffmpeg", "-hide_banner", "-/filter_complex", graph],
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                timeout=20)
+    return "Unrecognized option" not in result.stderr
+
+
+def filter_file_args(option, path):
+    """ffmpeg arguments that load `option`'s filtergraph from `path`, spelled for this ffmpeg."""
+    if _ffmpeg_reads_option_files():
+        return [f"-/{option}", str(path)]
+    return [_LEGACY_FILTER_FILE_OPTIONS[option], str(path)]
+
+
 def get_video_duration(video_path):
-    """Return media duration in seconds via ffprobe, or 0.0 on failure."""
-    cmd = ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+    """Return media duration in seconds via ffprobe."""
+    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration",
            "-of", "csv=p=0", str(video_path)]
     result = run_cmd(cmd)
     if result.returncode != 0:
-        return 0.0
-    try:
-        return float(result.stdout.strip())
-    except (TypeError, ValueError):
-        return 0.0
+        raise RuntimeError(f"ffprobe 无法读取时长: {video_path}: {result.stderr.strip()}")
+    return float(result.stdout.strip())

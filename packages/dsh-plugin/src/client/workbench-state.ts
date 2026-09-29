@@ -90,6 +90,10 @@ export interface WorkbenchMemory {
   splitTree: SplitTree;
   /** Phase C free windows: keyed by panel id, absolute viewport geometry. */
   floats: Record<string, FloatGeometry>;
+  /** Latest settled Agent write the workbench has already followed or taken as history. */
+  settledMutation: string | undefined;
+  /** False only in a Store instance the plugin has not restored this Session's memory into yet. */
+  hydrated: boolean;
 }
 
 export type Update<T> = T | ((current: T) => T);
@@ -124,9 +128,22 @@ export function createWorkbenchStore() {
       productionIntentCalls: {},
       featurePane: undefined,
       splitTree: defaultSplitTree(),
-      floats: {}
+      floats: {},
+      settledMutation: undefined,
+      hydrated: false
     }),
     actions: {
+      restore: (draft, memory: WorkbenchMemory | undefined) => {
+        if (memory !== undefined) {
+          Object.assign(draft, memory);
+          // A save in flight belonged to the dropped instance; its completion never lands here.
+          draft.buffers = Object.fromEntries(Object.entries(memory.buffers).map(([path, buffer]) => [path, { ...buffer, saving: undefined }]));
+        }
+        draft.hydrated = true;
+      },
+      setSettledMutation: (draft, value: string | undefined) => {
+        draft.settledMutation = value;
+      },
       setBuffers: (draft, update: Update<Record<string, FileBuffer>>) => {
         draft.buffers = applyUpdate(draft.buffers, update);
       },

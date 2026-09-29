@@ -8,6 +8,7 @@ import {
   previewMutation,
   workbenchLabel,
   workbenchModeForPath,
+  type UndispatchedCall,
   type WorkbenchMode
 } from "./file-activity.js";
 import { buildFileTree, type FileTreeNode } from "./file-tree.js";
@@ -124,7 +125,10 @@ export function CreativeWorkbench({
   sessionId,
   runningCalls,
   partial,
+  undispatched,
   settledMutation,
+  settledMutationTurn,
+  liveTurn,
   sessionRunning,
   productionQueue,
   productionIntents,
@@ -143,7 +147,12 @@ export function CreativeWorkbench({
   readonly sessionId: string;
   readonly runningCalls: readonly RunningToolCall[];
   readonly partial: PartialAssistant | null;
+  readonly undispatched: readonly UndispatchedCall[];
   readonly settledMutation: string | undefined;
+  /** Turn of {@link settledMutation}; only a write from a Turn this mount saw open is followed. */
+  readonly settledMutationTurn: number | undefined;
+  /** The Session's last Turn while it is open. */
+  readonly liveTurn: number | undefined;
   readonly sessionRunning: boolean;
   readonly productionQueue: readonly ProductionQueueEntry[];
   readonly productionIntents: readonly SettledProductionIntent[];
@@ -155,8 +164,8 @@ export function CreativeWorkbench({
   readonly creativeProject: boolean;
 } & Pick<WorkbenchSlotProps, "useStore" | "actions" | "sendProductionPrompt" | "cancelProduction" | "removeQueuedProduction">) {
   const activities = useMemo(
-    () => fileMutations(runningCalls, partial),
-    [partial, runningCalls]
+    () => fileMutations(runningCalls, partial, undispatched),
+    [partial, runningCalls, undispatched]
   );
   const normalizedActivities = useMemo(() => activities.flatMap((activity) => {
     const path = creativeRelativePath(activity.path, workspace?.cwd, workspace?.bookDirectories);
@@ -164,6 +173,9 @@ export function CreativeWorkbench({
   }), [activities, workspace?.cwd, workspace?.bookDirectories]);
   const primaryActivity = normalizedActivities.at(-1);
   const activityPaths = useMemo(() => new Set(normalizedActivities.map((value) => value.path)), [normalizedActivities]);
+  const settledPath = settledMutation === undefined
+    ? undefined
+    : creativeRelativePath(settledMutation.slice(settledMutation.indexOf("\0") + 1), workspace?.cwd, workspace?.bookDirectories);
   const activity = primaryActivity?.activity;
   const activityPath = primaryActivity?.path;
   const workbench = useStore((memory) => memory.workbench);
@@ -217,7 +229,12 @@ export function CreativeWorkbench({
   const navRef = useRef<HTMLElement>(null);
   const activityBases = useRef(new Map<string, { readonly path: string; readonly base: string }>());
   const previousSignals = useRef<ReadonlySet<string>>(new Set());
-  const previousSettledMutation = useRef(settledMutation);
+  // The consumed signal lives in the Store so it survives a remount: DSH 0.1.7 reloads a Session's
+  // Chat after a switch, and replaying its history must not look like a fresh Agent write.
+  const consumedSettledMutation = useStore((memory) => memory.settledMutation);
+  // A reloaded Session shows its history as closed Turns; only a Turn seen open is live work.
+  const liveTurns = useRef(new Set<number>());
+  if (liveTurn !== undefined) liveTurns.current.add(liveTurn);
   const saveLocks = useRef(new Set<string>());
   const buffer = selected === undefined ? undefined : buffers[selected];
   const selectedFile = workspace?.files.find((file) => file.path === selected);
@@ -613,6 +630,9 @@ export function CreativeWorkbench({
       const next = { ...current };
       for (const [path, value] of Object.entries(current)) {
         if (paths.has(path) || activityPaths.has(path)) continue;
+        // A write that just settled is on disk before the workspace reload lists it; keep its
+        // preview (and so the selection) until then. A denied write never settles and is pruned.
+        if (value.source === "agent" && sessionRunning && path === settledPath) continue;
         if (value.source === "human" && value.content !== value.saved) {
           if (value.missing !== true) {
             next[path] = { ...value, missing: true, error: "文件已从 workspace 移除。本地草稿仍保留，可复制后放弃草稿。" };
@@ -625,7 +645,7 @@ export function CreativeWorkbench({
       }
       return changed ? next : current;
     });
-  }, [activityPaths, workspace, workspaceLoading]);
+  }, [activityPaths, sessionRunning, settledPath, workspace, workspaceLoading]);
 
   useEffect(() => {
     if (selected === undefined || selectedMedia || activityPaths.has(selected)) return;
@@ -759,17 +779,22 @@ export function CreativeWorkbench({
   }, [normalizedActivities, reload, runningCalls]);
 
   useEffect(() => {
-    if (settledMutation === undefined || settledMutation === previousSettledMutation.current) return;
+    if (settledMutation === undefined || settledMutation === consumedSettledMutation) return;
+    // History replayed after a reload or a Session switch is not a fresh Agent write.
+    if (settledMutationTurn === undefined || !liveTurns.current.has(settledMutationTurn)) {
+      actions.setSettledMutation(settledMutation);
+      return;
+    }
     // The signal carries an absolute path, so creativeRelativePath cannot resolve it until the
     // workspace (and its cwd) has loaded. Consuming the signal first would burn it: the effect
     // re-runs when cwd arrives, but the guard above then short-circuits and the agent's file is
     // never selected. Wait for cwd instead of dropping the follow.
     if (workspace?.cwd === undefined) return;
-    previousSettledMutation.current = settledMutation;
+    actions.setSettledMutation(settledMutation);
     const path = creativeRelativePath(settledMutation.slice(settledMutation.indexOf("\0") + 1), workspace.cwd, workspace.bookDirectories);
     if (path !== undefined) followAgentPath(path);
     reload();
-  }, [followAgentPath, reload, settledMutation, workspace?.cwd, workspace?.bookDirectories]);
+  }, [actions, consumedSettledMutation, followAgentPath, reload, settledMutation, settledMutationTurn, workspace?.cwd, workspace?.bookDirectories]);
 
   useEffect(() => {
     if (selected === undefined) return;

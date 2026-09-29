@@ -49,8 +49,8 @@ license: MIT
 只读对应资料，不预加载整个项目：
 
 - 原著分析：[原著分析审查表](references/rubric-source-analysis.md)
-- 故事、场景、行动与对白：[故事剧本审查表](references/rubric-story-script.md)
-- 身份、变体、连续性与图片提示词：[资产提示词审查表](references/rubric-assets-prompts.md)
+- 故事、场景、行动与对白，改编是否守住原著人物与主线，已接受节奏档案的核对，开场、结尾与中段的局部检查：[故事剧本审查表](references/rubric-story-script.md)
+- 身份、变体、连续性、时代与图片提示词：[资产提示词审查表](references/rubric-assets-prompts.md)
 - 原文落实、镜头、关键帧与视频运动：[视觉运动审查表](references/rubric-visual-motion.md)
 - 完整审查方法：[审查方法](references/review-method.md)
 - 制作端常见缺陷：[生产质量门](references/production-quality-gates.md)
@@ -71,6 +71,8 @@ license: MIT
 - 剧本对白、动作、声音、画面文字是否都有画面/声音承载；
 - 人物、地点、道具状态和镜头起止是否连续；
 - 提示词是否从准确起点到准确终点；
+- 目标模型画音同轨时，声音内容、时序和发声边界是否与来源一致；无对白镜是否交代底声或静默
+  （`VID-22`、`VID-23`，见 [视觉运动审查表](references/rubric-visual-motion.md)）；
 - 私有输入、凭据、绝对路径或内部流程文字是否泄漏。
 
 缺少必要输入时只停止依赖它的判断，其他问题可以继续汇总。
