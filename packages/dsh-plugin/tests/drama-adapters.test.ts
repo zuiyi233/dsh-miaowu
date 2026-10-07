@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DRAMA_ADAPTER_CONFIG_ENV,
@@ -14,6 +16,8 @@ import {
 } from "../src/drama-adapters.js";
 import { hostPython } from "../src/host-python.js";
 import { createDramaSkillProvider } from "../src/skill-provider.js";
+
+const execFileAsync = promisify(execFile);
 
 const dramaRoot = resolve(import.meta.dirname, "../../knowledge/drama/skills");
 const temporary: string[] = [];
@@ -117,6 +121,7 @@ it("registers the ComfyUI adapters with no required credentials and documents th
     expect(written.adapters["comfyui"]).toEqual({ command: ["python", comfyuiRunnerPath(), "drama"], timeout_seconds: 600 });
     expect(written.adapters["comfyui-video"]).toEqual({ command: ["python", comfyuiRunnerPath(), "drama"], timeout_seconds: 3_600 });
     expect(written.adapters["comfyui-music"]).toEqual({ command: ["python", comfyuiRunnerPath(), "drama"], timeout_seconds: 600 });
+    expect(JSON.stringify(written)).not.toContain("reference_roles");
     expect(JSON.stringify(written)).not.toMatch(/key|token|secret/iu);
   });
 
@@ -126,6 +131,42 @@ it("registers the ComfyUI adapters with no required credentials and documents th
     const custom = join(root, "mine.json");
     expect(dramaAdapterConfigPath(dramaRoot, { [DRAMA_ADAPTER_CONFIG_ENV]: custom }, root)).toEqual({ path: custom, generated: false });
     expect(await ensureDramaAdapterConfig(dramaRoot, { env: { [DRAMA_ADAPTER_CONFIG_ENV]: custom }, temporaryRoot: root })).toEqual({ path: custom, generated: false, ok: false });
+    const document = '{"adapters":{"seedance":{"command":["python","adapter.py"],"timeout_seconds":10,"reference_roles":["reference_audio"]}}}\n';
+    await writeFile(custom, document);
+    expect(await ensureDramaAdapterConfig(dramaRoot, { env: { [DRAMA_ADAPTER_CONFIG_ENV]: custom }, temporaryRoot: root })).toEqual({ path: custom, generated: false, ok: true });
+    expect(await readFile(custom, "utf8")).toBe(document);
+  });
+
+  it("lets upstream reject generic voice bindings and accepts an explicit known-model profile", async () => {
+    const root = await mkdtemp(join(tmpdir(), "oh-story-adapter-roles-"));
+    temporary.push(root);
+    const project = join(root, "project");
+    await mkdir(project);
+    const generic = join(root, "generic.json");
+    const custom = join(root, "custom.json");
+    await writeFile(generic, JSON.stringify(dramaAdapterConfigDocument(dramaRoot, "python")));
+    await writeFile(custom, JSON.stringify({ adapters: { seedance: {
+      command: ["python", "adapter.py"], timeout_seconds: 10, reference_roles: ["reference_audio"]
+    } } }));
+    const script = String.raw`
+import runpy, sys
+from pathlib import Path
+tool = runpy.run_path(sys.argv[1])
+job = {"adapter": "seedance", "reference_bindings": [{"role": "reference_audio"}]}
+_, _, generic_roles = tool["_load_adapter"](Path(sys.argv[2]), "seedance", Path(sys.argv[4]))
+try:
+    tool["_require_adapter_roles"](job, generic_roles)
+except ValueError as error:
+    assert "reference_audio; nothing was submitted" in str(error), error
+else:
+    raise AssertionError("generic generated profile admitted reference_audio")
+_, _, custom_roles = tool["_load_adapter"](Path(sys.argv[3]), "seedance", Path(sys.argv[4]))
+tool["_require_adapter_roles"](job, custom_roles)
+print("generic rejected; explicit profile admitted")
+`;
+    const result = await execFileAsync((await hostPython()).command, ["-B", "-c", script,
+      resolve(dramaRoot, "short-drama-produce/scripts/production_tool.py"), generic, custom, project], { encoding: "utf8" });
+    expect(result.stdout.trim()).toBe("generic rejected; explicit profile admitted");
   });
 
   it("reports presence per adapter without exposing values", () => {

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
-import type { DramaAdapterStatus } from "../drama-adapters.js";
+import type { DramaAdapterModality, DramaAdapterStatus } from "../drama-adapters.js";
 import { productionCompleteness, type DramaDocumentTarget, type DramaEpisodeProduction, type DramaProductionSection } from "./drama-production.js";
 import { parseDramaReviewDocument, type DramaReviewVerdict } from "./drama-review.js";
 import { endpoint } from "./workbench-ui.js";
 import { nativeBatchPrompt, nativeCompositionPrompt, nativeProductionPrompt } from "./production-prompts.js";
-import { activeProductionJobId, compositionInFlight, createPendingJob, queuedItemForJob, reconcileProductionJobs, reconcileSequence, referencesForTarget, reorderSequence, sequenceIssues, selectedVersionForTarget, summarizeEpisodeOutput, type CanvasPoint, type EpisodeOutputKind, type ProductionJob, type ProductionMediaVersion, type ProductionQueueEntry, type ProductionSequenceItem } from "./production-runtime.js";
+import { activeProductionJobId, compositionInFlight, createPendingJob, mediaBelongsToEpisode, queuedItemForJob, reconcileProductionJobs, reconcileSequence, referencesForTarget, reorderSequence, sequenceIssues, sequenceSourceEligible, selectedVersionForTarget, summarizeEpisodeOutput, type CanvasPoint, type EpisodeOutputKind, type ProductionJob, type ProductionMediaVersion, type ProductionQueueEntry, type ProductionSequenceItem } from "./production-runtime.js";
 import { DramaPlayback } from "./drama-playback.js";
 
 interface Props {
@@ -143,7 +143,6 @@ export interface DramaPreflightComfyui {
   readonly runnerReady?: boolean | undefined;
 }
 
-const MODALITY_LABEL = { image: "图片", video: "视频", tts: "语音", music: "音乐" } as const;
 const OUTPUT_KIND_LABEL: Readonly<Record<EpisodeOutputKind, string>> = { image: "图片", video: "视频", music: "音乐" };
 
 function adapterCostSuffix(costModel: "free-local" | "metered-cloud" | undefined): string {
@@ -273,6 +272,26 @@ export function EpisodeOutputLedger({ jobs, versions }: {
     {summary.map((row) => <span key={row.kind}>{OUTPUT_KIND_LABEL[row.kind]} {row.produced} 件 · 进行中 {row.running} · {OUTPUT_COST_LABEL[row.kind]}</span>)}
   </div>;
 }
+export function compositionSources(
+  production: DramaEpisodeProduction,
+  sequence: readonly ProductionSequenceItem[],
+  versions: readonly ProductionMediaVersion[]
+) {
+  const versionById = new Map(versions.map((version) => [version.id, version]));
+  const shotById = new Map(production.shots.map((shot) => [shot.id, shot]));
+  return sequence.flatMap((item) => {
+    const version = item.versionId === undefined ? undefined : versionById.get(item.versionId);
+    const path = version?.path;
+    if (version === undefined || path === undefined) return [];
+    const shot = shotById.get(item.shotId);
+    const sourceId = version.kind === "video"
+      ? shot?.motion?.id ?? item.shotId
+      : version.targetId.startsWith("IMG-") ? version.targetId : item.shotId;
+    return [{ shotId: item.shotId, sourceId, kind: version.kind, path, durationSeconds: shot?.durationSeconds }];
+  });
+}
+
+const MODALITY_LABEL: Readonly<Record<DramaAdapterModality, string>> = { image: "图片", video: "视频", tts: "语音", music: "音乐" };
 
 /**
  * DeepSeek writes the prompts; the pictures, videos, speech and music come from
@@ -341,7 +360,7 @@ export function DramaProductionView(props: Props) {
   useEffect(() => { jobsRef.current = props.jobs; }, [props.jobs]);
 
   useEffect(() => {
-    const next = reconcileSequence(props.production.shots.map((shot) => shot.id), props.sequence, props.versions, props.selections);
+    const next = reconcileSequence(props.production.shots.map((shot) => shot.id), props.sequence, props.versions, props.selections, props.production.episodeDirectory);
     if (JSON.stringify(next) !== JSON.stringify(props.sequence)) props.onSequenceChange(next);
   }, [props.production.shots, props.selections, props.sequence, props.versions]);
 
@@ -377,8 +396,7 @@ export function DramaProductionView(props: Props) {
   };
 
   const dispatchComposition = async (job: ProductionJob) => {
-    const versionById = new Map(props.versions.map((version) => [version.id, version]));
-    const ordered = props.sequence.flatMap((item) => { const version = item.versionId === undefined ? undefined : versionById.get(item.versionId); return version === undefined ? [] : [version.path ?? version.url]; });
+    const ordered = compositionSources(props.production, props.sequence, props.versions);
     commitJobs([...jobsRef.current, job]); props.onSectionChange("tasks");
     try { await props.onDispatchPrompt(nativeCompositionPrompt(props.production, job, ordered)); setNotice("成片任务已进入 DSH 原生队列；文件、FFmpeg 和写入继续受 DSH 权限与审批控制。"); }
     catch (error) { commitJobs(jobsRef.current.map((item) => item.id === job.id ? { ...item, status: "failed", error: error instanceof Error ? error.message : String(error) } : item)); }
@@ -393,7 +411,7 @@ export function DramaProductionView(props: Props) {
     catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
   };
   const composeSequence = () => {
-    const issues = sequenceIssues(props.sequence, props.versions);
+    const issues = sequenceIssues(props.sequence, props.versions, props.production.episodeDirectory);
     if (issues.length > 0) { setNotice(issues[0]); return; }
     // short-drama-edit renders to this fixed path, so the job correlates on the deliverable
     // rather than on a job id in the filename, and ignores a cut that was already there.
@@ -417,7 +435,7 @@ export function DramaProductionView(props: Props) {
     {props.section === "shots" && <ShotBoard {...props} onCreateJob={createJob} onBatch={createBatch} />}
     {props.section === "assets" && <AssetBoard {...props} onCreateJob={createJob} />}
     {props.section === "tasks" && <TaskBoard jobs={props.jobs} queue={props.queue} sessionRunning={props.sessionRunning} onCancel={cancelJob} onRemoveQueued={removeQueuedJob} />}
-    {props.section === "sequence" && <SequenceBoard {...props} onCompose={composeSequence} />}
+    {props.section === "sequence" && <SequenceBoard {...props} episodeDirectory={props.production.episodeDirectory} onCompose={composeSequence} />}
     {props.section === "playback" && <DramaPlayback sessionId={props.sessionId} production={props.production} versions={props.versions} selections={props.selections} episodeName={props.production.episodeDirectory.split("/").at(-1) ?? props.production.episodeDirectory} onSelectionsChange={props.onSelectionsChange} />}
     {props.section === "canvas" && <ProductionCanvas {...props} />}
   </div>;
@@ -492,10 +510,16 @@ export function JobFilenameHint({ job }: { readonly job: ProductionJob }) {
   return <span data-warn title="输出文件名需包含任务 ID,工作台才能自动关联结果">产出文件名未包含任务 ID（{job.id}），生成后工作台将无法自动关联结果——请在提示词或 job outputs 中修正</span>;
 }
 
-function SequenceBoard(props: Props & { readonly onCompose: () => void }) {
+export function SequenceBoard(props: Pick<Props, "jobs" | "sequence" | "versions" | "onSequenceChange"> & { readonly episodeDirectory?: string; readonly onCompose: () => void }) {
   const composing = compositionInFlight(props.jobs);
-  const issues = sequenceIssues(props.sequence, props.versions); const versionById = new Map(props.versions.map((version) => [version.id, version])); const move = (index: number, delta: number) => { const source = props.sequence[index]; const target = props.sequence[index + delta]; if (source !== undefined && target !== undefined) props.onSequenceChange(reorderSequence(props.sequence, index, index + delta)); };
-  return <section className="oh-story-sequence"><div className="oh-story-sequence-summary"><strong>{props.sequence.length} 个镜头</strong><span>{props.sequence.length === 0 ? "还没有镜头" : composing ? "成片任务进行中" : issues.length === 0 ? "已可合成" : `${String(issues.length)} 个阻塞项`}</span><button type="button" disabled={composing || issues.length > 0 || props.sequence.length < 2} onClick={props.onCompose}>合成成片</button></div>{issues.length > 0 && <ul className="oh-story-sequence-issues">{issues.slice(0, 3).map((issue) => <li key={issue}>{issue}</li>)}{issues.length > 3 && <li>另有 {issues.length - 3} 个阻塞项，请在下方镜头行补齐视频。</li>}</ul>}<ol>{props.sequence.map((item, index) => { const version = item.versionId === undefined ? undefined : versionById.get(item.versionId); return <li key={item.shotId}><span>{String(index + 1).padStart(2, "0")}</span>{version === undefined ? <div className="oh-story-sequence-missing">缺少视频</div> : <MediaPreview version={version} interactive={false} />}<strong>{item.shotId}</strong><div><button type="button" aria-label={`上移 ${item.shotId}`} disabled={index === 0} onClick={() => { move(index, -1); }}>↑</button><button type="button" aria-label={`下移 ${item.shotId}`} disabled={index === props.sequence.length - 1} onClick={() => { move(index, 1); }}>↓</button></div></li>; })}</ol></section>;
+  const scopedVersions = props.versions.filter((version) => props.episodeDirectory === undefined || mediaBelongsToEpisode(version.path, props.episodeDirectory));
+  const issues = sequenceIssues(props.sequence, scopedVersions, props.episodeDirectory); const versionById = new Map(scopedVersions.map((version) => [version.id, version])); const move = (index: number, delta: number) => { const source = props.sequence[index]; const target = props.sequence[index + delta]; if (source !== undefined && target !== undefined) props.onSequenceChange(reorderSequence(props.sequence, index, index + delta)); };
+  const chooseSource = (shotId: string, sourceVersionId: string) => {
+    props.onSequenceChange(props.sequence.map((item) => item.shotId !== shotId
+      ? item
+      : sourceVersionId === "" ? { shotId: item.shotId, versionId: item.versionId } : { ...item, sourceVersionId, versionId: sourceVersionId }));
+  };
+  return <section className="oh-story-sequence"><div className="oh-story-sequence-summary"><strong>{props.sequence.length} 个镜头</strong><span>{props.sequence.length === 0 ? "还没有镜头" : composing ? "成片任务进行中" : issues.length === 0 ? "已可合成" : `${String(issues.length)} 个阻塞项`}</span><button type="button" disabled={composing || issues.length > 0 || props.sequence.length < 2} onClick={props.onCompose}>合成成片</button></div>{issues.length > 0 && <ul className="oh-story-sequence-issues">{issues.slice(0, 3).map((issue) => <li key={issue}>{issue}</li>)}{issues.length > 3 && <li>另有 {issues.length - 3} 个阻塞项，请在下方镜头行补齐素材。</li>}</ul>}<ol>{props.sequence.map((item, index) => { const version = item.versionId === undefined ? undefined : versionById.get(item.versionId); const choices = scopedVersions.filter((candidate) => candidate.path !== undefined && sequenceSourceEligible(item.shotId, candidate)); const explicitMissing = item.sourceVersionId !== undefined && !choices.some((choice) => choice.id === item.sourceVersionId); return <li key={item.shotId}><span>{String(index + 1).padStart(2, "0")}</span>{version === undefined ? <div className="oh-story-sequence-missing">缺少素材</div> : <MediaPreview version={version} interactive={false} />}<strong>{item.shotId}</strong><div><select aria-label={`选择 ${item.shotId} 成片素材`} value={item.sourceVersionId ?? ""} onChange={(event) => { chooseSource(item.shotId, event.target.value); }}><option value="">自动（视频优先）</option>{explicitMissing && <option value={item.sourceVersionId} disabled>已选素材不可用</option>}{choices.map((choice) => <option value={choice.id} key={choice.id}>{choice.targetId} · {choice.kind === "video" ? "视频" : "静帧"} · {choice.path?.split("/").at(-1)}</option>)}</select><button type="button" aria-label={`上移 ${item.shotId}`} disabled={index === 0} onClick={() => { move(index, -1); }}>↑</button><button type="button" aria-label={`下移 ${item.shotId}`} disabled={index === props.sequence.length - 1} onClick={() => { move(index, 1); }}>↓</button></div></li>; })}</ol></section>;
 }
 
 function ProductionCanvas(props: Props) {

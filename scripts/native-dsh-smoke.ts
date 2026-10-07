@@ -36,7 +36,7 @@ export function listTarEntries(bytes: Uint8Array): string[] {
 }
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const dshVersion = "0.2.0-rc.1";
+const dshVersion = process.env.DSH_TEST_VERSION ?? process.argv[2] ?? "0.2.1-alpha.1";
 /** Exact WebSocket route carrying every Typert Remote stream. */
 const REMOTE_STREAM_MUX_PATH = "/api/remote.mux";
 const demoFramesDirectory = process.env.OH_STORY_DEMO_FRAMES_DIR;
@@ -731,7 +731,9 @@ async function main(): Promise<void> {
     await Promise.all([
       writeFile(join(generatedGameRoot, "PRODUCT_BRIEF.md"), "# PRODUCT_BRIEF · DSH Game Studio Smoke\n\ntargetFinish: playable-prototype\n"),
       writeFile(join(generatedGameRoot, "_progress.md"), "# Progress\n\n- playable: complete\n"),
-      writeFile(join(generatedGameRoot, "build", "app", "index.html"), "<!doctype html><html lang=zh-CN><meta charset=utf-8><title>DSH Game Smoke</title><button id=play>试玩成功</button><script>document.querySelector('#play').addEventListener('click',event=>event.currentTarget.textContent='输入已验证')</script></html>"),
+      // Expose an actionable button only after its input listener is attached;
+      // a streamed HTML response can make it visible before the script arrives.
+      writeFile(join(generatedGameRoot, "build", "app", "index.html"), "<!doctype html><html lang=zh-CN><meta charset=utf-8><title>DSH Game Smoke</title><button id=play disabled>试玩成功</button><script>document.body.dataset.fixtureInstance=String(Math.random());document.body.dataset.clicks='0';const play=document.querySelector('#play');play.addEventListener('click',event=>{document.body.dataset.clicks=String(Number(document.body.dataset.clicks)+1);event.currentTarget.textContent='输入已验证'});play.disabled=false</script></html>"),
       writeFile(join(generatedGameRoot, "qa", "verification.json"), `${JSON.stringify({
         schemaVersion: 3,
         status: "PASS",
@@ -757,6 +759,7 @@ async function main(): Promise<void> {
       }, null, 2)}\n`),
       writeFile(join(videoProjectRoot, "work", "clip_plan.json"), `${JSON.stringify({ clips: [{ source_start: 0, source_end: 5 }] }, null, 2)}\n`),
       writeFile(join(videoProjectRoot, "work", "narration.json"), `${JSON.stringify([{ start: 0, end: 2, text: "视频工作台烟测" }], null, 2)}\n`),
+      writeFile(join(videoProjectRoot, "work", "production_reference.json"), `${JSON.stringify({ profile: { provenance: "measured" }, methods: [] }, null, 2)}\n`),
       writeFile(join(videoProjectRoot, "work", "assembly_manifest.json"), `${JSON.stringify({ final_output: "video-recaps/smoke-recap/outputs/recap_smoke.mp4" }, null, 2)}\n`)
     ]);
 
@@ -797,7 +800,8 @@ async function main(): Promise<void> {
       "package/lib/video-recap/skills/video-recap/scripts/recap.py",
       "package/lib/video-recap/skills/video-recap/scripts/recap_inspect.py",
       "package/python/comfyui_runner.py",
-      "package/docs/comfyui.md"
+      "package/docs/comfyui.md",
+      "package/lib/video-recap/skills/video-reference/scripts/reference.py"
     ]) {
       if (!entries.has(required)) throw new Error(`Plugin tarball is missing ${required}.`);
     }
@@ -813,7 +817,7 @@ async function main(): Promise<void> {
         || /copy-path-safety\.py$/u.test(entry)
         || /dashboard_server\.py$/u.test(entry)
         || /drama\/skills\/short-drama\/scripts\/creator_views\.py$/u.test(entry)
-        || /video-recap\/skills\/video-recap\/(?:scripts\/dashboard_[a-z]+\.py|assets\/dashboard\/)/u.test(entry)
+        || /video-recap\/skills\/video-recap\/(?:scripts\/dashboard_[a-z]+\.py|scripts\/dashboard\/|assets\/dashboard\/)/u.test(entry)
         || /drama\/skills\/short-drama\/references\/lifecycle-commands\.md$/u.test(entry)) {
         throw new Error(`Plugin tarball retained forbidden content: ${entry}`);
       }
@@ -901,13 +905,13 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
       "novel-to-game", "novel-game-analyze", "game-concept", "game-world-design", "game-art-direction", "game-build", "game-qa"
     ].includes(skill.name));
     const videoSkills = catalog.skills.filter((skill) => [
-      "video-recap", "video-understanding", "video-script", "video-cut", "video-voiceover", "video-assemble"
+      "video-recap", "video-reference", "video-understanding", "video-script", "video-cut", "video-voiceover", "video-assemble"
     ].includes(skill.name));
     if (ohStorySkills.length !== 13) throw new Error(`Expected 13 Oh Story Skills, found ${String(ohStorySkills.length)}.`);
     if (dramaSkills.length !== 11) throw new Error(`Expected 11 Drama Skills, found ${String(dramaSkills.length)}.`);
     if (gameSkills.length !== 7) throw new Error(`Expected 7 NovelToGame Skills, found ${String(gameSkills.length)}.`);
-    if (JSON.stringify(videoSkills.map((skill) => skill.name).sort()) !== JSON.stringify(["video-recap", "video-script"])) {
-      throw new Error(`Expected the two user-invocable video-recap entries, found ${videoSkills.map((skill) => skill.name).join(", ")}.`);
+    if (JSON.stringify(videoSkills.map((skill) => skill.name).sort()) !== JSON.stringify(["video-recap", "video-reference", "video-script"])) {
+      throw new Error(`Expected the three user-invocable video-recap entries, found ${videoSkills.map((skill) => skill.name).join(", ")}.`);
     }
     // Names alone cannot tell the plugin's bridged Skills from same-named copies found elsewhere.
     const foreignSkills = [...ohStorySkills, ...dramaSkills, ...gameSkills, ...videoSkills]
@@ -1078,6 +1082,7 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
       || bundledGame.verification.binding !== "PINNED"
       || bundledGame.previewUrl === undefined || generatedGame?.source !== "workspace" || generatedGame.previewUrl === undefined
       || generatedGame.verification?.status !== "PASS" || generatedGame.verification.binding !== "UNBOUND"
+      || !storyWorkspacePayload.files?.some((file) => file.path.endsWith("/production_reference.json"))
       || generatedVideo?.title !== "DSH Video Recap Smoke" || generatedVideo.state !== "ready"
       || JSON.stringify(generatedVideo.previews.map((preview) => preview.role)) !== JSON.stringify(["source", "edited", "final"])) {
       throw new Error(`Story Session workspace route failed: ${JSON.stringify(storyWorkspacePayload)}`);
@@ -1847,17 +1852,65 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         };
         throw new Error(`Generated workspace game was not playable: ${JSON.stringify(diagnostics)}`, { cause: error });
       }
-      await generatedPlay.click();
-      await generatedFrame.getByRole("button", { name: "输入已验证", exact: true }).waitFor({ state: "visible", timeout: 10_000 });
       const generatedIframe = page.locator('iframe[title="《DSH Game Studio Smoke》可试玩预览"]');
-      await generatedIframe.evaluate((element) => { element.setAttribute("data-e2e-instance", "generated-preserved"); });
+      await generatedFrame.locator("#play:enabled").waitFor({ state: "visible", timeout: 10_000 });
+      await generatedIframe.evaluate((element) => {
+        element.setAttribute("data-e2e-instance", "generated-preserved");
+        element.closest('[data-slot="conversation.session"]')?.setAttribute("data-e2e-anchor", "game-before-input");
+        element.closest(".oh-story-split-surface")?.setAttribute("data-e2e-surface", "game-before-input");
+      });
+      const generatedInputState = async () => {
+        const frame = page.frames().find((candidate) => candidate.url().includes("/oh-story/game-preview/workspace/"));
+        const button = await generatedFrame.locator("#play").boundingBox();
+        return {
+          browserVersion: browser.version(),
+          button,
+          parentHit: button === null ? null : await page.evaluate(({ x, y, width, height }) => {
+            const point = { x: x + width / 2, y: y + height / 2 };
+            return {
+              point,
+              elements: document.elementsFromPoint(point.x, point.y).slice(0, 6).map((element) => ({
+                tag: element.tagName, id: element.id, class: element.className,
+                title: element.getAttribute("title"), bounds: element.getBoundingClientRect().toJSON()
+              }))
+            };
+          }, button),
+          project: await projectSelect.inputValue(),
+          tabs: await gameTabs.getByRole("tab", { selected: true }).allTextContents(),
+          anchors: await page.locator('[data-slot="conversation.session"]').evaluateAll((elements) => elements.map((element) => element.getAttribute("data-e2e-anchor"))),
+          surfaces: await page.locator(".oh-story-split-surface").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-e2e-surface"))),
+          frames: await page.locator("iframe").evaluateAll((elements) => elements.map((element) => ({
+            src: element.src, marker: element.getAttribute("data-e2e-instance"), title: element.title,
+            bounds: element.getBoundingClientRect().toJSON(), display: getComputedStyle(element).display
+          }))),
+          responses: gamePreviewResponses.slice(-12),
+          inner: await frame?.evaluate(() => ({
+            instance: document.body.dataset.fixtureInstance, clicks: document.body.dataset.clicks,
+            readyState: document.readyState, text: document.querySelector("#play")?.textContent,
+            disabled: document.querySelector<HTMLButtonElement>("#play")?.disabled
+          }))
+        };
+      };
+      let inputBeforeClick = await generatedInputState();
+      const requireGeneratedInput = async (phase: string): Promise<void> => {
+        try { await generatedFrame.getByRole("button", { name: "输入已验证", exact: true }).waitFor({ state: "visible", timeout: 10_000 }); }
+        catch (error) {
+          const after = await generatedInputState().then(
+            (value) => ({ ok: true, value }),
+            (diagnosticError) => ({ ok: false, error: String(diagnosticError) })
+          );
+          throw new Error(`Generated game input failed ${phase}: ${JSON.stringify({ error: String(error), before: inputBeforeClick, after, pageErrors })}`, { cause: error });
+        }
+      };
+      await generatedPlay.click();
+      await requireGeneratedInput("after initial click");
       await gameTabs.getByRole("tab", { name: "项目文件", exact: true }).click();
       await page.locator(".oh-game-design").waitFor({ state: "visible", timeout: 10_000 });
       await gameTabs.getByRole("tab", { name: "试玩", exact: true }).click();
       if (await generatedIframe.getAttribute("data-e2e-instance") !== "generated-preserved") {
         throw new Error("Preview/Design switching remounted the generated game iframe.");
       }
-      await generatedFrame.getByRole("button", { name: "输入已验证", exact: true }).waitFor({ state: "visible", timeout: 10_000 });
+      await requireGeneratedInput("after Preview/Design restoration");
       const generatedBrowserFrame = page.frames().find((frame) => frame.url().includes("/oh-story/game-preview/workspace/"));
       if (generatedBrowserFrame === undefined) throw new Error("Generated workspace game frame was not attached.");
       const previewEscapeBlocked = await generatedBrowserFrame.evaluate(async (sessionId) => {
@@ -1872,7 +1925,7 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         throw new Error("Game Studio did not select the bundled Jin Ping Mei example.");
       }
       const gameFrame = page.frameLocator('iframe[title="《金瓶梅 · 风月总账》可试玩预览"]');
-      const ageGate = gameFrame.getByRole("button", { name: "我已成年", exact: true });
+      const ageGate = gameFrame.getByRole("button", { name: "我已成年，进入", exact: true });
       await ageGate.waitFor({ state: "visible", timeout: 30_000 });
       const gameScroller = page.locator("[data-conversation-scroll]");
       const gameChat = page.locator('[data-slot="conversation.session"] > :not(.oh-story-split-surface)');
@@ -1886,16 +1939,25 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
       await prepareDemoSurface(page);
       await captureGameEvidence(page, "game-studio-age-gate");
       await captureDemoFrame(page, "game", 1);
+      if (gamePreviewResponses.some(({ url }) => /\/(?:explicit|prelude)(?:\/|\.)/u.test(url))) {
+        throw new Error("Bundled ADV preloaded adult media before age confirmation.");
+      }
       await ageGate.click();
-      const enterGame = gameFrame.getByRole("button", { name: "进宅", exact: true });
+      const enterGame = gameFrame.getByRole("button", { name: "开始游戏", exact: true });
       await enterGame.waitFor({ state: "visible", timeout: 10_000 });
       await captureGameEvidence(page, "game-studio-title");
       await captureDemoFrame(page, "game", 2);
       await enterGame.click();
-      // The opening scene's heading. It is upstream copy (NovelToGame 0.4 rewrote it), so every
-      // wait on the opening goes through this one locator.
-      const gameOpening = gameFrame.getByRole("heading", { name: "账上空了五十两", exact: true });
-      await gameOpening.waitFor({ state: "visible", timeout: 10_000 });
+      // NovelToGame 0.5 replaces the ledger with a route-based ADV. Dismiss its
+      // chapter card, then exercise real input and its new save/backlog controls.
+      await gameFrame.locator("#card").click();
+      const gameOpening = gameFrame.locator("#text");
+      await gameOpening.filter({ hasText: "清河县的春天" }).waitFor({ state: "visible", timeout: 10_000 });
+      await gameFrame.getByRole("button", { name: "快存", exact: true }).click();
+      await gameOpening.click();
+      await gameOpening.click();
+      await gameFrame.getByRole("button", { name: "快读", exact: true }).click();
+      await gameOpening.filter({ hasText: "清河县的春天" }).waitFor({ state: "visible", timeout: 10_000 });
       const gameIframe = page.locator('iframe[title="《金瓶梅 · 风月总账》可试玩预览"]');
       await gameIframe.evaluate((element) => { element.setAttribute("data-e2e-instance", "jin-ping-mei-preserved"); });
       await captureGameEvidence(page, "game-studio-playable");
@@ -1967,25 +2029,20 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
       await gameOpening.waitFor({ state: "visible", timeout: 10_000 });
       if (!useRealDeepSeek) {
         await projectSelect.selectOption(`workspace:${generatedGameId}`);
-        await generatedFrame.getByRole("button", { name: "试玩成功", exact: true }).waitFor({ state: "visible", timeout: 20_000 });
-        // Project switch can re-mount the preview iframe once after its content
-        // loads; clicking into a reload resets the button. Retry until the
-        // verified-input state settles instead of trusting one click.
-        let gameVerifyTries = 0;
-        while (true) {
-          const playButton = generatedFrame.getByRole("button", { name: "试玩成功", exact: true });
-          try {
-            await playButton.waitFor({ state: "visible", timeout: 5_000 });
-            await playButton.click();
-          } catch { /* mid-reload; the verified-input probe below decides */ }
-          try {
-            await generatedFrame.getByRole("button", { name: "输入已验证", exact: true }).waitFor({ state: "visible", timeout: 5_000 });
-            break;
-          } catch { /* reload reset the fixture; click again */ }
-          gameVerifyTries += 1;
-          if (gameVerifyTries >= 8) throw new Error("Generated game preview did not settle into the verified-input state.");
-        }
+        await generatedFrame.getByRole("button", { name: "试玩成功", exact: true }).waitFor({ state: "visible", timeout: 10_000 });
+        await generatedFrame.locator("#play:enabled").waitFor({ state: "visible", timeout: 10_000 });
+        // Selecting a different project intentionally creates a fresh iframe.
+        // Diagnose this click against that instance, not the discarded first one.
+        await generatedIframe.evaluate((element) => {
+          element.setAttribute("data-e2e-instance", "generated-return-input");
+          element.closest('[data-slot="conversation.session"]')?.setAttribute("data-e2e-anchor", "game-return-input");
+          element.closest(".oh-story-split-surface")?.setAttribute("data-e2e-surface", "game-return-input");
+        });
+        inputBeforeClick = await generatedInputState();
+        await generatedFrame.getByRole("button", { name: "试玩成功", exact: true }).click();
+        await requireGeneratedInput("after returning from bundled project");
         await generatedIframe.evaluate((element) => { element.setAttribute("data-e2e-instance", "new-build-preserved"); });
+        inputBeforeClick = await generatedInputState();
         const beforeGameUpdate = (await sessionEvents(origin, gameSession.sessionId)).at(-1)?.seq ?? -1;
         await rpc(origin, "session/prompt", {
           request: {
@@ -2000,7 +2057,7 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         if (await generatedIframe.getAttribute("data-e2e-instance") !== "new-build-preserved") {
           throw new Error("A newly built preview silently remounted after the game iframe lost focus.");
         }
-        await generatedFrame.getByRole("button", { name: "输入已验证", exact: true }).waitFor({ state: "visible", timeout: 10_000 });
+        await requireGeneratedInput("after pending build completion");
         await gameStudio.getByRole("button", { name: "载入新版本", exact: true }).click();
         await generatedFrame.getByRole("button", { name: "试玩成功", exact: true }).waitFor({ state: "visible", timeout: 10_000 });
         if (await generatedIframe.getAttribute("data-e2e-instance") !== null) {
@@ -2051,6 +2108,8 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
       await storyTree.waitFor({ state: "visible", timeout: 10_000 });
 
       await selectSession(page, dramaWorkspace.workspace.title, dramaSessionTitle);
+      // Reading drama files with a real model does not select a UI workbench.
+      await page.getByRole("tablist", { name: "创作工作台" }).getByRole("tab", { name: "短剧", exact: true }).click();
       const dramaTree = page.getByRole("navigation", { name: "短剧项目文件" });
       await dramaTree.waitFor({ state: "visible", timeout: 10_000 });
       const dramaKind = page.locator(".oh-story-kind");
@@ -2307,10 +2366,24 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
       await page.locator(".oh-story-media-library").scrollIntoViewIfNeeded();
       await productionTabs.getByRole("tab", { name: "成片", exact: true }).click();
       if (await page.locator(".oh-story-sequence > ol > li").count() !== 22
-        || await page.locator(".oh-story-sequence-summary").getByText("21 个阻塞项", { exact: true }).count() !== 1
+        || await page.locator(".oh-story-sequence-summary").getByText("20 个阻塞项", { exact: true }).count() !== 1
         || await page.locator(".oh-story-sequence-issues li").count() !== 4
         || await page.getByRole("button", { name: "合成成片", exact: true }).isEnabled()) {
-        throw new Error("Production sequence did not expose shot order and missing-video blockers.");
+        throw new Error("Production sequence did not expose shot order and missing-media blockers.");
+      }
+      const explicitStillPath = "交付/EP001/IMG-ZHOUBOSEN-SHEET-select-smoke.png";
+      await mkdir(dirname(join(dramaRoot, explicitStillPath)), { recursive: true });
+      await cp(keyframeV2MediaFixture, join(dramaRoot, explicitStillPath));
+      await page.getByRole("button", { name: "刷新", exact: true }).click();
+      const stillSelector = page.getByRole("combobox", { name: "选择 SHOT-EP001-001 成片素材", exact: true });
+      const stillOption = stillSelector.getByRole("option", { name: /IMG-ZHOUBOSEN-SHEET · 静帧/u });
+      await stillOption.waitFor({ state: "attached", timeout: 10_000 });
+      const stillVersionId = await stillOption.getAttribute("value");
+      if (stillVersionId === null) throw new Error("Sequence did not expose the same-episode delivery IMG source.");
+      await stillSelector.selectOption(stillVersionId);
+      const selectedStill = page.locator(".oh-story-sequence > ol > li").first().locator("img");
+      if (new URL((await selectedStill.getAttribute("src")) ?? "", origin).searchParams.get("path") !== explicitStillPath) {
+        throw new Error("Explicit IMG composition source did not replace its automatic shot keyframe.");
       }
       await page.getByRole("button", { name: "下移 SHOT-EP001-001", exact: true }).click();
       if (await page.locator(".oh-story-sequence > ol > li strong").first().textContent() !== "SHOT-EP001-002") {
@@ -2336,6 +2409,7 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
       await productionTab.click();
       await page.locator(".oh-story-shot-card").first().waitFor({ state: "visible", timeout: 10_000 });
       if (!useRealDeepSeek) {
+        const beforeShotOne = (await sessionEvents(origin, dramaSession.sessionId)).at(-1)?.seq ?? -1;
         await page.locator(".oh-story-shot-card").first().getByRole("button", { name: "准备关键帧", exact: true }).click();
         await productionTabs.getByRole("tab", { name: "任务", exact: true }).waitFor({ state: "visible", timeout: 10_000 });
         await page.locator(".oh-story-task-board article").first().waitFor({ state: "visible", timeout: 10_000 });
@@ -2343,10 +2417,12 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
           .waitFor({ state: "visible", timeout: 20_000 });
         await page.getByText("等待确认", { exact: true })
           .waitFor({ state: "visible", timeout: 10_000 });
+        await waitForCompletedTurn(origin, dramaSession.sessionId, beforeShotOne);
 
         const taskFor = (targetId: string) => page.locator(".oh-story-task-board article").filter({ hasText: targetId }).first();
         const shotCards = page.locator(".oh-story-shot-card");
 
+        const beforeShotTwo = (await sessionEvents(origin, dramaSession.sessionId)).at(-1)?.seq ?? -1;
         await productionTabs.getByRole("tab", { name: "镜头", exact: true }).click();
         await shotCards.nth(1).getByRole("button", { name: "准备关键帧", exact: true }).click();
         const runningQueueRemovalTask = taskFor("SHOT-EP001-002");
@@ -2361,6 +2437,8 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         await removedQueuedTask.getByText("已取消", { exact: true }).waitFor({ state: "visible", timeout: 10_000 });
         await runningQueueRemovalTask.getByText("等待确认", { exact: true })
           .waitFor({ state: "visible", timeout: 10_000 });
+        // Business confirmation state is not a host Turn-completion barrier.
+        await waitForCompletedTurn(origin, dramaSession.sessionId, beforeShotTwo);
 
         const productionRequestsBeforeCancel = mockDeepSeek?.requests.filter((request) => request === "production").length ?? 0;
         await productionTabs.getByRole("tab", { name: "镜头", exact: true }).click();
@@ -2425,6 +2503,8 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         await batchTask.getByText("DSH Turn 已结束，已发现 1/22 项成果；请刷新核对剩余输出。", { exact: true })
           .waitFor({ state: "visible", timeout: 15_000 });
 
+        // Fill all videos; the explicitly selected delivery IMG must still win
+        // over shot one's new video and dispatch a genuine mixed sequence.
         const readyVideoPaths = Array.from({ length: 22 }, (_, index) => {
           const shotId = `SHOT-EP001-${String(index + 1).padStart(3, "0")}`;
           return `剧集/EP001/制作成果/${shotId}/${shotId}-ready-smoke.mp4`;
@@ -2437,8 +2517,28 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         await productionTabs.getByRole("tab", { name: "成片", exact: true }).click();
         await page.getByText("已可合成", { exact: true }).waitFor({ state: "visible", timeout: 10_000 });
         const composeButton = page.getByRole("button", { name: "合成成片", exact: true });
-        if (!await composeButton.isEnabled()) throw new Error("A complete video sequence still blocked composition.");
+        if (!await composeButton.isEnabled()) throw new Error("A complete mixed sequence still blocked composition.");
+        const sequenceRows = page.locator(".oh-story-sequence > ol > li");
+        if (await sequenceRows.first().locator("img").count() !== 1 || await sequenceRows.nth(1).locator("video").count() !== 1) {
+          throw new Error("Mixed composition did not preview its actual image and video source types.");
+        }
+        if (new URL((await sequenceRows.first().locator("img").getAttribute("src")) ?? "", origin).searchParams.get("path") !== explicitStillPath) {
+          throw new Error("A new video silently replaced the creator's explicit static IMG source.");
+        }
+        await page.setViewportSize({ width: 500, height: 900 });
+        await page.waitForTimeout(150);
+        const sequenceOverflow = await page.locator(".oh-story-sequence").evaluate((element) => element.scrollWidth - element.clientWidth);
+        if (sequenceOverflow > 1) throw new Error(`500px sequence source controls overflowed by ${String(sequenceOverflow)}px.`);
+        const compactSourcePicker = page.getByRole("combobox", { name: "选择 SHOT-EP001-001 成片素材" });
+        await compactSourcePicker.scrollIntoViewIfNeeded();
+        const compactSourcePickerBox = await compactSourcePicker.boundingBox();
+        if (!await compactSourcePicker.isVisible() || compactSourcePickerBox === null || compactSourcePickerBox.width < 100 || compactSourcePickerBox.height < 20) {
+          throw new Error(`500px sequence source selector is not usable: ${JSON.stringify(compactSourcePickerBox)}`);
+        }
+        await page.setViewportSize({ width: 1_440, height: 900 });
         await composeButton.click();
+        await page.locator('[data-slot="conversation.session"]').getByText("IMG-ZHOUBOSEN-SHEET · 静帧", { exact: false }).last()
+          .waitFor({ state: "visible", timeout: 10_000 });
         const compositionTask = page.locator(".oh-story-task-board article").filter({ hasText: "成片" }).first();
         await compositionTask.getByRole("button", { name: "停止当前 DSH Turn", exact: true })
           .waitFor({ state: "visible", timeout: 10_000 });
@@ -2718,6 +2818,8 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
       videoStudio: "preview-left-chat-right",
       videoPreviewRoles: ["source", "edited", "final"],
       playableIframe: true,
+      gameAdvSaveRestore: true,
+      mixedStaticComposition: !useRealDeepSeek,
       previewCsp: "asset-prefix-only",
       gameModeExit: true,
       gameModeState: "preserved",
@@ -2737,7 +2839,8 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
   } catch (error) {
     const apiKey = process.env.DEEPSEEK_API_KEY;
     const redact = (value: string): string => apiKey === undefined ? value : value.replaceAll(apiKey, "[REDACTED]");
-    throw new Error(`${redact(String(error))}\nMock requests: ${JSON.stringify(mockDeepSeek?.requests ?? [])}\nDSH logs:\n${redact(logs.join("").slice(-16_000))}`, { cause: error });
+    // eslint-disable-next-line preserve-caught-error -- The original cause may contain credentials; retain only redacted diagnostics.
+    throw new Error(`${redact(String(error))}\nMock requests: ${JSON.stringify(mockDeepSeek?.requests ?? [])}\nDSH logs:\n${redact(logs.join("").slice(-16_000))}`);
   } finally {
     if (firstRunBrowser !== undefined) await firstRunBrowser.close();
     if (child !== undefined) await stop(child);

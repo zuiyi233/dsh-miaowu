@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolCallBlock } from "@deepseek-ai/dsh-client-ui-conversation/client";
+import { PartialArguments } from "@deepseek-ai/dsh-util-values";
 import type { ToolCallViewProps } from "@deepseek-ai/dsh-client-ui-tool/client";
 import {
   ComfyuiToolView,
@@ -23,6 +24,8 @@ function settledBlock(text: string, isError = false): ToolCallBlock {
     seq: 1,
     time: 0,
     callId: "call-1",
+    name: "oh_story_comfyui",
+    args: PartialArguments.EMPTY,
     call: { name: "oh_story_comfyui", argsRaw: "{}" },
     callTime: null,
     content: [{ type: "text", text }],

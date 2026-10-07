@@ -184,7 +184,9 @@ async function privateDirectory(path: string): Promise<boolean> {
 }
 
 /** The upstream adapter-config document: argv commands and timeouts only, never credentials. */
-export function dramaAdapterConfigDocument(skillRoot: string, python = "python3"): { readonly adapters: Record<string, { readonly command: readonly string[]; readonly timeout_seconds: number }> } {
+export function dramaAdapterConfigDocument(skillRoot: string, python = "python3"): {
+  readonly adapters: Record<string, { readonly command: readonly string[]; readonly timeout_seconds: number }>;
+} {
   const script = resolve(skillRoot, PROVIDER_SCRIPT);
   const comfyuiRunner = comfyuiRunnerPath();
   const adapters: Record<string, { readonly command: readonly string[]; readonly timeout_seconds: number }> = {};

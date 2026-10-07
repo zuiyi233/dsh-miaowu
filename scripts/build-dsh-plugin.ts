@@ -2,6 +2,8 @@ import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { build, type Plugin } from "esbuild";
 
+import { isLocalArtifactPath } from "../packages/dsh-plugin/build-path-policy.js";
+
 const root = resolve(import.meta.dirname, "..");
 const packageRoot = resolve(root, "packages/dsh-plugin");
 const outputRoot = resolve(packageRoot, "lib");
@@ -98,37 +100,28 @@ await build({
  * accumulates next to the pinned assets. The copies below take whole directories, so ignored files
  * would otherwise reach the tarball.
  */
-function isLocalArtifact(source: string): boolean {
-  const normalized = source.replaceAll("\\", "/");
-  return normalized.includes("/__pycache__/")
-    || normalized.endsWith("/__pycache__")
-    || normalized.endsWith(".pyc")
-    || normalized.endsWith("/.DS_Store")
-    || /\/\.om[cx](?:\/|$)/u.test(normalized);
-}
-
 await cp(ohStoryRoot, resolve(outputRoot, "oh-story"), {
   recursive: true,
   filter: (source) => {
     const bundledPath = relative(ohStoryRoot, source).replaceAll("\\", "/");
-    return !isLocalArtifact(source)
+    return !isLocalArtifactPath(ohStoryRoot, source)
       && !platformGlue.some((entry) => bundledPath === entry.replace(/\/$/u, "") || bundledPath.startsWith(entry));
   }
 });
 
 await cp(dramaRoot, resolve(outputRoot, "drama"), {
   recursive: true,
-  filter: (source) => !isLocalArtifact(source)
+  filter: (source) => !isLocalArtifactPath(dramaRoot, source)
 });
 
 await cp(novelToGameRoot, resolve(outputRoot, "novel-to-game"), {
   recursive: true,
-  filter: (source) => !isLocalArtifact(source)
+  filter: (source) => !isLocalArtifactPath(novelToGameRoot, source)
 });
 
 await cp(videoRecapRoot, resolve(outputRoot, "video-recap"), {
   recursive: true,
-  filter: (source) => !isLocalArtifact(source)
+  filter: (source) => !isLocalArtifactPath(videoRecapRoot, source)
 });
 
 await cp(dshMiaowuRoot, resolve(outputRoot, "dsh-miaowu"), {
@@ -154,6 +147,7 @@ for (const excluded of [
   "video-recap/skills/video-recap/scripts/dashboard_io.py",
   "video-recap/skills/video-recap/scripts/dashboard_runs.py",
   "video-recap/skills/video-recap/scripts/dashboard_templates.py",
+  "video-recap/skills/video-recap/scripts/dashboard",
   "video-recap/skills/video-recap/assets/dashboard"
 ]) {
   const present = await access(resolve(outputRoot, excluded)).then(() => true, () => false);
