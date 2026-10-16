@@ -45,6 +45,8 @@ const demoFramesDirectory = process.env.OH_STORY_DEMO_FRAMES_DIR;
 const gameEvidenceDirectory = process.env.OH_STORY_GAME_E2E_DIR;
 const useRealDeepSeek = process.env.OH_STORY_DEMO_USE_REAL_DEEPSEEK === "1";
 const browserChannel = process.env.DSH_SMOKE_BROWSER_CHANNEL ?? (process.platform === "win32" ? "msedge" : "chrome");
+/** First-launch surfaces: the no-Session welcome and the creative-project onboarding. */
+const FIRST_RUN_GUIDE_SELECTOR = '[aria-label="Oh Story 使用引导"], [aria-label="创作工程引导"]';
 const storyProjectName = "让你管账号，你高燃混剪炸全网";
 const dramaProjectName = "让你管账号";
 const storyFixture = join(repositoryRoot, "scripts", "demo-fixtures", "story", storyProjectName);
@@ -868,17 +870,27 @@ async function main(): Promise<void> {
     // the page loads. Wait for it instead of skipping a not-yet-mounted dialog.
     await firstRunPage.getByRole("button", { name: /^(?:Continue|继续)$/u }).click({ timeout: 20_000 });
     await firstRunPage.getByRole("dialog").waitFor({ state: "detached", timeout: 10_000 });
-    const welcome = firstRunPage.getByRole("region", { name: "Oh Story 使用引导" });
-    await welcome.waitFor({ state: "visible", timeout: 20_000 });
-    if (!(await welcome.innerText()).includes("Oh Story 已加载")) throw new Error("First launch did not explain how to open the workbench.");
+    // A fresh Host shows one of two guides: DSH 0.2.1+ opens a default blank Session
+    // right away, so the creative-project onboarding takes the place of the no-Session
+    // welcome that older Hosts still render.
+    const firstRunGuide = firstRunPage.locator(FIRST_RUN_GUIDE_SELECTOR).first();
+    try {
+      await firstRunGuide.waitFor({ state: "visible", timeout: 20_000 });
+    } catch (error) {
+      const guides = await firstRunPage.evaluate("[...document.querySelectorAll('.oh-story-welcome, .oh-story-empty')].map((element) => element.getAttribute('aria-label'))");
+      throw new Error(`First-launch guide never became visible (found: ${JSON.stringify(guides)})\nBrowser errors: ${JSON.stringify(firstRunErrors)}\n${await firstRunPage.locator("body").ariaSnapshot()}`, { cause: error });
+    }
+    if (!/Oh Story 已加载|尚未检测到创作工程/u.test(await firstRunGuide.innerText())) {
+      throw new Error("First launch did not explain how to open the workbench.");
+    }
     // Check compact layout on a separate page so resizing does not switch the
     // desktop page's sidebar into a drawer while fixture Sessions arrive.
     const compactFirstRunPage = await firstRunPage.context().newPage();
     await compactFirstRunPage.setViewportSize({ width: 500, height: 900 });
     await compactFirstRunPage.goto(dshTokenUrl, { waitUntil: "networkidle" });
-    const compactWelcome = compactFirstRunPage.getByRole("region", { name: "Oh Story 使用引导" });
-    await compactWelcome.waitFor({ state: "visible", timeout: 20_000 });
-    const bounds = await compactWelcome.boundingBox();
+    const compactGuide = compactFirstRunPage.locator(FIRST_RUN_GUIDE_SELECTOR).first();
+    await compactGuide.waitFor({ state: "visible", timeout: 20_000 });
+    const bounds = await compactGuide.boundingBox();
     if (bounds === null || bounds.width <= 0 || bounds.x < 0 || bounds.x + bounds.width > 500) {
       throw new Error("First-launch guide overflowed the compact viewport.");
     }
@@ -1379,7 +1391,7 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
       if (await page.locator(".oh-story-split-surface").count() !== 1) {
         throw new Error("Blank DSH Session did not mount the three-column workbench.");
       }
-      if (await page.getByRole("region", { name: "Oh Story 使用引导" }).count() !== 0) {
+      if (await page.locator(FIRST_RUN_GUIDE_SELECTOR).count() !== 0) {
         throw new Error("First-launch guide remained after entering a Session.");
       }
 
