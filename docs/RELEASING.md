@@ -28,6 +28,38 @@ The workflow requests an OpenID Connect identity and publishes with provenance.
 Once Trusted Publishing is verified, the long-lived `NPM_TOKEN` secret can be
 removed.
 
+## Fork status (2026-10-17)
+
+`scripts/release.mjs` and `.github/workflows/release.yml` are inherited from
+upstream and hard-code the upstream identity (`zenstory-ai/oh-story-dsh`,
+package `@oh-story/dsh`, tarball `oh-story-dsh-<version>.tgz`, User-Agent and
+release-name strings, and the `node_modules/@oh-story/dsh` install check). On
+this fork the tag pipeline therefore stops immediately with
+`release: repository must be zenstory-ai/oh-story-dsh`, and the npm jobs have no
+published package or Trusted Publishing entry yet.
+
+Until that adapter work lands, the tag-triggered workflow is disabled
+(`disabled_manually`) and releases are cut by hand:
+
+1. verify locally: `pnpm verify`, plus the packaged DSH smoke on both Host lines
+   (`pnpm test:dsh` for the default line, `pnpm test:dsh:rc` for `0.2.0-rc.2`);
+2. build the tarball:
+   `pnpm --filter @dsh-miaowu/dsh build && pnpm --filter @dsh-miaowu/dsh pack --pack-destination release`;
+3. write `release/SHA256SUMS` with
+   `sha256sum dsh-miaowu-dsh-<version>.tgz > SHA256SUMS`;
+4. create the annotated tag and the GitHub Release, then upload the tarball and
+   `SHA256SUMS` as assets — README and docs install from
+   `https://github.com/zuiyi233/dsh-miaowu/releases/download/v<version>/dsh-miaowu-dsh-<version>.tgz`;
+5. re-download the asset and compare its SHA-256 with the local file before
+   announcing the release.
+
+Re-enable the upstream pipeline once `release.mjs` is parameterised and npm
+credentials (or Trusted Publishing) exist:
+
+```bash
+gh api -X PUT repos/zuiyi233/dsh-miaowu/actions/workflows/350173456/enable
+```
+
 ## Cut a release
 
 1. Update the root and package versions, installation examples, and
