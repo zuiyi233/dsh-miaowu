@@ -4,6 +4,7 @@ import type { WorkbenchMode } from "./file-activity.js";
 import type { GameQaSummary } from "./game-qa.js";
 import type { VideoProject } from "./video-studio.js";
 import type { DramaProductionSection } from "./drama-production.js";
+import type { CanvasViewport } from "./canvas-viewport.js";
 import type {
   CanvasPoint,
   ProductionJob,
@@ -83,7 +84,7 @@ export interface WorkbenchMemory {
   productionReferences: Record<string, Record<string, string[]>>;
   productionSequence: Record<string, ProductionSequenceItem[]>;
   productionCanvas: Record<string, Record<string, CanvasPoint>>;
-  productionZoom: Record<string, number>;
+  productionViewport: Record<string, CanvasViewport>;
   productionIntentCalls: Record<string, boolean>;
   featurePane: string | undefined;
   /** Phase C layout: story/drama split tree (tree|editor pair). */
@@ -124,7 +125,7 @@ export function createWorkbenchStore() {
       productionReferences: {},
       productionSequence: {},
       productionCanvas: {},
-      productionZoom: {},
+      productionViewport: {},
       productionIntentCalls: {},
       featurePane: undefined,
       splitTree: defaultSplitTree(),
@@ -201,8 +202,8 @@ export function createWorkbenchStore() {
       setProductionCanvas: (draft, update: Update<Record<string, Record<string, CanvasPoint>>>) => {
         draft.productionCanvas = applyUpdate(draft.productionCanvas, update);
       },
-      setProductionZoom: (draft, update: Update<Record<string, number>>) => {
-        draft.productionZoom = applyUpdate(draft.productionZoom, update);
+      setProductionViewport: (draft, update: Update<Record<string, CanvasViewport>>) => {
+        draft.productionViewport = applyUpdate(draft.productionViewport, update);
       },
       setProductionIntentCalls: (draft, update: Update<Record<string, boolean>>) => {
         draft.productionIntentCalls = applyUpdate(draft.productionIntentCalls, update);

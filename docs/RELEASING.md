@@ -3,6 +3,15 @@
 `@dsh-miaowu/dsh` is distributed as the same prebuilt tarball through npm and
 GitHub Releases. A release is created only from a `v<package-version>` tag.
 
+## Upstream update issues
+
+`.github/workflows/upstream-updates.yml` runs daily and opens one
+`upstream-update` issue per new version of a bundled Skill set (latest GitHub
+release ahead of the pinned manifest commit) or of DeepSeek Harness (an npm
+dist-tag on a version the plugin does not declare). Each issue carries the sync
+checklist. Close an issue to decline that version; it will not be reopened.
+Run `pnpm upstream:updates` for a local dry run.
+
 ## One-time npm setup
 
 The npm account used for the first publication must be allowed to publish the
@@ -25,7 +34,7 @@ removed.
    `CHANGELOG.md` for the intended release.
 2. Run `pnpm verify:release` locally. For 0.1.13 and later, retain fresh packaged
    Chrome E2E evidence on both the default DSH `0.2.0-rc.2` line and the explicit
-   `0.2.1-alpha.1` opt-in line; alpha support must not be announced from peer
+   `0.2.1-alpha.4` opt-in line; alpha support must not be announced from peer
    metadata or unit tests alone.
 3. Merge the release branch through a protected Pull Request after all four
    required CI checks pass, then wait for the newest main-push CI run for that
@@ -132,14 +141,14 @@ metadata and manifest integrity rather than resubmit while processing.
 Do not announce a release until the registry reports the exact version:
 
 ```bash
-VERSION=0.1.13
+VERSION=0.1.16
 npm view "@dsh-miaowu/dsh@$VERSION" version dist.integrity
 npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.0-rc.2 dsh plugin --profile web add "@dsh-miaowu/dsh@$VERSION"
 ```
 
-The default public smoke uses npm `latest` (`0.2.0-rc.2`). After it passes,
+The default public smoke pins DSH `0.2.0-rc.2`. After it passes,
 repeat the isolated install/start/browser smoke with
-`@deepseek-ai/dsh@0.2.1-alpha.1`; never mix host versions within one profile or
+`@deepseek-ai/dsh@0.2.1-alpha.4`; never mix host versions within one profile or
 describe the alpha line as supported before its Chrome run passes.
 
 The GitHub Release tarball remains a registry-independent installation path:

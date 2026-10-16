@@ -11,8 +11,47 @@
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-10-16
+
+### Changed
+
+- 显式 alpha 宿主更新到 [DeepSeek Harness 0.2.1-alpha.4](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-alpha.4)，配套 Cordis / Schemastery 更新到 `4.0.5-alpha.2` / `3.18.5-alpha.2`；默认安装仍使用 npm `latest` 的 `0.2.0-rc.2`。新增 `engines.dsh`，与 DSH peer 的双线兼容范围一致，供新版宿主优先检查。
+- 同步 [Oh Story 0.8.6](https://github.com/zenstory-ai/oh-story-claudecode/releases/tag/v0.8.6)（`86a8000cc89048e441b906b3389f1f847aeb20cd`，`agents_version` 34 → 35，13 Skills、7 Roles）：去 AI 味流程分开检查合规、机械表达与场面写法，按作者授权范围修改；作者记忆由长篇、短篇写作 Skill 管理，独立审稿和去味不再自行查询或写入记忆。DSH 技能桥同步新的脚本归属，已有 `.story/作者记忆/` 数据继续使用。
+- 包含已审阅的 [Drama Skills 0.9.0](https://github.com/zenstory-ai/drama-skills/releases/tag/v0.9.0)（`dafe80ee390ec8be5a7ec8dd156a84d511f8e7dd`，11 Skills）、NovelToGame **0.5.0**（`bf0ffbc0cedf20b3f40ba9b60212af27f6713221`，7 Skills）及 video-recap-skills **0.6.2**（`5785c33d8b5172cfa2837a8a0d57eb4b87837475`，7 Skills）文档更新。Drama 的旧作者模板随上游退役，创作按所需 Markdown 文档交接；NovelToGame 世界设计入口明确交付完整切片设计，原型由后续 build 阶段构建。
+
 ### Fixed
 
+- 适配新版 DSH 的子角色启动接口，修复 `oh_story_role` 在新 alpha 上无法运行的问题；角色提示词与工具权限在首轮模型请求前生效，取消会停止并释放对应子角色，默认 rc 宿主继续使用原接口。
+- 双语 README、安装与升级说明按当前宿主线整理，区分技能目录发现与按需正文读取、短剧核心五文档与剪辑记录、付费媒体任务确认与普通模型调用；安全说明按实际 Session 文件系统、预览和并发写入边界校正。badcase、配对与真实样本保留。短剧 demo 字节与新固定来源完全一致，只更新来源提交登记，不重写历史输出。
+
+## [0.1.15] - 2026-10-10
+
+### Changed
+
+- 同步 [Oh Story 0.8.5](https://github.com/zenstory-ai/oh-story-claudecode/releases/tag/v0.8.5)（`2cf7be61b139f3852c82f981a7ff4eed2aaf5926`，`agents_version` 仍是 34，13 Skills、7 Roles 不变）：写正文时作者记忆的篇幅（单次查询 2048 字节）改按写手实际读到的「- 习惯原文（编号）」计算，编号、分类等格式不再占篇幅，同样篇幅能带上约一倍的习惯（每条 40 字左右时从 8 条到 15 条，20 字左右时从 11 条到 27 条）。篇幅不做成可调，装不下也不暂停写作（[#61](https://github.com/zenstory-ai/oh-story-dsh/issues/61)）。
+- 上游扫榜给起点、七猫加了「书库新书」采集，「扫七猫新书」这类说法也会进长篇扫榜。DSH 原生扫榜不运行随包采集与汇总脚本，只用当前 Preset 的网页工具，所以这份新书采集和汇总口径的修复在 DSH 里不会自动生效。
+
+### Fixed
+
+- 有作者习惯这章没带上时，写完一章（日更是一批）的汇报里会用原话点名是哪几条，并建议说「整理作者记忆」；原来只在内部核对报告里记一笔，作者看不到，没带上的超过 20 条时数目还会少报（[#61](https://github.com/zenstory-ai/oh-story-dsh/issues/61)）。
+- 书放在工作区的 `长篇/`、`短篇/` 文件夹下时，写章的组装脚本能认出工作区并自动带上全局与本书的作者习惯，不再查询失败、退回对话里手查；工作区认不出、书目录下又只有本书记忆时不再代查，避免把本书记忆挪位后再也读不出来。DSH 默认的单书布局（工作区就是书根）照常识别。
+
+## [0.1.14] - 2026-10-08
+
+### Added
+
+- 短剧「生产」视图的「画布」改为无限画布：拖动空白处（左键或中键）平移，滚轮以光标为中心缩放（10%–300%），节点坐标不受限制；新增「适应」框选全部节点，「复位」清空布局后重新框选。画布获得焦点时方向键平移、`+`/`-` 缩放、`0` 适应；单击节点选中、Enter 打开原文，选中素材时它的连线一起高亮。每集的视野随布局一起按集保留在当前页面。
+- 新增每日运行的 `Upstream Updates` 工作流：四套上游 Skills 的最新 release 领先 manifest 固定提交，或 `@deepseek-ai/dsh` 的 npm dist-tag 指向插件未声明的版本时，自动开一个带同步清单的 `upstream-update` issue；关闭即表示不跟该版本，不再提醒。本地可用 `pnpm upstream:updates` 预览。
+
+### Changed
+
+- 同步 [video-recap-skills 0.6.2](https://github.com/zenstory-ai/video-recap-skills/releases/tag/v0.6.2)（`539168622918e058bd250c793b82f043eced31e0`）：dub（英译中原声复刻）必须显式带 `--confirm-voice-rights`，缺少时在建 `work_dir`、抽音频和任何外发请求之前报错，其他模式传入也报错；技能桥要求 Agent 先向用户确认视频音频使用权与说话人同意克隆，确认后才加该参数。**旧 `work/` 打印的 dub 续跑命令需要补上这个参数。** video-script 与 video-voiceover 写明每条远程调用发送的内容与关闭方式；没有 `MIMO_API_KEY` 时旁白评审直接退出，不再把稿件发出去。
+- 「生产」视图统一视觉：生成环境与格式提醒收进顶部状态胶囊，默认收起，点开后逐行列出各供应商缺失的环境变量与 Adapter 配置文件（可复制完整路径）；未配置供应商显示为空心灰点，只有 Python 低于 3.10 或 Adapter 写入失败才标红。镜头、素材、任务、成片与项目媒体库统一卡片圆角、间距、mono ID 与状态色，素材类型标签浮在媒体上，提示词收为 3 行；「任务」空状态给出下一步。
+
+### Fixed
+
+- 画布缩放后滚动范围不再停留在旧尺寸，最后几个镜头也能到达；拖到画布左上方之外的节点不再找不回来；画布外框按剩余高度填满，不再出现双层滚动；别处选中或 Agent 聚焦的镜头会被带进画布视野，键盘把节点移出视野时视野跟随。拖动与缩放期间只在画布本地渲染，结束后才写入工作台状态。
+- 「成片」行的镜头 ID 不再在窄列里逐段换行；500px 紧凑布局下素材选择独占一行、上下移按钮竖排，不横向溢出。
 - 修复 npm 发布把相对 tgz 路径误识别为 GitHub 仓库地址的问题；增加严格绑定原始制品的一次性恢复流程，补齐 0.1.13 的 npm 渠道，不移动标签或覆盖已发布资产。
 - 修复公开渠道验收把 npm 传播期间的 404 当成可用元数据的问题，使其进入现有有界等待，而不在空值上读取完整性。
 
@@ -292,7 +331,10 @@
 - 提供 13 个 Oh Story 小说 Skills、7 个专业 Roles 与 10 个 Drama Skills。
 - 提供文件树、Markdown/JSONL 编辑预览与官方 DSH Chat 同屏的三栏工作台。
 
-[Unreleased]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.13...HEAD
+[Unreleased]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.16...HEAD
+[0.1.16]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.15...v0.1.16
+[0.1.15]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.14...v0.1.15
+[0.1.14]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/zenstory-ai/oh-story-dsh/compare/v0.1.10...v0.1.11

@@ -1,11 +1,7 @@
 ---
 name: video-cut
 user-invocable: false
-description: >
- 把长视频按 Agent 选择的原片区间剪成短片。作为两阶段创作流程中的剪辑环节，读取 clip_plan.json 与源视频，
- 输出 edited_source.mp4；随后 Agent 按输出时间线写 narration.json。支持单视频与多视频（sources manifest）拼剪，
- 本工具不读取、不映射旁白。
- 触发词：视频剪辑、剪辑式解说、video cut、clip plan、拼剪。
+description: 把长视频按 Agent 选择的原片区间剪成短片。作为两阶段创作流程中的剪辑环节，读取 clip_plan.json 与源视频， 输出 edited_source.mp4；随后 Agent 按输出时间线写 narration.json。支持单视频与多视频（sources manifest）拼剪， 本工具不读取、不映射旁白。 触发词：视频剪辑、剪辑式解说、video cut、clip plan、拼剪。
 ---
 
 ## 1. 定位
@@ -18,7 +14,7 @@ description: >
 4. 拼接选定区间，输出恒定帧率的 `edited_source.mp4`，帧数与 `clip_plan_validated.json` 记录的一致。
 5. 到此停止，由 Agent 按真实输出时间线写 `narration.json`；本工具不读取旁白，也不做原片→输出映射。
 
-相同输入会得到相同输出。`edited_source.mp4.meta.json` 记录标准化 clips、渲染设置和每个源文件的 `size`/`mtime_ns`；三者与当前一致且 `edited_source.mp4` 存在非空才复用，任一不同即重渲染。只有 sidecar 而没有媒体文件不复用。
+渲染缓存按输入与设置复用。`edited_source.mp4.meta.json` 记录标准化 clips、渲染设置和每个源文件的 `size`/`mtime_ns`；三者与当前一致且 `edited_source.mp4` 存在非空才复用，任一不同即重渲染。只有 sidecar 而没有媒体文件不复用。
 
 ## 2. 输入契约
 
@@ -43,7 +39,7 @@ description: >
 
 ## 3. 剪辑意图契约
 
-工具不会替 Agent 做创作选择。写片段前先完成本节的剪辑意图检查，并让每个区间映射到 `recap_story_plan.json` 的一个 beat。
+Agent 写片段前先确认剪辑意图，并让每个区间映射到 `recap_story_plan.json` 的一个 beat；工具负责执行与校验。
 
 使用现有自由文本 `reason` 保存简洁决定：
 

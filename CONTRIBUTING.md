@@ -35,6 +35,7 @@ DEEPSEEK_API_KEY_FILE=/path/to/key pnpm test:dsh:real
 
 - Oh Story：`packages/knowledge/oh-story`
 - Drama Skills：`packages/knowledge/drama`
+- NovelToGame：`packages/knowledge/novel-to-game`
 - video-recap-skills：`packages/knowledge/video-recap`
 
 本地同步相邻 checkout：
@@ -42,6 +43,7 @@ DEEPSEEK_API_KEY_FILE=/path/to/key pnpm test:dsh:real
 ```bash
 OH_STORY_UPSTREAM_DIR=/path/to/oh-story-claudecode pnpm assets:sync:story
 DRAMA_SKILLS_UPSTREAM_DIR=/path/to/drama-skills pnpm assets:sync:drama
+NOVEL_TO_GAME_UPSTREAM_DIR=/path/to/novel-to-game pnpm assets:sync:game
 VIDEO_RECAP_UPSTREAM_DIR=/path/to/video-recap-skills pnpm assets:sync:video
 pnpm assets:check
 ```
@@ -62,7 +64,7 @@ pnpm assets:check
 1. 更新版本、安装示例与 `CHANGELOG.md`。
 2. 运行 `pnpm verify:release`。
 3. 需要观察官方 provider 兼容性时，运行 `pnpm test:dsh:real`，并确认结果是 executed and passed、项目摘要未改变、凭据未出现在日志中；缺少凭据导致的 skipped 不能记作 passed，也不替代第 2 步的确定性 correctness gate。
-4. 运行 `DEEPSEEK_API_KEY=... pnpm demo`，通过真实 DeepSeek 会话一次性重新生成并检查四张 README 演示图（需要 `ffmpeg`；`OH_STORY_DEMO_MOCK=1` 可用固定 fixture 免 Key 出图）。
+4. 需要更新 README 演示图时，再运行 `DEEPSEEK_API_KEY=... pnpm demo`，通过真实 DeepSeek 会话重新生成并检查四张图（需要 `ffmpeg`）。`OH_STORY_DEMO_MOCK=1` 可用固定 fixture 出图，但不能记作真实 provider 证据。
 5. 运行 `pnpm pack:release` 并检查 tarball。
 6. 按 [`docs/RELEASING.md`](docs/RELEASING.md) 创建与包版本一致的 Tag，由工作流执行正式发布。
 

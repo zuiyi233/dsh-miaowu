@@ -16,28 +16,14 @@ Vulnerabilities in DeepSeek Harness itself belong to the
 
 ## Trust boundary
 
-`@dsh-miaowu/dsh` is a Cordis plugin inside a DSH process. DSH owns the model, credentials,
-sandbox, tool permissions, and approvals; this plugin never reads credentials, opens a
-network listener of its own, or starts a second agent runtime.
+`@dsh-miaowu/dsh` is a Cordis plugin inside a DSH process. DSH owns models, credentials, sandbox policy, tool permissions and approvals. The plugin opens no network listener of its own and starts no second agent runtime. Host preflight checks whether media credentials are set; it returns configuration status, not key values. Media adapters run through the current DSH execution environment.
 
-The plugin adds one HTTP surface: a Session-scoped creative file route under `/oh-story`,
-mounted on DSH's existing web server. It is defended in depth:
+The plugin mounts `/oh-story` routes on DSH's existing web server for creative files, read-only media and game previews, and runtime preflight:
 
-- **Browser trust fence.** Every request passes the same Host, `Origin`, and Fetch Metadata
-  checks as DSH's native `/api`. The Host fence blocks DNS rebinding; the `sec-fetch-site`
-  and `Origin` checks block cross-site requests. Only loopback authorities are trusted by
-  default — a non-loopback deployment must declare each authority in the plugin's
-  `trustedHosts` config, and a malformed entry fails the plugin load rather than silently
-  widening access.
-- **Session scoping.** The working directory comes from the DSH `sessionId`, never from the
-  request. Child agent sessions get no editor route.
-- **Path containment.** Every path segment is checked with `lstat`, symlinks are resolved and
-  re-checked for containment at each level and again on the final target, and access is
-  limited to the documented novel and short-drama project directories with an allowlist of
-  editable extensions.
-- **Concurrency safety.** Reads return a content version; writes require it as a precondition
-  and are staged through an exclusive temporary file, so a stale save is rejected instead of
-  overwriting concurrent changes.
+- **Browser trust.** Workspace, file, media and preflight requests apply Host, `Origin` and Fetch Metadata checks matching DSH's native API boundary. Only loopback authorities are trusted by default. A non-loopback deployment must declare each authority in `trustedHosts`; malformed entries fail plugin loading. Generated-game previews additionally allow isolated document navigation under a trusted Host and apply a restrictive CSP to preview responses.
+- **Session scoping.** Workspace paths come from the DSH Session, never a request-supplied working directory. Child-Agent Sessions receive no editor route. The bundled game is a separate read-only example.
+- **Path containment.** Creative file access uses an allowlist of directories and extensions, including the documented novel, short-drama, `game-adaptations` and `video-recaps` roots. The current Agent's DSH `FileSystem` resolves paths and checks containment in its workspace. Workspace game-preview assets are additionally confined to that game's `build/app` directory; media previews are extension-allowlisted and read-only.
+- **Concurrent writes.** Reads return the DSH filesystem's opaque version. Writes use atomic `replaceIfVersion` with that version and the current Session's sandbox policy, rejecting stale saves instead of overwriting concurrent changes.
 
 ## Bundled upstream content
 

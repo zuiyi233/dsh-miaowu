@@ -6,13 +6,13 @@ metadata: {"openclaw":{"source":"https://github.com/zenstory-ai/oh-story-claudec
 ---
 # story-short-write：短篇网文写作
 
-你是短篇网文写作执行器。从构思到成稿，完成一篇完整的短篇小说。
+你负责从构思到成稿，完成一篇完整的短篇小说。
 
 **执行规则：短篇以情绪为目标，所有内容为情绪服务。**
 
 ## 写前必读（强制，先读后写）
 
-短篇按作者时刻加载：每个时刻只读自己的文件，后一时刻只靠落盘文件接上前一时刻。创建或修改故事文件前，先判断当前时刻并完整读取它的必读项（分块直到 EOF；`rg` 检索或局部摘读不算读完）。**只读本 SKILL.md 不算完成门禁。**
+短篇按作者当前要做的事分阶段加载，阶段之间靠落盘文件交接。创建或修改故事文件前，先判断当前时刻，再完整读取该时刻的必读项；分块读取直到 EOF，`rg` 检索或局部摘读不算读完。**只读本 SKILL.md 不算完成门禁。**
 
 | 时刻 | 作者确认什么 | 读什么 | 落盘 |
 |---|---|---|---|
@@ -20,16 +20,16 @@ metadata: {"openclaw":{"source":"https://github.com/zenstory-ai/oh-story-claudec
 | 构思（Phase 2） | 故事核、人物、反转、付费点 | ① `references/workflow-design.md` + `references/writing-workflow.md`、`references/submission-craft.md`、`references/short-craft.md`、`references/short-reversal.md` ② 核心 10 题材读一个精确的 `references/genre-styles/{题材}.md`，冷门题材读 `references/genre-writing-formulas.md` ③ 有反派或真相揭露设计时读 `references/villain-and-reveal.md`，不适用时在设计校验区写明原因 | `设定.md`、`小节大纲.md` |
 | 写正文（Phase 3–4） | 成稿 | Phase 3 写正文前完整读取 `references/workflow-draft.md`，按其「写前加载」读写作手法；Phase 4 精修前完整读取 `references/workflow-revision.md` | `正文.md` |
 
-构思必读项在第一次写入 `设定.md` / `小节大纲.md` 前读完。任一必需路径不存在、不可读或题材尚未解析到唯一 reference 时，立即停止，报告准确路径/待定项，**不得创建或修改故事产物**。不要把“已读 references”的回执写进故事文件；选出的题材招式、反转计算等应用证据写进正常设计字段。每个时刻按当前任务完整回读，不得用早先读过代替。
+构思必读项须在首次写入 `设定.md` / `小节大纲.md` 前读完。任一必需路径不存在、不可读，或题材尚未对应到唯一 reference 时，立即停止，报告准确路径或待定项，**不得创建或修改故事产物**。故事文件只记录选出的题材招式、反转计算等设计，不写“已读 references”的回执。进入每个时刻都按当前任务完整回读。
 
 **交接只靠落盘**：作者在对话里定下的字数、平台、人称、偏好、红线和否掉的方案，构思交付前写进 `设定.md`；写正文只读两份设计文件与本时刻的写作手法，不重读构思方法论，也不回翻对话。
-**换上下文**：构思读得最多。构思汇报末尾建议作者新开一个对话说「写正文」；作者要在本对话接着写也照做。新对话里两份设计文件已通过构思完成门禁时，直接进入写正文。
+**换上下文**：构思阶段加载最多，汇报末尾建议作者新开对话说「写正文」；作者选择在本对话接着写时照常执行。新对话中，两份设计文件通过构思完成门禁即可进入写正文。
 
 ---
 
 > Agent 只查当前端 canonical 目录（Claude `.claude/agents`、OpenCode `.opencode/agents`、Codex `.codex/agents` TOML、Antigravity `.agents/agents`），不跨端误判。Claude 用 `subagent_type`，OpenCode 用 `subagent` 的 `agent`，Codex 用 `agent_type`，Antigravity 用 `invoke_subagent` + `TypeName`。主会话自己写正文、去味是常态，不报；作者明确要交给写作助手而能力/文件缺失、unknown agent 或 ZCode 3.3.4 时，由主会话接手并一句白话告诉作者（如「写作助手用不了，由我直接写」），`Fallback: project custom agents unavailable -> solo` 原文只写进汇报最后一行「技术备注：」。
 >
-> Spawn 版本提示（不阻断 spawn）：先读取项目根 `.story-deployed` 的 `agents_version`。与本版 `agents_version: 34` 不一致时（标记缺失、字段缺失/非整数、小于或大于 34）**照常按文件存在性检查并 spawn**，同时用一句白话提示作者「写作助手是旧版，运行 /story-setup 后新开对话」，`Notice: agents bundle 版本不匹配（项目 {N}，本版 34）` 原文写进技术备注行；大于 34 时额外提示先更新 oh-story-claudecode，不要用本地旧版 setup 降级覆盖。只有 agent 文件缺失、或运行时不暴露 custom agent 时才降级 solo/direct，`Fallback: ... -> solo` 同样只进技术备注行。
+> Spawn 版本提示（不阻断 spawn）：先读取项目根 `.story-deployed` 的 `agents_version`。与本版 `agents_version: 35` 不一致时（标记缺失、字段缺失/非整数、小于或大于 35）**照常按文件存在性检查并 spawn**，同时用一句白话提示作者「写作助手是旧版，运行 /story-setup 后新开对话」，`Notice: agents bundle 版本不匹配（项目 {N}，本版 35）` 原文写进技术备注行；大于 35 时额外提示先更新 oh-story-claudecode，不要用本地旧版 setup 降级覆盖。只有 agent 文件缺失、或运行时不暴露 custom agent 时才降级 solo/direct，`Fallback: ... -> solo` 同样只进技术备注行。
 
 **文风裁决**：正文写作、改写或审稿前先读 [references/style-resolution.md](references/style-resolution.md)，加载本书文风并形成 `style_resolution`；无作者记忆也执行。当前请求、本书文风和 active 偏好按维度覆盖通用 references；同一裁决交给后续执行者。
 
@@ -39,16 +39,18 @@ metadata: {"openclaw":{"source":"https://github.com/zenstory-ai/oh-story-claudec
 2. **一个核心支点撑一篇**。反转型围绕一次主揭示蓄力；无反转型围绕报应兑现或甜度递进积累期待。不多线、不铺世界观。
 3. **每句话必须有用**。不推动剧情、不铺垫反转、不推高情绪的句子 → 删。
 4. **开头 3 句定生死，结尾定传播**。开头必须包含钩子，结尾必须有余韵。
-5. **默认第一人称**。短篇网文（盐言/七猫短篇等）绝大多数用第一人称，代入感最强。当前请求、本篇文风或题材需要第三人称时按其执行，不因默认值改回「我」。
+5. **默认第一人称**，用亲历视角建立代入感。当前请求、本篇文风或题材需要第三人称时按其执行。
 
 ---
 
+## 作者记忆管理
+
+管理习惯读 `references/author-memory.md`（整理、超编、迁移按其中指路）。仅管理习惯时完成即停，不建书、不写正文。
+
 ## 核心方法
 
-除了上面的执行规则，构思和写作时遵循：
-
-- **定方向就换风格**：题材一旦确定，腔调、开篇、钩子、情绪烈度、金句、招式、收尾全部切到该题材包（追妻含时代变体与小三/死人文学分支）；冷门题材用公式结构骨架兜底，腔调按 `short-craft.md`
-- **复用作者习惯**：有作者记忆时，正文前用 `scripts/author_memory_commit.py query --workspace {工作区} --book-root {项目目录} --kind prose_style --kind story_design [--genre {题材}] [--workflow 短篇]` 获取 active 条目（≤2KB），传给正文/改写 agent 作为自然倾向，不逐条展示或最大化命中，不牺牲连贯、节奏和字数；硬门禁、当前请求和本篇设定优先。长期声明在收尾用 `record` 写入并回传回执，细则见 [references/author-memory.md](references/author-memory.md)。
+- **按题材选写法**：确定题材后，按文风裁决选用题材包的腔调、开篇、钩子、情绪烈度、金句、招式与收尾；追妻按时代变体及小三/死人文学分支选择。冷门题材用公式安排结构，腔调按 `short-craft.md`
+- **复用作者习惯**：有作者记忆时，正文前用 `scripts/author_memory_commit.py query --workspace {工作区} --book-root {项目目录} --kind prose_style --kind story_design [--genre {题材}] [--workflow 短篇]` 把输出的 `lines` 原样交正文/改写 agent 作自然倾向，不逐条追求命中，不牺牲连贯、节奏和字数；硬门禁、当前请求和本篇设定优先；没装下的交稿时用原话告诉作者。长期声明在收尾按上方管理入口处理。
 
 ---
 
@@ -64,14 +66,14 @@ metadata: {"openclaw":{"source":"https://github.com/zenstory-ai/oh-story-claudec
 
 如果用户只有模糊想法 → 帮用户做情绪选择：
 
-| 情绪类型 | 适合场景 | 难度 | 市场热度 | 常配题材包 |
-|----------|----------|------|----------|------------|
-| 意难平 | 虐恋、遗憾、错过 | 中 | 🔥🔥🔥 | 追妻火葬场 / 甜宠（先虐后甜） |
-| 反转震撼 | 悬疑、身份错位 | 高 | 🔥🔥🔥 | 悬疑 / 沙雕脑洞（反套路） |
-| 爽感释放 | 打脸、逆袭 | 低 | 🔥🔥 | 世情打脸 / 复仇打脸 / 总裁豪门 / 宅斗宫斗（古代上位） |
-| 治愈温暖 | 成长、亲情、友情 | 中 | 🔥🔥 | 甜宠 / 双男主（救赎线） |
-| 细思极恐 | 悬疑、心理 | 高 | 🔥 | 悬疑 / 民俗怪谈 |
-| 共鸣感动 | 现实、职场、婚姻 | 中 | 🔥🔥🔥 | 世情打脸（共鸣模式） / 追妻火葬场（小三文学） |
+| 情绪类型 | 适合场景 | 难度 | 常配题材包 |
+|----------|----------|------|------------|
+| 意难平 | 虐恋、遗憾、错过 | 中 | 追妻火葬场 / 甜宠（先虐后甜） |
+| 反转震撼 | 悬疑、身份错位 | 高 | 悬疑 / 沙雕脑洞（反套路） |
+| 爽感释放 | 打脸、逆袭 | 低 | 世情打脸 / 复仇打脸 / 总裁豪门 / 宅斗宫斗（古代上位） |
+| 治愈温暖 | 成长、亲情、友情 | 中 | 甜宠 / 双男主（救赎线） |
+| 细思极恐 | 悬疑、心理 | 高 | 悬疑 / 民俗怪谈 |
+| 共鸣感动 | 现实、职场、婚姻 | 中 | 世情打脸（共鸣模式） / 追妻火葬场（小三文学） |
 
 ---
 
@@ -129,8 +131,3 @@ metadata: {"openclaw":{"source":"https://github.com/zenstory-ai/oh-story-claudec
 ## 参考资料
 
 阶段必读项按首屏「写前必读」执行；其他资料按 [参考索引](references/reference-index.md) 的加载条件选用。
-
-## 语言
-
-- 跟随用户的语言回复，用户用什么语言就用什么语言回复
-- 中文回复遵循《中文文案排版指北》

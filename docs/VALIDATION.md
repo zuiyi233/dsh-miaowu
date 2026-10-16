@@ -1,6 +1,56 @@
 # Validation
 
-Released: `@oh-story/dsh` 0.1.13 on DeepSeek Harness `0.2.0-rc.2`, with explicit `0.2.1-alpha.1` coverage. Local aggregate acceptance, credentialed browser demos and public-channel validation passed on 2026-10-03.
+Released: `@oh-story/dsh` 0.1.16 on DeepSeek Harness `0.2.0-rc.2`, with explicit `0.2.1-alpha.4` coverage. Local aggregate acceptance and paid-provider review passed on 2026-10-16.
+
+## 0.1.16 release evidence
+
+### Local evidence
+
+- Oh Story 0.8.6 (`86a8000cc890`), 13 Skills, 7 Roles and `agents_version` 35: all 365 bundled files pass parity. Author-memory resources belong to the long- and short-form writing Skills; the ignored local ZIP is excluded by the synchronizer and rejected by parity. Drama 0.9.0 (`dafe80ee390e`), NovelToGame 0.5.0 (`bf0ffbc0cedf`) and video-recap 0.6.2 (`5785c33d8b51`) retain their reviewed pins.
+- The first local aggregate command encountered unrelated old checkouts under `.claude/worktrees/` during ESLint. Verification uses a clean export of committed source; no local checkout or lint exclusion was changed to hide a source failure.
+- The first alpha.4 browser run exposed the obsolete global-single-blank-session assumption. The test now binds the welcome guide to its selected Session ID and checks that Session's blank state and canonical default-workspace path.
+
+- A later alpha.4 run reached streaming Todo geometry but encountered an invisible auxiliary tail node. The smoke now measures the last visible semantic row in its own flow and checks its full viewport/Composer bounds and padding in one snapshot; product CSS and visibility thresholds are unchanged.
+
+- On 2026-10-16, the clean-source `pnpm verify:release` completed successfully: lint, typecheck, four parity checks, the DSH boundary, 16 release tests, 3 upstream-update tests, 179 unit/contract tests across 23 files and the build. Packaged Chrome on both DSH `0.2.1-alpha.4` and `0.2.0-rc.2` returned `"ok": true`, with Role streaming, mixed composition, ADV save/restore, compact 500 px layouts and 20-writer atomic CAS enabled. Main and tag workflows repeat the full suite on the final submitted source.
+
+### Paid provider
+
+- On 2026-10-16, `pnpm test:dsh:real` against the packed runtime from `44b9b7e` passed on DSH `0.2.1-alpha.4`, using `deepseek-official/deepseek-flash`. Both `story-review` and `short-drama-review` resolved to the installed plugin. The Session logs contain 3 Role calls; the two required Roles (`story-explorer` and `consistency-checker`) each returned a correlated, non-error, non-empty tool result. Story and drama produced 109 and 68 durable events respectively; the project digest remained unchanged.
+- This is paid review/Role compatibility evidence. The README browser GIFs remain the 0.1.13 recordings, and no new paid media production is claimed. The temporary credential stayed outside the repository, was not exposed in DSH logs, and its local file was removed after the run.
+
+### Release gates
+
+- **Local aggregate acceptance — PASSED 2026-10-16:** full `pnpm verify:release`, with successful packaged Chrome on alpha.4 and rc.2.
+- **Paid provider — PASSED 2026-10-16:** native Story/Drama review and both required Role results on alpha.4; the separately recorded browser integration uses the fixture provider.
+
+## 0.1.15 release evidence
+
+### Local evidence
+
+- Oh Story 0.8.5 (`2cf7be61b139`): synchronized from a clean detached worktree of the `v0.8.5` tag, so a locally excluded `skills/story-long-analyze.zip` in the neighbouring checkout is not bundled; parity passes against that worktree (365 files, 13 Skills, 7 Roles, `agents_version` 34). The upstream author-memory transaction suite and all 42 writer-pipeline tests pass on the tag.
+- Issue #61 reproduction against the bundled scripts in the DSH single-book layout (workspace is the book root): 20 active global `prose_style` habits of about 40 characters each. The 0.8.4 `query` returns 8 items and omits 12; the 0.8.5 `query` returns 16 items with `lines`, omits 4 and reports each omission in `omitted_summaries`. `build_writer_prompt.find_workspace` recognises both the single-book layout and a book under `长篇/`.
+- On 2026-10-10, `pnpm verify:release` completed against the release source: lint, typecheck, all four parity checks (Oh Story 0.8.5, Drama 0.8.1, NovelToGame 0.5.0, video-recap 0.6.2), the DSH boundary, 16 release checks, 3 upstream-update checks, 173 unit/contract tests across 23 files and the build; packaged Chrome result JSON reported `"ok": true` on DSH `0.2.1-alpha.1` and `0.2.0-rc.2`.
+- No plugin source changed in this release; the diff under `packages/knowledge` is 35 bundled Oh Story files plus the manifest.
+
+### Release gates
+
+- **Local aggregate acceptance — PASSED 2026-10-10:** `pnpm verify:release` with both alpha and rc.2 result JSON reporting `"ok": true`.
+- **Credentialed browser demos and paid provider — NOT RERUN:** no `DEEPSEEK_API_KEY` run was made for 0.1.15; the fixture provider does not exercise a real writer receiving the larger author-memory block.
+
+## 0.1.14 release evidence
+
+### Local evidence
+
+- video-recap-skills 0.6.2 (`539168622918`): parity passes against a fresh `v0.6.2` checkout. The upstream groups touched by 0.6.2 pass unchanged: voiceover 161, script 128, orchestrator 464 with 9 skipped. Two orchestrator files need Python 3.10 and were not run on the Python 3.9 host.
+- On 2026-10-08, `pnpm verify:release` completed against the final release source: lint, typecheck, all four parity checks (Oh Story 0.8.4, Drama 0.8.1, NovelToGame 0.5.0, video-recap 0.6.2), the DSH boundary, 16 release checks, 3 upstream-update checks, 173 unit/contract tests across 23 files and the build; packaged Chrome result JSON reported `"ok": true` on DSH `0.2.1-alpha.1` and `0.2.0-rc.2`.
+- The packaged smoke now also drives the infinite canvas: background drag pans without changing node coordinates, the wheel changes zoom, and Fit frames every node after panning and zooming. A separate exploratory Chrome run against the packaged plugin checked 19 canvas behaviours, including cursor-anchored zoom, negative node coordinates, selection centring, keyboard follow, resize stability and the compact layout, and captured every Production tab in light and dark mode.
+- The `Upstream Updates` workflow ran on GitHub against `main` both as a dry run (reporting video-recap 0.6.2 before the sync merged) and as a real run after the sync (`No new upstream versions.`, no issue opened).
+
+### Release gates
+
+- **Local aggregate acceptance — PASSED 2026-10-08:** `pnpm verify:release` with both alpha and rc.2 result JSON reporting `"ok": true`.
+- **Credentialed browser demos and paid provider — NOT RERUN:** no `DEEPSEEK_API_KEY` run was made for 0.1.14; the README GIFs are unchanged from 0.1.13 and do not show the new canvas or status pills.
 
 ## 0.1.13 release evidence
 
@@ -104,7 +154,7 @@ The gate discovers all `*.test.ts` and `*.contract.test.ts` files. Coverage clai
 - 游戏 defaults to real-time Preview, keeps the playable iframe left of the wider official Chat, executes workspace-game input, preserves the same runtime across Preview/project-file switching, switches projects, reaches the Jin Ping Mei opening scene, and restores focus after fullscreen;
 - Game Studio exposes no QA tab, scorecard, badge or QA screenshot; the six-check artifact contract remains covered by parity, Host API assertions and packaged automation;
 - at 500×900 the game-specific `制作 / 对话` switch preserves both iframe state and Composer usability without horizontal clipping;
-- two isolated creator-first episodes, including production projection rebuilds, EP-local tasks, versions, selections, sequence and canvas coordinates when switching EP001 ↔ EP002;
+- two isolated creator-first episodes, including production projection rebuilds, EP-local tasks, versions, selections, sequence and canvas coordinates when switching EP001 ↔ EP002; background-drag panning that leaves node coordinates untouched, cursor-anchored wheel zoom and fit-to-nodes on the infinite canvas;
 - direct `oh_story_production` execution by the fixture Agent, durable semantic-focus replay and navigation isolation; cosmetic canvas coordinates remain creator-controlled Session state;
 - a searchable project media library and explicit EP001 → EP002 image-reference reuse without duplicating prompt editing inside production cards;
 - running + queued submissions read from the host `inbox` projection, exact Queue removal, current-Turn cancellation with the remaining Queue preserved but not auto-executed, and a late real MP4 that upgrades a completed batch from 0/22 to an explicit 1/22 partial result without a render loop;

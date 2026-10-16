@@ -36,9 +36,11 @@ export function listTarEntries(bytes: Uint8Array): string[] {
 }
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const dshVersion = process.env.DSH_TEST_VERSION ?? process.argv[2] ?? "0.2.1-alpha.1";
+const dshVersion = process.env.DSH_TEST_VERSION ?? process.argv[2] ?? "0.2.1-alpha.4";
 /** Exact WebSocket route carrying every Typert Remote stream. */
 const REMOTE_STREAM_MUX_PATH = "/api/remote.mux";
+/** ChatFlow may wrap rows in its slot; nested process rows do not belong to the main tail. */
+const CHAT_FLOW_ROW_SELECTOR = ":is([data-chat-flow-key], [data-chat-running]):not([data-step-process-content] *)";
 const demoFramesDirectory = process.env.OH_STORY_DEMO_FRAMES_DIR;
 const gameEvidenceDirectory = process.env.OH_STORY_GAME_E2E_DIR;
 const useRealDeepSeek = process.env.OH_STORY_DEMO_USE_REAL_DEEPSEEK === "1";
@@ -89,7 +91,7 @@ const longReplyContent = [
   longReplyTail
 ].join("\n");
 const roleReference = "story-setup/references/agent-references/writing-craft.md";
-const roleReferenceExcerpt = "贯穿道具系统";
+const roleReferenceExcerpt = "贯穿道具：随情节改变意义";
 const roleSmokePrompt = "ROLE_RUNTIME_SMOKE：必须调用 oh_story_role 的 narrative-writer，并返回子角色结果。";
 const roleChildPrompt = `ROLE_CHILD_SMOKE：必须先调用 oh_story_bundled_reference 读取 ${roleReference}，确认内容包含“${roleReferenceExcerpt}”，再回复指定验证文本。`;
 const roleChildReply = "ROLE_CHILD_RESULT：narrative-writer 子 Agent 已读取打包参考并完成。";
@@ -637,7 +639,7 @@ async function assertChatAnchorContract(
   await page.waitForFunction((layout) => (
     document.querySelector("[data-conversation-scroll]")?.getAttribute("data-oh-story-layout") === layout
   ), expectedLayout);
-  const anchor = page.locator("[data-chat-flow]:not([data-step-process-content]) > [data-chat-flow-key]:not([hidden])").last();
+  const anchor = chat.locator(`${CHAT_FLOW_ROW_SELECTOR}:visible`).last();
   let measurement: {
     readonly anchorBox: Awaited<ReturnType<Locator["boundingBox"]>>;
     readonly composerBox: Awaited<ReturnType<Locator["boundingBox"]>>;
@@ -942,15 +944,20 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
     // DSH 0.1.7 opens a fresh home straight into a blank Session in its default workspace, so the
     // guide belongs to that blank state: it returns with that Session and retires once it starts.
     if (!useRealDeepSeek) {
-      // DSH lists a blank Session only while it is selected; its workspace's New Session action
-      // reuses that blank Session.
+      // New Session may retain earlier blank Sessions. Bind the assertion to the
+      // guide's currently selected conversation and its default-workspace directory.
       await firstRunPage.getByRole("treeitem").filter({ hasText: /^(?:Default workspace|默认工作区)/u }).first().hover();
       await firstRunPage.getByRole("button", { name: /^(?:New session in Default workspace|在“默认工作区”中新建会话)$/u }).click();
       await welcome.waitFor({ state: "visible", timeout: 10_000 });
-      const firstRunSessions = await rpc<{ readonly items: readonly { readonly sessionId: string; readonly blank: boolean }[] }>(origin, "session/list", { _request: {} });
-      const blankSessions = firstRunSessions.items.filter((item) => item.blank);
-      if (blankSessions.length !== 1) throw new Error(`Expected the default workspace's one blank Session: ${JSON.stringify(firstRunSessions.items)}`);
-      await prepareSession(origin, blankSessions[0]!.sessionId, "你好", "通用 · 首次启动");
+      const selectedSessionId = await welcome.evaluate((guide) =>
+        guide.closest("[data-conversation-content]")?.getAttribute("data-conversation-session"));
+      const firstRunSessions = await rpc<{ readonly items: readonly { readonly sessionId: string; readonly blank: boolean; readonly cwd?: string }[] }>(origin, "session/list", { _request: {} });
+      const selectedSession = firstRunSessions.items.find((item) => item.sessionId === selectedSessionId);
+      const defaultWorkspacePath = await realpath(join(temporaryRoot, "documents", "deepseek-harness", "default-workspace"));
+      if (selectedSession?.blank !== true || selectedSession.cwd === undefined || await realpath(selectedSession.cwd) !== defaultWorkspacePath) {
+        throw new Error(`Expected the guide's selected blank Session in the default workspace: ${JSON.stringify({ selectedSessionId, selectedSession, defaultWorkspacePath })}`);
+      }
+      await prepareSession(origin, selectedSession.sessionId, "你好", "通用 · 首次启动");
       await welcome.waitFor({ state: "detached", timeout: 10_000 });
     }
     if (firstRunErrors.length > 0) throw new Error(`First-launch browser errors: ${JSON.stringify(firstRunErrors)}`);
@@ -2237,60 +2244,48 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         await todo.waitFor({ state: "visible", timeout: 30_000 });
         await todo.getByRole("button").click();
         await todo.locator("li").last().waitFor({ state: "attached", timeout: 20_000 });
-        const measureTodoLayout = () => page.evaluate(() => {
+        const measureTodoLayout = () => page.evaluate((rowSelector) => {
           const scroller = Array.from(document.querySelectorAll<HTMLElement>("[data-conversation-scroll]"))
             .find((element) => element.dataset.ohStoryWorkbench === "drama" && element.getBoundingClientRect().width > 0);
           const flow = scroller?.querySelector<HTMLElement>("[data-chat-flow]:not([data-step-process-content])");
           const seat = scroller === undefined
             ? undefined
             : Array.from(scroller.children).find((element): element is HTMLElement => element instanceof HTMLElement && element.hasAttribute("data-composer-seat"));
-          const tail = flow?.lastElementChild;
+          // DSH may retain hidden/folding rows or auxiliary nodes at the end.
+          // Measure the final rendered row in this flow, including its running status.
+          const tail = flow === null || flow === undefined ? undefined : Array.from(
+            flow.querySelectorAll<HTMLElement>(rowSelector)
+          ).filter((element) => element.closest("[data-chat-flow]") === flow
+            && element.getBoundingClientRect().width > 0 && element.getBoundingClientRect().height > 0).at(-1);
           if (!(tail instanceof HTMLElement) || seat === undefined || flow === null || flow === undefined || scroller === undefined) {
             return { ready: false, scroller: scroller !== undefined, flow: flow !== null && flow !== undefined, seat: seat !== undefined, tail: tail?.tagName };
           }
           const tailBox = tail.getBoundingClientRect();
           const seatBox = seat.getBoundingClientRect();
+          const scrollBox = scroller.getBoundingClientRect();
           const clearance = Number.parseFloat(getComputedStyle(flow).paddingBottom);
           return {
-            ready: clearance >= seatBox.height + 15 && tailBox.bottom <= seatBox.top + 1,
+            ready: clearance >= seatBox.height + 15
+              && tailBox.top >= scrollBox.top - 1 && tailBox.bottom <= seatBox.top + 1
+              && tailBox.bottom <= scrollBox.bottom + 1,
             clearance,
             seatHeight: Math.round(seatBox.height),
             seatTop: Math.round(seatBox.top),
+            tailTop: Math.round(tailBox.top),
             tailBottom: Math.round(tailBox.bottom),
+            viewportTop: Math.round(scrollBox.top),
+            viewportBottom: Math.round(scrollBox.bottom),
+            tailFlowKey: tail.getAttribute("data-chat-flow-key"),
             tail: `${tail.tagName}.${tail.className}`,
             fromBottom: Math.round(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight)
           };
-        });
+        }, CHAT_FLOW_ROW_SELECTOR);
         let todoLayout = await measureTodoLayout();
         for (const deadline = Date.now() + 10_000; !todoLayout.ready && Date.now() < deadline;) {
           await page.waitForTimeout(100);
           todoLayout = await measureTodoLayout();
         }
         if (!todoLayout.ready) throw new Error(`Streaming Todo left the Chat tail behind the Composer: ${JSON.stringify(todoLayout)}`);
-        const flow = page.locator('[data-slot="conversation.session"] [data-chat-flow]:not([data-step-process-content])');
-        const tail = flow.locator(":scope > *").last();
-        // The seat grows by the Todo panel one layout pass before the workbench
-        // republishes its height, so assert the settled frame, not the resize.
-        await page.waitForFunction(() => {
-          const body = document.querySelector('[data-slot="conversation.session"] [data-chat-flow]:not([data-step-process-content])');
-          const seat = document.querySelector("[data-composer-seat]");
-          const last = body?.lastElementChild;
-          if (body == null || seat == null || last == null) return false;
-          const seatTop = seat.getBoundingClientRect().top;
-          const lastBox = last.getBoundingClientRect();
-          return Number.parseFloat(getComputedStyle(body).paddingBottom) >= seat.getBoundingClientRect().height + 15
-            && lastBox.top + lastBox.height <= seatTop + 1;
-        }, undefined, { timeout: 15_000 });
-        const [tailBox, seatBox, scrollBox, clearance, tailFlowKey] = await Promise.all([
-          tail.boundingBox(), page.locator("[data-composer-seat]").boundingBox(), scroller.boundingBox(),
-          flow.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom)), tail.getAttribute("data-chat-flow-key")
-        ]);
-        // DSH 0.1.7 ends the flow with the running Turn's step-process group, which carries a flow
-        // key; the geometry, not the kind of the last row, is what must hold.
-        if (tailBox === null || seatBox === null || scrollBox === null
-          || tailBox.y < scrollBox.y - 1 || tailBox.y + tailBox.height > seatBox.y + 1 || clearance < seatBox.height + 15) {
-          throw new Error(`Streaming Todo obscured Chat: ${JSON.stringify({ tailBox, seatBox, scrollBox, clearance, tailFlowKey })}`);
-        }
       }
       await prepareDemoSurface(page);
       await selectFile(page, "剧集/EP001/剧本.md");
@@ -2402,6 +2397,40 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
       if (leftAfterKeyboardMove !== leftBeforeKeyboardMove + 10) {
         throw new Error("Production canvas did not expose keyboard-operable Session layout controls.");
       }
+      const canvasViewport = page.locator(".oh-story-canvas-viewport");
+      const canvasWorld = page.locator(".oh-story-canvas");
+      const canvasBox = await canvasViewport.boundingBox();
+      if (canvasBox === null) throw new Error("Production canvas viewport is not laid out.");
+      const canvasTransform = () => canvasWorld.evaluate((element) => (element as HTMLElement).style.transform);
+      const canvasCorner = await canvasViewport.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        for (let y = box.bottom - 24; y > box.top + 24; y -= 24) {
+          for (let x = box.right - 24; x > box.left + 24; x -= 24) {
+            if (document.elementFromPoint(x, y) === element) return { x, y };
+          }
+        }
+        throw new Error("Production canvas has no empty background to pan from.");
+      });
+      const transformBeforePan = await canvasTransform();
+      await page.mouse.move(canvasCorner.x, canvasCorner.y);
+      await page.mouse.down();
+      await page.mouse.move(canvasCorner.x - 240, canvasCorner.y - 160, { steps: 8 });
+      await page.mouse.up();
+      const transformAfterPan = await canvasTransform();
+      if (transformAfterPan === transformBeforePan || Number.parseFloat(await firstCanvasNode.evaluate((element) => getComputedStyle(element).left)) !== leftAfterKeyboardMove) {
+        throw new Error(`Dragging the canvas background did not pan the view independently of node layout: ${transformBeforePan} -> ${transformAfterPan}`);
+      }
+      const zoomLabel = page.locator(".oh-story-canvas-controls span");
+      const zoomBeforeWheel = await zoomLabel.textContent();
+      await page.mouse.move(canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2);
+      await page.mouse.wheel(0, -240);
+      await page.waitForFunction((before) => document.querySelector(".oh-story-canvas-controls span")?.textContent !== before, zoomBeforeWheel, { timeout: 5_000 });
+      await page.getByRole("button", { name: "适应", exact: true }).click();
+      const framedNodes = await page.locator(".oh-story-canvas article").evaluateAll((elements, box) => elements.every((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.left >= box.x - 1 && rect.right <= box.x + box.width + 1;
+      }), canvasBox);
+      if (!framedNodes) throw new Error("Canvas fit did not frame every node after panning and zooming.");
       await productionTabs.getByRole("tab", { name: "镜头", exact: true }).click();
       await page.locator(".oh-story-shot-card").first().getByRole("button", { name: "IMG-ZHOUBOSEN-SHEET", exact: true }).click();
       await page.getByRole("textbox", { name: "剧集/EP001/图片提示词.md" }).waitFor({ state: "visible", timeout: 10_000 });

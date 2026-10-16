@@ -1,10 +1,6 @@
 ---
 name: video-recap
-description: >
- 从输入视频生成中文解说成片或原声剧情短片。用户提供 .mp4 / .mov / .mkv / .webm，并要求剪辑、添加旁白、
- 配音、总结、短剧/电视剧/电影/纪录片/科普解说时使用。负责编排 video-* 技能链：视频理解 →
- Agent 制定故事与视听方案 → 剪辑 → 配音 → 合成。触发词：视频解说、视频旁白、生成解说、
- 视频 recap、video recap、voiceover、narration、auto-dub、recap。
+description: 从输入视频生成中文解说成片或原声剧情短片。用户提供 .mp4 / .mov / .mkv / .webm，并要求剪辑、添加旁白、 配音、总结、短剧/电视剧/电影/纪录片/科普解说时使用。负责编排 video-* 技能链：视频理解 → Agent 制定故事与视听方案 → 剪辑 → 配音 → 合成。触发词：视频解说、视频旁白、生成解说、 视频 recap、video recap、voiceover、narration、auto-dub、recap。
 ---
 
 ## 1. 定位与流程
@@ -60,7 +56,7 @@ video-assemble 严格验证，recap 只核对子技能绑定记录引用的是�
 
 ## 2. 创作职责
 
-这不是单纯的 JSON / 渲染流水线。Agent 是本次内容的创作负责人。先判断本轮的**创作控制模式**（CREATE / DIRECTED / REVISION，与 `--edit-mode` 无关），再在进入昂贵的下游处理前完成五次判断：
+Agent 负责本次创作。先判断本轮的**创作控制模式**（CREATE / DIRECTED / REVISION，与 `--edit-mode` 分别选择），再在配音和渲染前完成五次判断：
 
 1. **导演判断**：观众承诺、POV、戏剧问题、情绪终点与揭示节奏。
 2. **故事编辑**：beat 定义为“发生了什么变化”，不是场景摘要。
@@ -93,7 +89,7 @@ TTS 供应商由 `--tts-provider mimo-tts|fish-audio|index-tts`（或 `TTS_PROVI
 
 可覆盖配置见 `references/config-playbook.md`，`final_qc.json` 的字段见 `references/data-schema.md`。
 
-下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。脚本启动后会自行定位兄弟技能和资源。
+下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。编排脚本从同一技能根目录定位所需阶段；安装时需让五个阶段技能与本技能位于同一层。
 
 ## 4. 标准解说流程（audio-mode narration）
 
@@ -161,13 +157,13 @@ python3 scripts/recap.py <video> --work-dir <work_dir>  # 可追加 --edit-mode 
 
 ### 4.5 字幕与克隆旁白
 
-若要把旁白字幕固定在原片字幕区域，先在仓库根目录运行：
+若要把旁白字幕固定在原片字幕区域，先测量位置。完整源码安装可在仓库根目录运行以下工具；单独安装技能时，由 Agent 查看视频帧测出同一显示画布上的上下边界：
 
 ```bash
 python3 tools/measure_subtitle.py <video>
 ```
 
-再传入测得的 `--subtitle-y-top/--subtitle-y-bot`。坐标基于 ffmpeg 自动旋转后的显示画布，区间为半开 `[top, bot)`，并要求底对齐 ASS 样式；显式设置后，该区域默认使用 60% 透明度的旁白窗口遮罩。
+再传入测得的 `--subtitle-y-top/--subtitle-y-bot`。坐标基于 ffmpeg 自动旋转后的显示画布，区间为半开 `[top, bot)`，并要求底对齐 ASS 样式；显式设置后，该区域默认使用不透明的旁白窗口遮罩；可用 `SUBTITLE_MASK_OPACITY` 调整。
 
 解说模式如需克隆参考声音，使用 `--voice-ref <audio>`；它与 dub 模式不同。
 
@@ -190,7 +186,7 @@ full/cut 交付如需让确定性的最终检查影响命令退出状态，显�
 该参数不支持 `--edit-mode dub`；dub 未传该参数时的准备和渲染行为不变。
 
 交付时读 `final_qc.json` 的 `metadata.warnings`，有内容就原样告诉用户，不能只报“完成”。`subtitle_burn_degraded`
-表示 ffmpeg 缺 libass、默认烧录被降级：成片里没有字幕，字幕在成片旁的同名 `.srt`。用户要烧录字幕，就请他装带 libass 的
+表示 ffmpeg 缺 libass、默认烧录被降级：新字幕保存在成片旁的同名 `.srt`，原片已有硬字幕仍保留。用户要烧录字幕，就请他装带 libass 的
 ffmpeg 后重跑；显式传 `--burn-subtitles` 时缺 libass 会在开跑前报错。旁白里写了 `visual_overlays` 而 ffmpeg 缺
 drawtext 时，流程在配音前停下，按报错删掉叠加或换 ffmpeg 后续跑。
 
@@ -210,10 +206,12 @@ python3 scripts/recap.py adopted.mp4 --work-dir packaging_work --audio-mode adop
 
 ## 5. 英译中原声复刻模式
 
-`--edit-mode dub` 把英文视频翻译为中文，并用原说话者的克隆音色替换人声；它不是在压低原声上叠加解说。
+`--edit-mode dub` 是实验功能：把英文视频翻译为中文，并用原说话者的克隆音色替换人声；它不是在压低原声上叠加解说。只在用户明确要求英译中配音时使用。
+
+dub 会把源视频音轨分窗发给 MiMo ASR 转写，并把截取的约 10 秒原说话人声音作为参考，连同每句译文发给 MiMo voiceclone。因此必须带 `--confirm-voice-rights`：先向用户确认他有权使用这段视频与音频、且说话人同意被克隆声音，确认后才加这个参数；缺少时启动即报错，不抽音频、不发请求。该参数只用于 dub，其他模式传入会报错。
 
 ```bash
-python3 scripts/recap.py <video> --edit-mode dub --work-dir <work_dir>
+python3 scripts/recap.py <video> --edit-mode dub --confirm-voice-rights --work-dir <work_dir>
 ```
 
 准备阶段会转写英文、提取一段参考音频，并写出 `dub_brief.md` 与 `dub_transcript.json`。Agent 按 `dub_brief.md` 里的翻译要求（逐句忠实、时间窗、语速）写 `dub_script.json`：
@@ -254,4 +252,4 @@ python3 scripts/dashboard_server.py --root <目录> [--port 0] [--open]
 ## 8. 能力边界
 
 - 语义评审默认建议型、失败开放；只有调用方显式启用严格解说评审时，事实矛盾、残句或评审不可用才会在 TTS 前阻断。确定性校验阶段始终负责硬校验。
-- 宣发标题、花字或外部文案回填见 `video-script` 的 references/promotional-copy.md。
+- 宣发标题、花字或外部文案回填交给 `video-script`，由它读取自己的宣发参考。
