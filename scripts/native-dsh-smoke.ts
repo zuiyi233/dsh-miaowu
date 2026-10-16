@@ -866,15 +866,18 @@ async function main(): Promise<void> {
     const firstRunErrors: string[] = [];
     firstRunPage.on("pageerror", (error) => firstRunErrors.push(error.message));
     await firstRunPage.goto(dshTokenUrl, { waitUntil: "networkidle" });
-    // A fresh Host can stack notices (release notes, then the first-use guide), and the
-    // labels differ per build, so close every dialog instead of only the first one.
+    // Notices mount after the page loads and may stack (release notes, then the
+    // first-use guide), so wait for one before closing it and take the action button
+    // from the page rather than from the first dialog; a Host without a notice falls
+    // through after the timeout.
     for (let round = 0; round < 4; round += 1) {
       const dialog = firstRunPage.getByRole("dialog").first();
-      if (await dialog.count() === 0) break;
-      const button = dialog.getByRole("button", { name: /^(?:Continue|继续|知道了|确定|开始使用)$/u }).first();
+      const appeared = await dialog.waitFor({ state: "visible", timeout: round === 0 ? 15_000 : 2_000 }).then(() => true).catch(() => false);
+      if (!appeared) break;
+      const button = firstRunPage.getByRole("button", { name: /^(?:Continue|继续|知道了|确定|开始使用)$/u }).filter({ visible: true }).last();
       if (await button.count() > 0) await button.click({ timeout: 10_000 }).catch(() => undefined);
       else await firstRunPage.keyboard.press("Escape");
-      await firstRunPage.waitForTimeout(500);
+      await firstRunPage.waitForTimeout(600);
     }
     await firstRunPage.getByRole("dialog").waitFor({ state: "detached", timeout: 10_000 });
     // A fresh Host shows one of two guides: DSH 0.2.1+ opens a default blank Session
