@@ -78,7 +78,7 @@ jobs:
         run: |
           version="$(node -p "require('./packages/dsh-plugin/package.json').version")"
           node scripts/release.mjs manifest \
-            --tarball "release/dsh-miaowu-$version.tgz" \
+            --tarball "release/dsh-miaowu-dsh-$version.tgz" \
             --sha "$GITHUB_SHA" \
             --version "$version" \
             --run-id "$GITHUB_RUN_ID" \
