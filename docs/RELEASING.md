@@ -154,5 +154,5 @@ describe the alpha line as supported before its Chrome run passes.
 The GitHub Release tarball remains a registry-independent installation path:
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.0-rc.2 dsh plugin --profile web add "https://github.com/zuiyi233/dsh-miaowu/releases/download/v$VERSION/dsh-miaowu-$VERSION.tgz"
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.0-rc.2 dsh plugin --profile web add "https://github.com/zuiyi233/dsh-miaowu/releases/download/v$VERSION/dsh-miaowu-dsh-$VERSION.tgz"
 ```
