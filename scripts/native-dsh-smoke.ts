@@ -952,7 +952,7 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
       throw new Error(`First-launch navigation failed: ${String(error)}\nBrowser errors: ${JSON.stringify(firstRunErrors)}\n${await firstRunPage.locator("body").ariaSnapshot()}`, { cause: error });
     }
     await firstRunPage.getByRole("tablist", { name: "创作工作台" }).waitFor({ state: "visible", timeout: 20_000 });
-    await welcome.waitFor({ state: "detached", timeout: 10_000 });
+    await firstRunPage.locator(FIRST_RUN_GUIDE_SELECTOR).waitFor({ state: "detached", timeout: 10_000 });
     // DSH 0.1.7 opens a fresh home straight into a blank Session in its default workspace, so the
     // guide belongs to that blank state: it returns with that Session and retires once it starts.
     if (!useRealDeepSeek) {
@@ -960,8 +960,8 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
       // guide's currently selected conversation and its default-workspace directory.
       await firstRunPage.getByRole("treeitem").filter({ hasText: /^(?:Default workspace|默认工作区)/u }).first().hover();
       await firstRunPage.getByRole("button", { name: /^(?:New session in Default workspace|在“默认工作区”中新建会话)$/u }).click();
-      await welcome.waitFor({ state: "visible", timeout: 10_000 });
-      const selectedSessionId = await welcome.evaluate((guide) =>
+      await firstRunGuide.waitFor({ state: "visible", timeout: 10_000 });
+      const selectedSessionId = await firstRunGuide.evaluate((guide) =>
         guide.closest("[data-conversation-content]")?.getAttribute("data-conversation-session"));
       const firstRunSessions = await rpc<{ readonly items: readonly { readonly sessionId: string; readonly blank: boolean; readonly cwd?: string }[] }>(origin, "session/list", { _request: {} });
       const selectedSession = firstRunSessions.items.find((item) => item.sessionId === selectedSessionId);
@@ -970,7 +970,12 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
         throw new Error(`Expected the guide's selected blank Session in the default workspace: ${JSON.stringify({ selectedSessionId, selectedSession, defaultWorkspacePath })}`);
       }
       await prepareSession(origin, selectedSession.sessionId, "你好", "通用 · 首次启动");
-      await welcome.waitFor({ state: "detached", timeout: 10_000 });
+      // The onboarding tracks the creative project, not the blank Session: a plain
+      // message in an empty workspace keeps the launcher (upstream's welcome retired here).
+      await firstRunPage.waitForTimeout(1_000);
+      if (!(await firstRunGuide.isVisible())) {
+        throw new Error("Onboarding retired while the default workspace still had no creative project.");
+      }
     }
     if (firstRunErrors.length > 0) throw new Error(`First-launch browser errors: ${JSON.stringify(firstRunErrors)}`);
     await firstRunBrowser.close();
