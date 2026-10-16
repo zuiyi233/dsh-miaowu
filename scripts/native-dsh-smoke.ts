@@ -866,9 +866,16 @@ async function main(): Promise<void> {
     const firstRunErrors: string[] = [];
     firstRunPage.on("pageerror", (error) => firstRunErrors.push(error.message));
     await firstRunPage.goto(dshTokenUrl, { waitUntil: "networkidle" });
-    // The fresh Host always shows this notice, but its settings arrive after
-    // the page loads. Wait for it instead of skipping a not-yet-mounted dialog.
-    await firstRunPage.getByRole("button", { name: /^(?:Continue|继续)$/u }).click({ timeout: 20_000 });
+    // A fresh Host can stack notices (release notes, then the first-use guide), and the
+    // labels differ per build, so close every dialog instead of only the first one.
+    for (let round = 0; round < 4; round += 1) {
+      const dialog = firstRunPage.getByRole("dialog").first();
+      if (await dialog.count() === 0) break;
+      const button = dialog.getByRole("button", { name: /^(?:Continue|继续|知道了|确定|开始使用)$/u }).first();
+      if (await button.count() > 0) await button.click({ timeout: 10_000 }).catch(() => undefined);
+      else await firstRunPage.keyboard.press("Escape");
+      await firstRunPage.waitForTimeout(500);
+    }
     await firstRunPage.getByRole("dialog").waitFor({ state: "detached", timeout: 10_000 });
     // A fresh Host shows one of two guides: DSH 0.2.1+ opens a default blank Session
     // right away, so the creative-project onboarding takes the place of the no-Session
@@ -1059,11 +1066,11 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
       const comfyuiCalls = comfyuiEvents.filter((event) => event.type === "tool/call")
         .map((event) => event.data as { readonly callId?: string; readonly name?: string; readonly arguments?: unknown })
         .filter((call) => call.name === "oh_story_comfyui");
+      // tool/result carries the settled call head on data.message — the same shape the
+      // role contract reads. There is no content array, so match the callId directly.
       const comfyuiResult = comfyuiEvents.filter((event) => event.type === "tool/result")
-        .flatMap((event) => (event.data as {
-          readonly message?: { readonly content?: readonly { readonly toolCallId?: string; readonly isError?: boolean }[] };
-        }).message?.content ?? [])
-        .find((result) => result.toolCallId === comfyuiCalls[0]?.callId);
+        .map((event) => (event.data as { readonly message?: { readonly toolCallId?: string; readonly isError?: boolean } }).message)
+        .find((message) => message?.toolCallId !== undefined && message.toolCallId === comfyuiCalls[0]?.callId);
       let comfyuiArguments: unknown;
       try {
         const value = comfyuiCalls[0]?.arguments;
