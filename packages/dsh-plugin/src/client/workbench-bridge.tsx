@@ -145,7 +145,7 @@ function SessionWorkbenchBridge({ sessionId, useSession, useProjection, useChat,
     // .oh-story-split-surface 卸载、:has() 失配,宿主瞬间弹回官方全宽。
     let missed = 0;
     const locate = (): void => {
-      const anchor = document.querySelector<HTMLElement>("[data-conversation-scroll] > [data-slot='conversation.session']");
+      const anchor = document.querySelector<HTMLElement>(`[data-conversation-content][data-conversation-session="${CSS.escape(sessionId)}"]:not([data-sidebar-chat] *) > [data-conversation-scroll] > [data-slot='conversation.session']`);
       if (anchor !== null) {
         missed = 0;
         setTarget((current) => current === anchor ? current : anchor);
