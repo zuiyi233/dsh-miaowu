@@ -33,7 +33,7 @@ function WorkbenchWelcome() {
     const document = marker.current?.ownerDocument;
     if (document === undefined) return;
     const locate = (): void => {
-      const anchor = document.querySelector<HTMLElement>("[data-conversation-scroll]");
+      const anchor = document.querySelector<HTMLElement>("[data-conversation-content]:not([data-sidebar-chat] *) > [data-conversation-scroll]");
       setTarget((current) => current === anchor ? current : anchor ?? undefined);
     };
     locate();
