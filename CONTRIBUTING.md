@@ -57,7 +57,7 @@ pnpm assets:check
 - `CI / Portability`：macOS 与 Windows 执行类型、资产、单测与构建，锁定跨平台路径行为。
 - `CI / Packaged DSH Web integration`：构建 tarball、安装到官方 DSH Web，并用 Chrome 验证能力目录、工作区安全与三栏 UI。
 - `Real Provider`：手动兼容性观察；凭据预检与真实测试是独立 Job。配置 `DEEPSEEK_API_KEY` 时真实测试显示 executed，未配置时真实测试 Job 显示 skipped，汇总区分 `EXECUTED_AND_PASSED`、`EXECUTED_AND_FAILED`、`SKIPPED_NO_CREDENTIAL`、`PREFLIGHT_FAILED` 与 `PROVIDER_JOB_NOT_COMPLETED`。只有 `EXECUTED_AND_PASSED` 会让工作流成功；其余状态都不会产生绿色兼容性结论。
-- `Release`：手动触发只在 `main` 上做不发布的演练；稳定的 `vX.Y.Z` Tag 还必须指向已合入 `main`、且同一提交最新一次完整 CI 成功，才会把一次构建的同一份 `.tgz` 以追加方式发布到 GitHub Release 与 npm。重跑不会覆盖不同字节。
+- `Release`：工作流监听 `miaowu-v*` Tag；手动触发只在 `main` 上做不发布的演练；稳定的 `miaowu-vX.Y.Z` Tag 还必须指向已合入 `main`、且同一提交最新一次完整 CI 成功，才会把一次构建的同一份 `.tgz` 以追加方式发布到 GitHub Release 与 npm（npm 尚未发布，现在只有 GitHub Release 通道）。重跑不会覆盖不同字节。
 
 ## 发布检查
 
@@ -66,6 +66,6 @@ pnpm assets:check
 3. 需要观察官方 provider 兼容性时，运行 `pnpm test:dsh:real`，并确认结果是 executed and passed、项目摘要未改变、凭据未出现在日志中；缺少凭据导致的 skipped 不能记作 passed，也不替代第 2 步的确定性 correctness gate。
 4. 需要更新 README 演示图时，再运行 `DEEPSEEK_API_KEY=... pnpm demo`，通过真实 DeepSeek 会话重新生成并检查四张图（需要 `ffmpeg`）。`OH_STORY_DEMO_MOCK=1` 可用固定 fixture 出图，但不能记作真实 provider 证据。
 5. 运行 `pnpm pack:release` 并检查 tarball。
-6. 按 [`docs/RELEASING.md`](docs/RELEASING.md) 创建与包版本一致的 Tag，由工作流执行正式发布。
+6. 按 [`docs/RELEASING.md`](docs/RELEASING.md) 创建与包版本一致的 `miaowu-v<version>` 注释 Tag（不要复用上游 `v*` Tag），由工作流执行发布；npm 目前未发布，安装仍走源码构建或 `v0.1.16` 预构建包。
 
 架构约束见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，验证覆盖见 [`docs/VALIDATION.md`](docs/VALIDATION.md)。

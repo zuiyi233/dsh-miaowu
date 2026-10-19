@@ -22,6 +22,12 @@
 `origin = https://github.com/zuiyi233/dsh-miaowu.git` 为准，上游只作历史来源。
 插件注册名 `dsh-miaowu`，npm 包 `@dsh-miaowu/dsh`。`oh-story` 前缀的路由/工具/目录是**保留的功能引用**，不要误当品牌名改掉。
 
+### 发布与 tag
+
+- 版本号看 `packages/dsh-plugin/package.json`（根 `package.json` 要一致），当前源码 0.1.18。npm 包 `@dsh-miaowu/dsh` **尚未发布**（registry 返回 404），GitHub Release 目前只有 `v0.1.16` 预构建包，0.1.17 / 0.1.18 只能源码构建。
+- fork 的发布 Tag 一律 `miaowu-vX.Y.Z`，**不要复用上游 `v*` Tag**。`scripts/release.mjs` 只接受这个前缀，并会拒绝缺少 fork 入口（`packages/dsh-plugin/src/services/index.ts` 与 `createDshMiaowuSkillProvider`）或不在 `main` 祖先链上的源提交。
+- 打 Tag 前先跑 `node scripts/release.mjs check --tag miaowu-vX.Y.Z`（同时核对根/包版本一致、`CHANGELOG.md` 有该版本的带日期标题），再按 `docs/RELEASING.md` 执行；未经用户明确授权不要 push Tag 或发布。
+
 ## 2. 插件边界（红线）
 
 - DSH 拥有模型、provider、preset、权限、roots、runs、sessions。**本插件只做领域贡献**：skills、roles、tools（`oh_story_*` 具名注册）、hooks（`tools/pre-execute`、`tools/post-execute` 写法守卫）、`/oh-story/*` 工作台路由、客户端 workbench。
@@ -30,9 +36,9 @@
 
 ## 3. 已知宿主坑（不要重复踩）
 
-0. **空名工具 bug 已在宿主侧打补丁（2026-09-05，用户真实测试确认有效）**：病根是 `dsh-llm-deepseek` 流式解析对 `block.name`/`block.callId` 覆盖赋值（手册 `docs/faq.md` 的 `unknown tool ""` 条，根因讨论 #725）。补丁文件：`C:/Users/Administrator/AppData/Roaming/npm/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js:1288-1289`，改覆盖为“非空字符串才累加”，备份同目录 `index.js.bak-emptyname-fix`。注意三点：① 改的是本机全局 npm 宿主文件，不在仓库内，`git status` 看不到；② `npm i -g @deepseek-ai/dsh` 升级会覆盖补丁，升级后先看官方修没修 #725，没修则重打；③ 纯 JS 改动，重启 DSH App 即生效，不用重建。
+0. **空名工具 bug（`unknown tool ""`）——当前状态：未确认修复，先复现再动手**：病根是 `dsh-llm-deepseek` 流式解析对 `block.name`/`block.callId` 覆盖赋值（手册 `docs/faq.md` 的 `unknown tool ""` 条，根因讨论 #725）。本机全局宿主在 2026-10-20 已是 `0.2.1-alpha.5`（仓库默认宿主是 `0.2.1-rc.2`）；2026-09-05 打的那个补丁和同目录备份 `index.js.bak-emptyname-fix` 都已随升级消失。**不要假设它已修好**：先在当前宿主上按手册复现确认，再决定是否重打补丁；补丁改的是 `C:/Users/Administrator/AppData/Roaming/npm/node_modules/@deepseek-ai/dsh/` 下的全局 npm 文件，不在仓库内（`git status` 看不到），`npm i -g @deepseek-ai/dsh` 升级会再次覆盖，重打前必须备份。
 
-1. **空名工具 bug（alpha.4 / rc.1 均复现）**：宿主内置 `read`/`write` 发给模型时函数名丢空 → `Error: unknown tool ""` → 400。已做三级隔离（完整 profile / 摘本插件 / 双插件全摘只剩官方底座）**均复现**，与本插件无关。手册 `docs/faq.md` 有同族根因（rc.6 SSE 流式覆盖赋值，`translate.ts` 累加 + 严格类型校验），修宿主源码前先对一下手册方案。
+1. **空名工具 bug 的历史证据（2026-09 隔离结论）**：宿主内置 `read`/`write` 发给模型时函数名丢空 → `Error: unknown tool ""` → 400。当时做了三级隔离（完整 profile / 摘本插件 / 双插件全摘只剩官方底座）均复现，结论是与本插件无关；当时在 `0.2.1-alpha.4` 与 `0.2.1-rc.1` 复现，该结论不覆盖现在的全局 `0.2.1-alpha.5`，重新验证前不要当成现行结论引用。手册 `docs/faq.md` 有同族根因（SSE 流式覆盖赋值，`translate.ts` 累加 + 严格类型校验），修宿主源码前先对一下手册方案。
 2. **畸形 tool 消息污染会话**：空名失败回合的 `tool/result`（`callId: ""`）会被持久化，重载时网关校验 `message must have tool source` 失败 → “历史加载失败”。纯文本会话不受影响。用户真实会话若报此错，先摘畸形消息再谈修复。
 3. **`workspace.json` 是双表结构**：`tables.workspaces` 明细 + `global.workspaceIds` 顺序表。删工作区必须两处一起删，否则 `dsh web` 启动报 `registry order references missing workspace` 直接起不来。改前必备份。
 4. **真实 profile 是生产环境**：`~/.dsh/profiles/web` + 全局 rc.1 CLI。对真实 profile 跑探针/冒烟必污染 `~/.dsh/sessions` 与 `workspace.json`，跑完必须清理（删探针会话目录 + 移除索引条目 + 清 `%TEMP%` 残留），或一开始就用隔离 `DSH_HOME` 跑。

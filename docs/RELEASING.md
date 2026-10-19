@@ -1,7 +1,9 @@
 # Release process
 
-`@dsh-miaowu/dsh` is distributed as the same prebuilt tarball through npm and
-GitHub Releases. A release is created only from a `v<package-version>` tag.
+`@dsh-miaowu/dsh` is built as one prebuilt tarball. The GitHub Release carries that
+tarball and its checksum; the npm channel is not published yet. A release is created only
+from an annotated `miaowu-v` tag whose version matches the package, on a fork `main`
+commit.
 
 ## Upstream update issues
 
@@ -12,12 +14,41 @@ dist-tag on a version the plugin does not declare). Each issue carries the sync
 checklist. Close an issue to decline that version; it will not be reopened.
 Run `pnpm upstream:updates` for a local dry run.
 
+## Fork status (2026-10-20)
+
+The release pipeline now matches this fork's identity:
+
+- `scripts/release-identity.mjs` derives the repository, package name and tarball prefix
+  from `packages/dsh-plugin/package.json`; `scripts/release.mjs` uses that identity for
+  every string, install path and User-Agent it emits, and neither script contains an
+  upstream `oh-story-dsh` identity.
+- Stable tags are parsed as `miaowu-vX.Y.Z`. `.github/workflows/release.yml` triggers on
+  `miaowu-v*`, and its guards reject any other tag ref.
+- The source preflight rejects a tag or commit that lacks
+  `packages/dsh-plugin/src/services/index.ts` and `createDshMiaowuSkillProvider`, or that
+  is not descended from `main` (`origin/main` in a tag checkout). Upstream release
+  commits and upstream `v*` tags fail before any build starts.
+- The upstream-only `recover-v0.1.13.yml` workflow has been removed.
+- npm is unpublished: `@dsh-miaowu/dsh` returns 404 from the registry. Only the GitHub
+  Release channel exists, and its only release is `v0.1.16`; versions 0.1.17 and 0.1.18 are
+  source-only.
+
+The fork's Release workflow is currently disabled in GitHub Actions, so a `miaowu-v*` tag
+push starts no run until it is enabled. Enable it from the Actions tab, or list the fork's
+workflows with `gh workflow list` and enable the Release entry by its own ID. Do not copy a
+workflow ID from another repository or from older instructions.
+
 ## One-time npm setup
 
 The npm account used for the first publication must be allowed to publish the
 public `@dsh-miaowu/dsh` package. Store a granular publish token as the repository
 secret `NPM_TOKEN`; never commit it or put it in an issue, workflow file, or
 release note.
+
+This setup is not complete: the package has never been published and Trusted Publishing is
+not configured. Until the package exists on npm, the workflow's `Publish npm package` and
+`Verify public channels` jobs cannot succeed; the GitHub Release job does not depend on
+them.
 
 After the first publication, configure npm Trusted Publishing for:
 
@@ -28,58 +59,53 @@ The workflow requests an OpenID Connect identity and publishes with provenance.
 Once Trusted Publishing is verified, the long-lived `NPM_TOKEN` secret can be
 removed.
 
-## Fork status (2026-10-17)
+## Release steps
 
-`scripts/release.mjs` and `.github/workflows/release.yml` are inherited from
-upstream and hard-code the upstream identity (`zenstory-ai/oh-story-dsh`,
-package `@oh-story/dsh`, tarball `oh-story-dsh-<version>.tgz`, User-Agent and
-release-name strings, and the `node_modules/@oh-story/dsh` install check). On
-this fork the tag pipeline therefore stops immediately with
-`release: repository must be zenstory-ai/oh-story-dsh`, and the npm jobs have no
-published package or Trusted Publishing entry yet.
+Before step 1, set the same version in the root and plugin `package.json` and add a dated
+`## [<version>] - YYYY-MM-DD` heading to `CHANGELOG.md`; `release.mjs check` rejects a
+mismatch or a missing heading.
 
-Until that adapter work lands, the tag-triggered workflow is disabled
-(`disabled_manually`) and releases are cut by hand:
+1. Run `pnpm verify:release` locally. It runs the complete deterministic gate and the
+   packaged Chrome smoke on the default DSH `0.2.1-rc.2` line and on the earlier
+   `0.2.0-rc.2` line. A host line is not announced from peer metadata or unit tests alone.
+2. Build and pack from a clean tree, then write the checksum file:
 
-1. verify locally: `pnpm verify`, plus the packaged DSH smoke on both Host lines
-   (`pnpm test:dsh` for the default line, `pnpm test:dsh:rc` for `0.2.0-rc.2`);
-2. build the tarball:
-   `pnpm --filter @dsh-miaowu/dsh build && pnpm --filter @dsh-miaowu/dsh pack --pack-destination release`;
-3. write `release/SHA256SUMS` with
-   `sha256sum dsh-miaowu-dsh-<version>.tgz > SHA256SUMS`;
-4. create the annotated tag and the GitHub Release, then upload the tarball and
-   `SHA256SUMS` as assets — README and docs install from
-   `https://github.com/zuiyi233/dsh-miaowu/releases/download/v<version>/dsh-miaowu-dsh-<version>.tgz`;
-5. re-download the asset and compare its SHA-256 with the local file before
-   announcing the release.
+   ```bash
+   pnpm --filter @dsh-miaowu/dsh build
+   pnpm --filter @dsh-miaowu/dsh pack --pack-destination release
+   cd release && sha256sum dsh-miaowu-dsh-<version>.tgz > SHA256SUMS
+   ```
 
-Re-enable the upstream pipeline once `release.mjs` is parameterised and npm
-credentials (or Trusted Publishing) exist:
+3. On a fork `main` commit, create an annotated `miaowu-v<version>` tag and validate it:
 
-```bash
-gh api -X PUT repos/zuiyi233/dsh-miaowu/actions/workflows/350173456/enable
-```
+   ```bash
+   git tag -a miaowu-v<version> -m "dsh-miaowu <version>"
+   node scripts/release.mjs check --tag miaowu-v<version>
+   ```
 
-## Cut a release
+   The check prints the derived version/tag and the source ref, and fails if the tag,
+   version, changelog or fork source do not match. Never reuse an upstream `v*` tag name.
+4. Publish. Once the Release workflow is enabled (see Fork status), pushing the tag starts
+   `.github/workflows/release.yml`, which re-verifies, builds, and uploads the tarball plus
+   checksums to the GitHub Release. If you create the Release by hand instead, upload the
+   exact local tarball and `SHA256SUMS`, then re-download the asset and compare its SHA-256
+   with the local file. Do not create the same release twice: GitHub assets are
+   append-only, and a byte-different asset fails the workflow.
+5. After the npm setup above, publish and verify `@dsh-miaowu/dsh@<version>`. Until npm is
+   live, README installs use a source build or the `v0.1.16` prebuilt asset.
 
-1. Update the root and package versions, installation examples, and
-   `CHANGELOG.md` for the intended release.
-2. Run `pnpm verify:release` locally. For 0.1.13 and later, retain fresh packaged
-   Chrome E2E evidence on both the default DSH `0.2.1-rc.2` line and the earlier
-   `0.2.0-rc.2` line; a host line must not be announced from peer metadata or
-   unit tests alone.
-3. Merge the release branch through a protected Pull Request after all four
-   required CI checks pass, then wait for the newest main-push CI run for that
-   exact merge commit to pass all four jobs.
-4. Create and push the matching `v<package-version>` tag at that verified commit.
+## What the tag workflow does
 
-The release workflow then:
+Once enabled, a `miaowu-v*` tag push makes `.github/workflows/release.yml`:
 
 1. repeats the complete verification suite;
 2. builds and inspects a clean installable tarball;
-3. checks that the tag and package version match;
-4. uploads the tarball and SHA-256 checksum to a GitHub Release;
-5. publishes the identical tarball to npm with provenance.
+3. checks that the tag and package version match, that the changelog has the dated
+   heading, and that the source passed the newest `main` CI attempt;
+4. uploads the tarball, the SHA-256 checksum file and the release manifest to a GitHub
+   Release;
+5. publishes the identical tarball to npm with provenance, once credentials or Trusted
+   Publishing exist.
 
 The deterministic public manifest records the source commit, tool versions,
 tarball size, SHA-256, and npm-compatible SHA-512 integrity. Separate CI and
@@ -110,7 +136,9 @@ check-suite, source, status, conclusion, or GitHub Actions application change.
 After both publishers finish, the workflow anonymously downloads the GitHub
 tarball, waits a bounded time for npm registry propagation, compares
 `dist.integrity`, and installs the exact public npm version with lifecycle
-scripts disabled. A timeout or channel mismatch leaves the workflow red.
+scripts disabled. A timeout or channel mismatch leaves the workflow red. Until
+npm is configured, the `npm` and `verify-public` jobs cannot pass; the GitHub
+Release job still publishes.
 
 ## Dry-run and failure outcomes
 
@@ -120,7 +148,7 @@ GitHub and npm publisher jobs do not run. Pull requests never receive release
 write or OIDC permissions.
 
 Tag publication requires all of the following before dependency installation
-or package construction: a stable `vX.Y.Z` tag; matching root and plugin
+or package construction: a stable `miaowu-vX.Y.Z` tag; matching root and plugin
 versions; a dated changelog heading; the tag commit on `main`; and the newest
 GitHub Actions `CI` main-push run for that exact SHA, latest attempt, expected
 workflow path/application, and all four named jobs successful.
@@ -134,57 +162,40 @@ failure and needs investigation rather than a retry that mutates public bytes.
 
 ## Verify the public installation
 
-### One-time 0.1.13 npm recovery
+### Historical: upstream 0.1.13 npm recovery
 
-The original [0.1.13 tag run](https://github.com/zenstory-ai/oh-story-dsh/actions/runs/37139595180)
-passed verification and published GitHub assets, but npm interpreted its bare
-relative tarball path as a GitHub package shorthand. The generic publisher now
-passes an absolute local path, with a regression test. Do not move the tag,
-replace public assets, or rerun that old tag workflow: its source still has the
-relative-path bug.
+The upstream `oh-story-dsh` 0.1.13 npm recovery fixed a bare relative tarball path
+that npm read as a GitHub package shorthand. It was a one-time, upstream-bound
+workflow with upstream artifact IDs and commit hashes; this fork does not ship
+`recover-v0.1.13.yml`, and none of its IDs or digests apply to `zuiyi233/dsh-miaowu`.
+Do not resurrect that workflow here.
 
-`recover-v0.1.13.yml` is a narrowly bound manual recovery, not a new generic
-publishing entry point. Dispatch it on protected `main` only after that exact
-recovery commit passes all four main CI jobs. It reuses original artifact ID
-`11279574541` from run `37139595180`, attempt `1`, and independently recorded
-manifest/promotion/CI-proof digests. Before exposing npm credentials it proves
-both CI sources, re-resolves the original tag, and anonymously compares the
-tarball, manifest and checksums with the existing GitHub assets. It does not
-rebuild or write GitHub state. It invokes the original tag's publisher with an
-absolute directory, retains npm integrity idempotency, and finishes with
-anonymous public-channel and isolated-install verification.
+### After npm is published
 
-The recovery's npm provenance identifies the recovery workflow/main invocation,
-not the original tag-build invocation. The unchanged package source remains
-bound to `f207fa92863bd3626b8ee6bd7b5ad30762ef205c` by the original manifest,
-producer proofs and protected-main CI. The original artifact has a 14-day
-retention window; this recovery requires it to remain available. The normal
-`release.yml` manual dispatch remains a nonpublishing dry-run.
-
-[Recovery attempt 2](https://github.com/zenstory-ai/oh-story-dsh/actions/runs/37141721746/attempts/2)
-completed on 2026-10-03 with npm `skip-exact` and both public channels reporting
-`SUCCESS`, including isolated anonymous installation. Attempt 1 had already
-submitted the original package, but npm was still processing its public metadata.
-The original verifier accepted a 404 as a null result instead of waiting; that
-contract now has a regression fix on main. The old tag source is unchanged, so
-any repeat of this one-time workflow must first confirm the public exact-version
-metadata and manifest integrity rather than resubmit while processing.
-
-Do not announce a release until the registry reports the exact version:
+Do not announce an npm release until the registry reports the exact version:
 
 ```bash
-VERSION=0.1.18
+VERSION=<version>
 npm view "@dsh-miaowu/dsh@$VERSION" version dist.integrity
 npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add "@dsh-miaowu/dsh@$VERSION"
 ```
+
+Until publication, `npm view "@dsh-miaowu/dsh" version` returns 404; that is the expected
+unpublished state.
 
 The default public smoke pins DSH `0.2.1-rc.2`. After it passes,
 repeat the isolated install/start/browser smoke with
 `@deepseek-ai/dsh@0.2.0-rc.2`; never mix host versions within one profile or
 describe a host line as supported before its Chrome run passes.
 
-The GitHub Release tarball remains a registry-independent installation path:
+The GitHub Release tarball remains a registry-independent installation path. The
+last published asset is `v0.1.16`; future releases use the `miaowu-v` tag prefix:
 
 ```bash
+# existing prebuilt asset
+VERSION=0.1.16
 npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add "https://github.com/zuiyi233/dsh-miaowu/releases/download/v$VERSION/dsh-miaowu-dsh-$VERSION.tgz"
+
+# a future release, where <version> matches the miaowu-v tag
+# https://github.com/zuiyi233/dsh-miaowu/releases/download/miaowu-v<version>/dsh-miaowu-dsh-<version>.tgz
 ```
