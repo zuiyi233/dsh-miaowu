@@ -42,7 +42,7 @@
 | 游戏 | [NovelToGame 0.6.0](https://github.com/zenstory-ai/novel-to-game) · 7 Skills · 《金瓶梅》ADV 可玩示例（18+） | `/novel-to-game quick`、`/game-build`、`/game-qa` |
 | 视频 | [video-recap-skills 0.6.2](https://github.com/zenstory-ai/video-recap-skills/releases/tag/v0.6.2) · 7 Skills（3 个用户入口） | `/video-recap`、`/video-script`、`/video-reference` |
 
-> 当前版本 **0.1.18**（2026-10-19）。默认安装固定使用 DeepSeek Harness `0.2.1-rc.2`；仍支持更早的 `0.2.0-rc.2`。变更见 [CHANGELOG.md](CHANGELOG.md) 与 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases)；npm 渠道尚未发布（`@dsh-miaowu/dsh` 在 npm registry 返回 404），当前安装请用[安装](#安装)一节的 GitHub Release 预构建包。升级步骤见常见问题[「升级到新版本后要做什么」](#升级到新版本后要做什么)。
+> 当前源码版本 **0.1.18**（2026-10-19）：0.1.18 的预构建包与 npm 包都尚未发布，最近可用的预构建包是 **v0.1.16**，npm 未发布（`@dsh-miaowu/dsh` 在 registry 返回 404）。默认安装固定使用 DeepSeek Harness `0.2.1-rc.2`；仍支持更早的 `0.2.0-rc.2`。变更见 [CHANGELOG.md](CHANGELOG.md) 与 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases)；两条可用安装路径见[安装](#安装)。升级步骤见常见问题[「升级到新版本后要做什么」](#升级到新版本后要做什么)。
 
 ## 四个工作台
 
@@ -111,26 +111,45 @@
 
 ## 安装
 
-需要 Node.js 24+。安装命令会临时提供 pnpm，只装了 Node.js 的机器也能执行。`@dsh-miaowu/dsh` 尚未发布到 npm，当前通过本仓库 GitHub Release 的预构建包安装：
+需要 Node.js 24+。**源码版本是 0.1.18，但 0.1.18 的预构建包与 npm 包都还没发布**：本仓库 GitHub Release 目前只有 `v0.1.16`，npm registry 上 `@dsh-miaowu/dsh` 返回 404（2026-10-20 核对）。现在有两条可用路径。
+
+**推荐：从源码构建当前 0.1.18**（需要本机 pnpm，没有就先 `npm i -g pnpm`）
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.18/dsh-miaowu-dsh-0.1.18.tgz &&
+git clone https://github.com/zuiyi233/dsh-miaowu.git
+cd dsh-miaowu
+pnpm install --frozen-lockfile
+pnpm --filter @dsh-miaowu/dsh build
+pnpm --filter @dsh-miaowu/dsh pack --pack-destination release
+npx -y --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add ./release/dsh-miaowu-dsh-0.1.18.tgz
 npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 ```
 
-预构建包与校验和以 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) 页为准。
+`pack` 在 `release/` 下产出 `dsh-miaowu-dsh-0.1.18.tgz`（`prepack` 会自动再构建一次）。已经在源码 checkout 里时跳过前两行；`dsh plugin add` 若不接受相对路径，换成该文件的绝对路径。
+
+**快速试用：最近发布的预构建包 v0.1.16**（较旧，不含 0.1.17 / 0.1.18 的更新；这条命令会临时提供 pnpm，只装了 Node.js 的机器也能执行）
+
+```bash
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.16/dsh-miaowu-dsh-0.1.16.tgz &&
+npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
+```
+
+预构建包与校验和以 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) 页为准，该页当前的资产就是 v0.1.16。
 
 保持终端运行，浏览器默认自动打开；没有自动打开就复制终端打印的完整 `http://127.0.0.1:3080/?token=...` 链接访问，首次认证需要链接里的 token。关闭终端会停止服务。安装与启动请使用同一个 dsh 版本。本页默认命令固定使用 npm `latest` 的 DSH `0.2.1-rc.2`；本插件接受 `>=0.2.0-rc.2 <0.2.1-0` 与 `>=0.2.1-alpha.1 <0.2.2-0`。仍在用 `0.2.0-rc.2` 时，安装与启动两条命令都要换成 `@deepseek-ai/dsh@0.2.0-rc.2`；不要把两个宿主版本混用。DSH 会在安装与加载时检查版本，不匹配时给出明确提示（`dsh plugin allow-version` 可自担风险放行）。
 
 开始 AI 创作前，在 DSH 的「设置 → 模型」中添加 Provider 并填入 API Key，或在启动前设置环境变量 `DEEPSEEK_API_KEY`。只查看已有作品可在首次引导中选择「稍后配置 / Configure later」。
 
 <details>
-<summary>npm 安装（发布后可用）</summary>
+<summary>发布后可用：v0.1.18 预构建包与 npm 安装</summary>
 
-`@dsh-miaowu/dsh` 目前不在 npm 上（registry 返回 404），下面的命令要等发布后才能用；当前请使用上面的 GitHub Release 预构建包。发布后 npm 与预构建包安装等价：
+0.1.18 的 GitHub Release 资产与 npm 包都还没发布（2026-10-20 检查：资产 404，registry 404），下面的命令发布后才能用。实际标签与资产名以 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) 页为准；下一次发布的标签前缀是 `miaowu-v`，例如 v0.1.18 的资产路径会带 `miaowu-v0.1.18`。发布后这两条安装命令与源码构建安装等价：
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add @dsh-miaowu/dsh@0.1.18 &&
+# 发布后的 GitHub Release 预构建包
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/miaowu-v0.1.18/dsh-miaowu-dsh-0.1.18.tgz
+# 发布后的 npm 包
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add @dsh-miaowu/dsh@0.1.18
 npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 ```
 
@@ -171,10 +190,10 @@ npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 <details>
 <summary>装进独立 profile，按需启动</summary>
 
-插件装进哪个 profile，那个 profile 的每个 Session 就都会加载创作 Skills。想让原版 `web` 保持干净，就把插件装进独立 profile：
+插件装进哪个 profile，那个 profile 的每个 Session 就都会加载创作 Skills。想让原版 `web` 保持干净，就把插件装进独立 profile。下面的命令在源码根目录执行，用的是上一节源码构建出的 0.1.18 tarball；想跳过构建，可换成 v0.1.16 的 Release 资产（相对路径换成 `https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.16/dsh-miaowu-dsh-0.1.16.tgz`）：
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile story add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.18/dsh-miaowu-dsh-0.1.18.tgz
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile story add ./release/dsh-miaowu-dsh-0.1.18.tgz
 ```
 
 新 profile 默认没有界面。编辑 `~/.dsh/profiles/story/package.json`，把 `dsh.profile.bundles` 改成：
@@ -351,7 +370,7 @@ DSH 的 `plugin add` 内部需要 pnpm，单独运行 `npx @deepseek-ai/dsh ... 
 
 ### 升级到新版本后要做什么？
 
-重新执行[安装](#安装)命令，把预构建包 URL 里的版本号换成目标版本（npm 发布后也可把 `@dsh-miaowu/dsh@` 后的版本号换成目标版本），再重启 DSH。安装与启动使用同一个宿主版本；当前支持范围见[安装](#安装)。Skills 与 Roles 随插件打包，无需在项目里重新部署。
+按[安装](#安装)一节执行目标版本的命令：源码路径是 `git pull` 后重新 `build` + `pack`，再对新的 tarball 执行 `dsh plugin add`；用 v0.1.16 预构建包时把 URL 里的版本号换成目标版本；npm 发布后可直接安装 `@dsh-miaowu/dsh@<版本>`。装好后重启 DSH。安装与启动使用同一个宿主版本；当前支持范围见[安装](#安装)。Skills 与 Roles 随插件打包，无需在项目里重新部署。
 
 本仓库 0.1.17 / 0.1.18 跟随上游 Oh Story 0.9.0 与 NovelToGame 0.6.0，并包含插件侧 P2/P3 界面修复；逐项变更见 [CHANGELOG.md](CHANGELOG.md)。
 

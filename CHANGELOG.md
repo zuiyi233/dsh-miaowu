@@ -14,7 +14,7 @@
 ### Changed
 
 - 发行身份改为 fork 自己的线：发布标签前缀改为 `miaowu-vX.Y.Z`（下一个发布版本起），tarball 名与仓库地址统一为 `dsh-miaowu-dsh-<version>.tgz` 与 `zuiyi233/dsh-miaowu`；发布前先做 fork 源预检，拒绝把上游提交或上游标签当作发布源，并移除只服务上游的恢复工作流。
-- 双语 README 的安装主路径改为 GitHub Release 预构建包（`https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.18/dsh-miaowu-dsh-0.1.18.tgz`）。`@dsh-miaowu/dsh` 尚未发布到 npm（registry 返回 404），npm 命令收进「npm 安装（发布后可用）」折叠块；Badge、Releases、Issues、独立 profile 安装与项目表一并指向本 fork，上游只在出处与历史记录中保留。
+- 双语 README 的安装路径按实际发布状态改写：0.1.18 的预构建包与 npm 包都还没发布，推荐从源码构建 0.1.18；最近可用的预构建包 v0.1.16 作为快速试用路径；v0.1.18 的 Release 资产与 npm 安装收进「发布后可用」折叠块。Badge、Releases、Issues、独立 profile 安装与项目表一并指向本 fork，上游只在出处与历史记录中保留。
 - 新增 [docs/FORK-FEATURES.md](docs/FORK-FEATURES.md)，双语 README 增加「Fork 专有能力」一节：全文检索（CJK + 拼音）、版本历史/回滚/审计/行级批注、候选暂存、run/checkpoint/resume、备份三件套、伏笔闭环、书架、可选凭据保险库、`worldbuilding`/`publishing`/`finalize` 三个自有 Skills、ComfyUI 本地接入、喵呜小说工坊预设、运行中文件树刷新与按会话/工作区布局持久化。
 
 ### Fixed
