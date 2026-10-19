@@ -1,17 +1,17 @@
-<!-- Last synced with README.md: 2026-10-15 -->
+<!-- Last synced with README.md: 2026-10-20 -->
 
 <p align="center">
   <img src="https://zenstory.ai/brand/zenstory-ai-mark.svg" alt="" width="76" height="76">
 </p>
 
-<h1 align="center">Oh Story DSH</h1>
+<h1 align="center">dsh-miaowu</h1>
 
 <p align="center">
   <b>A novel, short-drama, interactive-game and video-recap creation workbench for DeepSeek Harness.</b>
 </p>
 
 <p align="center">
-  <a href="https://zenstory.ai/dsh"><b>Project page</b></a>
+  <a href="https://zenstory.ai/dsh"><b>Upstream project page</b></a>
   &nbsp;·&nbsp;
   <a href="#installation"><b>Install</b></a>
   &nbsp;·&nbsp;
@@ -21,17 +21,19 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/zenstory-ai/oh-story-dsh/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/zenstory-ai/oh-story-dsh?style=flat-square&color=22D3EE&logo=github&logoColor=white&label=Stars"></a>
-  <a href="https://github.com/zenstory-ai/oh-story-dsh/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/zenstory-ai/oh-story-dsh?style=flat-square&color=081431&label=Release"></a>
+  <a href="https://github.com/zuiyi233/dsh-miaowu/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/zuiyi233/dsh-miaowu?style=flat-square&color=22D3EE&logo=github&logoColor=white&label=Stars"></a>
+  <a href="https://github.com/zuiyi233/dsh-miaowu/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/zuiyi233/dsh-miaowu?style=flat-square&color=081431&label=Release"></a>
   <img alt="Workbenches 4" src="https://img.shields.io/badge/Workbenches-4-081431?style=flat-square">
   <a href="./LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/License-MIT-1F6FEB?style=flat-square"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/zenstory-ai/oh-story-dsh/issues"><img alt="GitHub Issues" src="https://img.shields.io/badge/GitHub%20Issues-181717?style=for-the-badge&logo=github&logoColor=white"></a>
+  <a href="https://github.com/zuiyi233/dsh-miaowu/issues"><img alt="GitHub Issues" src="https://img.shields.io/badge/GitHub%20Issues-181717?style=for-the-badge&logo=github&logoColor=white"></a>
 </p>
 
 ## What it is
+
+`dsh-miaowu` is the authorized fork of [`oh-story-dsh`](https://github.com/zenstory-ai/oh-story-dsh), not the upstream project itself. The upstream is maintained by [ZenStory AI](https://zenstory.ai); this repository keeps its Skills, Roles and four creation workbenches and adds fork-only capabilities on top (see "Fork-only capabilities" below). The package name, repository and release assets all belong to the fork: `@dsh-miaowu/dsh`, `zuiyi233/dsh-miaowu`.
 
 `oh-story-dsh` is a community plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH), independent of DeepSeek. Install it and DSH Web gains four creation workbenches: novel, short drama, game and video recap. Agents, sessions, models, permission approvals and Chat stay entirely native DSH; the plugin adds only creation Skills, professional Roles, project file contracts and the workbench UI, with no second agent runtime or project database.
 
@@ -44,7 +46,7 @@ The table describes the current source. Published packages pin their upstream co
 | Game | [NovelToGame 0.6.0](https://github.com/zenstory-ai/novel-to-game) · 7 Skills · playable 《金瓶梅》 ADV sample (18+) | `/novel-to-game quick`, `/game-build`, `/game-qa` |
 | Video | [video-recap-skills 0.6.2](https://github.com/zenstory-ai/video-recap-skills/releases/tag/v0.6.2) · 7 Skills (3 user entry points) | `/video-recap`, `/video-script`, `/video-reference` |
 
-> Latest release **v0.1.18** (2026-10-19). The default install pins DeepSeek Harness `0.2.1-rc.2`; the earlier `0.2.0-rc.2` remains supported. See [CHANGELOG.md](CHANGELOG.md) and [Releases](https://github.com/zenstory-ai/oh-story-dsh/releases); upgrade steps are in the FAQ entry [“What do I do after upgrading?”](#what-do-i-do-after-upgrading).
+> Current version **0.1.18** (2026-10-19). The default install pins DeepSeek Harness `0.2.1-rc.2`; the earlier `0.2.0-rc.2` remains supported. See [CHANGELOG.md](CHANGELOG.md) and [Releases](https://github.com/zuiyi233/dsh-miaowu/releases); the npm channel is not published yet (`@dsh-miaowu/dsh` returns 404 in the npm registry), so use the GitHub Release tarball under [Installation](#installation) for now. Upgrade steps are in the FAQ entry [“What do I do after upgrading?”](#what-do-i-do-after-upgrading).
 
 ## The four workbenches
 
@@ -82,26 +84,48 @@ Preview on the left, Chat on the right. Projects live in `video-recaps/<project>
 
 Boundaries and protocols for each workbench are in the [architecture notes](docs/ARCHITECTURE.md).
 
+## Fork-only capabilities
+
+The capabilities below are provided by this repository (`dsh-miaowu`) on top of the upstream four workbenches; upstream `oh-story-dsh` does not have them. Search, history, tasks, backup, foreshadows, bookshelf and vault state lives by default in JSON/JSONL files under the workspace `.oh-story/` directory, with no second database, agent runtime or session store; DSH still owns sessions, models, providers, permissions and run records.
+
+- **Full-text search**: CJK text and pinyin channels with line-level hits that carry path, line and offset; the index lives in `.oh-story/index/`, refreshes lazily by file version on query and can be rebuilt in full.
+- **Version history / rollback / audit / line annotations**: the latest 50 snapshots per file, rollback guarded by version checks against concurrent edits; `audit.jsonl` records writes, and annotations re-anchor by quote, marking `moved` or `stale` instead of being lost.
+- **Candidate staging**: the agent registers suggestions with `oh_story_task stage_candidate` without writing files; you confirm, amend or apply them in the "任务与候选" panel.
+- **run / checkpoint / resume**: long jobs track step progress and checkpoints and resume from the most recent paused or failed run (built-in recipes: novel-chapter, drama-batch, game-content).
+- **Backup trio**: bundle, snapshot and full backup; restore always writes a new directory and never overwrites the original, and offline JSON import goes through the same checks. Media bytes are skipped and the full backup excludes DSH sessions and provider credentials; when the vault is enabled, `.oh-story/vault/` is included in a full backup, so treat it as sensitive.
+- **Foreshadow loop**: planting, per-chapter reminders, a resolution state machine and snooze; analysis sidecars can be imported read-only.
+- **Bookshelf**: discover and manage multiple works; archiving only hides a record, and the 30-day recycle bin and permanent removal never delete workspace files.
+- **Optional credential vault**: AES-256-GCM, off by default; it only works when `DSH_MIAOWU_VAULT_ENABLED=1` is set and never takes over DSH environment credentials.
+- **Three fork-owned Skills**: `worldbuilding` (build the world first), `publishing` (submission packages and release tracking) and `finalize` (completion settlement and a foreshadow-resolution gate).
+- **Local ComfyUI integration**: short-drama production adapters and the `oh_story_comfyui` tool call a local ComfyUI through API-format workflow placeholders; a missing workflow is an explicit error, never a silent switch to another image path.
+- **喵呜小说工坊 preset**: the full standard-mode tool surface plus a Chinese fiction-writing persona, installed from a source checkout into DSH's Agent preset directory.
+- **Live file-tree refresh**: files written by role subagents, background jobs and scripts are re-listed quietly about every 4 seconds while the Session runs; hidden pages and in-flight requests are skipped.
+- **Per-session / per-workspace layout persistence**: three-pane and floating layouts are stored per session and the workbench open/closed choice per workspace; reset lives in layout settings.
+
+See [docs/FORK-FEATURES.md](docs/FORK-FEATURES.md) for enablement, optional status and the UI/tool boundary of each capability.
+
 ## Installation
 
-Requires Node.js 24+. The install command provides pnpm temporarily, so a machine with only Node.js can run it:
+Requires Node.js 24+. The install command provides pnpm temporarily, so a machine with only Node.js can run it. `@dsh-miaowu/dsh` is not published on npm yet; the current path is the prebuilt package from this repository's GitHub Release:
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add @oh-story/dsh@0.1.18 &&
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.18/dsh-miaowu-dsh-0.1.18.tgz &&
 npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 ```
 
-Keep the terminal running; the browser opens automatically by default. If it does not, copy the full `http://127.0.0.1:3080/?token=...` link printed in the terminal — first-time authentication needs the token in the link. Closing the terminal stops the service. Use the same dsh version for install and start. The commands on this page pin `0.2.1-rc.2`, the npm `latest`. The plugin accepts `>=0.2.0-rc.2 <0.2.1-0` and `>=0.2.1-alpha.1 <0.2.2-0`. If you stay on `0.2.0-rc.2`, use `@deepseek-ai/dsh@0.2.0-rc.2` in both the install and start commands; do not mix host versions. DSH checks compatibility while adding and loading the plugin and reports mismatches (`dsh plugin allow-version` overrides it at your own risk).
+The [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) page is authoritative for assets and checksums.
+
+Keep the terminal running; the browser opens automatically by default. If it does not, copy the full `http://127.0.0.1:3080/?token=...` link printed in the terminal — first-time authentication needs the token in the link. Closing the terminal stops the service. Use the same dsh version for install and start. The commands on this page pin `0.2.1-rc.2`, the npm `latest` for DSH. The plugin accepts `>=0.2.0-rc.2 <0.2.1-0` and `>=0.2.1-alpha.1 <0.2.2-0`. If you stay on `0.2.0-rc.2`, use `@deepseek-ai/dsh@0.2.0-rc.2` in both the install and start commands; do not mix host versions. DSH checks compatibility while adding and loading the plugin and reports mismatches (`dsh plugin allow-version` overrides it at your own risk).
 
 Before creating with AI, add a Provider and API key under DSH's Settings → Models, or set the `DEEPSEEK_API_KEY` environment variable before starting. To only browse existing work, choose "Configure later" in the first-run guide.
 
 <details>
-<summary>Install the prebuilt package from the GitHub Release</summary>
+<summary>npm install (available after publication)</summary>
 
-The prebuilt package in the GitHub Release passes the same test suite:
+`@dsh-miaowu/dsh` is not on npm yet (the registry returns 404), so the command below will not work until it is published; use the GitHub Release tarball above for now. Once published, npm and the prebuilt package are equivalent:
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add https://github.com/zenstory-ai/oh-story-dsh/releases/download/v0.1.18/oh-story-dsh-0.1.18.tgz &&
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add @dsh-miaowu/dsh@0.1.18 &&
 npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 ```
 
@@ -145,7 +169,7 @@ Voice references require an explicit capability declaration: generated generic p
 Whichever profile the plugin is installed into, every Session of that profile loads the creation Skills. To keep the stock `web` profile clean, install into a separate profile:
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile story add @oh-story/dsh@0.1.18
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile story add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.18/dsh-miaowu-dsh-0.1.18.tgz
 ```
 
 A new profile has no UI by default. Edit `~/.dsh/profiles/story/package.json` and set `dsh.profile.bundles` to:
@@ -154,7 +178,7 @@ A new profile has no UI by default. Edit `~/.dsh/profiles/story/package.json` an
 "bundles": [
   "@deepseek-ai/dsh-base",
   "@deepseek-ai/dsh-web-app",
-  "@oh-story/dsh"
+  "@dsh-miaowu/dsh"
 ]
 ```
 
@@ -302,11 +326,11 @@ The layout is taken over only when the current workspace really contains a creat
 
 ### A long reply in the right-hand Chat is hidden behind the input box?
 
-Update the plugin using Installation and restart DSH. If the current version still reproduces it, open an issue with the plugin version, DSH version, window width and steps. Historical reports are [#3](https://github.com/zenstory-ai/oh-story-dsh/issues/3) and [#26](https://github.com/zenstory-ai/oh-story-dsh/issues/26).
+Update the plugin using Installation and restart DSH. If the current version still reproduces it, open an issue in this repository with the plugin version, DSH version, window width and steps. Upstream historical reports are [#3](https://github.com/zenstory-ai/oh-story-dsh/issues/3) and [#26](https://github.com/zenstory-ai/oh-story-dsh/issues/26).
 
 ### The workbench is blank after installing — no panel and no "创作工作台" button?
 
-Check the plugin and DSH versions, then follow [Installation](#installation) using one supported host line: `0.2.1-rc.2` by default, or the earlier `0.2.0-rc.2`. Use that version for both installation and startup, and check that the plugin is loaded in the same profile. If the workbench is still blank, report the versions and terminal error. The historical Queue failure is recorded in [#50](https://github.com/zenstory-ai/oh-story-dsh/issues/50).
+Check the plugin and DSH versions, then follow [Installation](#installation) using one supported host line: `0.2.1-rc.2` by default, or the earlier `0.2.0-rc.2`. Use that version for both installation and startup, and check that the plugin is loaded in the same profile. If the workbench is still blank, report the versions and terminal error in an issue in this repository. The historical upstream Queue failure is recorded in [#50](https://github.com/zenstory-ai/oh-story-dsh/issues/50).
 
 ### I also installed Oh Story for Codex or OpenCode — which copy does DSH use?
 
@@ -330,7 +354,9 @@ Yes. The type, asset, unit-test and build gate runs on both macOS and Windows in
 
 ### What do I do after upgrading?
 
-Rerun the install command with the target version after `@oh-story/dsh@`, then restart DSH. Use the same host version for installation and startup; see [Installation](#installation) for the supported range. Skills and Roles ship with the plugin and need no redeployment into projects.
+Rerun the [Installation](#installation) command with the target version in the prebuilt tarball URL (or after `@dsh-miaowu/dsh@` once npm is published), then restart DSH. Use the same host version for installation and startup; see [Installation](#installation) for the supported range. Skills and Roles ship with the plugin and need no redeployment into projects.
+
+This repository's 0.1.17 / 0.1.18 versions follow upstream Oh Story 0.9.0 and NovelToGame 0.6.0 and include the plugin-side P2/P3 interface fixes; see [CHANGELOG.md](CHANGELOG.md) for each change.
 
 Version 0.1.18 finishes the interface findings from the 0.1.17 new-user audit (the bundled-example entry, the video runtime check, the game preview status, Python 3.9+ for short drama); it needs no migration, only a reinstall and restart.
 
@@ -356,11 +382,12 @@ See [CHANGELOG.md](CHANGELOG.md) and [Validation](docs/VALIDATION.md) for releas
 - [Original sound versus narration](https://zenstory.ai/video-recap/original-audio-and-narration): identify essential dialogue, picture evidence and gaps that need explanation.
 - [Writing-environment comparison](https://zenstory.ai/compare/writing-workflows): when plain chat, the DSH plugin or the hosted workbench fits.
 - [Architecture](docs/ARCHITECTURE.md): what DSH owns, what the plugin owns, and the protocol boundary of each workbench.
+- [Fork-only capabilities](docs/FORK-FEATURES.md): boundaries of search, history, tasks, backups, foreshadows, bookshelf, vault, ComfyUI and the preset.
 - [Validation](docs/VALIDATION.md): what each test layer covers and which evidence stays out of Pull Request CI.
 
 ## Contributing and support
 
-- **GitHub Issues**: [bugs, output-quality cases, feature requests](https://github.com/zenstory-ai/oh-story-dsh/issues/new/choose); include the plugin version, DSH version and reproduction steps.
+- **GitHub Issues**: [bugs, output-quality cases, feature requests](https://github.com/zuiyi233/dsh-miaowu/issues/new/choose); include the plugin version, DSH version and reproduction steps.
 - Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing code: `pnpm verify` is the quality gate for every Pull Request, and `pnpm test:dsh` packages the plugin and runs it inside an isolated official DSH Web.
 
 ## Acknowledgements
@@ -372,7 +399,7 @@ See [CHANGELOG.md](CHANGELOG.md) and [Validation](docs/VALIDATION.md) for releas
 
 ## Part of ZenStory AI
 
-Oh Story DSH is maintained by [ZenStory AI](https://zenstory.ai) — open-source, agent-native tools for creating, adapting and producing stories (GitHub org: [zenstory-ai](https://github.com/zenstory-ai)). Sibling projects:
+Upstream Oh Story DSH is maintained by [ZenStory AI](https://zenstory.ai) — open-source, agent-native tools for creating, adapting and producing stories (GitHub org: [zenstory-ai](https://github.com/zenstory-ai)). This repository, `dsh-miaowu`, is its authorized fork and is released independently by its maintainer. Sibling projects and the fork:
 
 | Project | What it does |
 | --- | --- |
@@ -380,5 +407,6 @@ Oh Story DSH is maintained by [ZenStory AI](https://zenstory.ai) — open-source
 | [drama-skills](https://github.com/zenstory-ai/drama-skills) | AI short-drama / motion-comic suite: scripts, assets, storyboards, image & video prompts, review |
 | [novel-to-game](https://github.com/zenstory-ai/novel-to-game) | Agent skills for source-grounded novel adaptation, target-runtime builds, and evidence-based QA |
 | [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | Create Chinese-narration recaps from supported video files, with optional editable JianYing/CapCut draft export |
-| [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | Community DeepSeek Harness plugin with novel, short-drama, game and video-recap workbenches (this repo) |
+| [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | Upstream project: community DeepSeek Harness plugin with novel, short-drama, game and video-recap workbenches |
+| [dsh-miaowu](https://github.com/zuiyi233/dsh-miaowu) | This repository: the authorized fork of `oh-story-dsh`, keeping the four workbenches and adding fork-only capabilities |
 | [zenstory](https://github.com/zenstory-ai/zenstory) | Chat-to-create AI novel-writing workbench ([app.zenstory.ai](https://app.zenstory.ai)) |

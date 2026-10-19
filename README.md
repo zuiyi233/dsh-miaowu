@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://zenstory.ai/zh/dsh"><b>项目主页</b></a>
+  <a href="https://zenstory.ai/zh/dsh"><b>上游主页</b></a>
   &nbsp;·&nbsp;
   <a href="#安装"><b>安装</b></a>
   &nbsp;·&nbsp;
@@ -19,8 +19,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/zenstory-ai/oh-story-dsh/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/zenstory-ai/oh-story-dsh?style=flat-square&color=22D3EE&logo=github&logoColor=white&label=Stars"></a>
-  <a href="https://github.com/zenstory-ai/oh-story-dsh/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/zenstory-ai/oh-story-dsh?style=flat-square&color=081431&label=Release"></a>
+  <a href="https://github.com/zuiyi233/dsh-miaowu/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/zuiyi233/dsh-miaowu?style=flat-square&color=22D3EE&logo=github&logoColor=white&label=Stars"></a>
+  <a href="https://github.com/zuiyi233/dsh-miaowu/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/zuiyi233/dsh-miaowu?style=flat-square&color=081431&label=Release"></a>
   <img alt="Workbenches 4" src="https://img.shields.io/badge/Workbenches-4-081431?style=flat-square">
   <a href="./LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/License-MIT-1F6FEB?style=flat-square"></a>
 </p>
@@ -28,6 +28,8 @@
 `dsh-miaowu` 是基于 DeepSeek Harness（DSH）构建的社区插件，把小说、短剧、互动游戏与视频解说四条创作流水线带进 DSH。DSH 管理 Agent、会话、模型、权限和 Chat；插件提供创作 Skills、专业 Roles、项目协议与对应工作台。
 
 ## 这是什么
+
+`dsh-miaowu` 是 [`oh-story-dsh`](https://github.com/zenstory-ai/oh-story-dsh) 的授权 fork，不是上游项目本身。上游由 [ZenStory AI](https://zenstory.ai/zh) 维护；本仓库保留上游的 Skills、Roles 与四个创作工作台，并在此基础上增加 fork 专有能力（见下文「Fork 专有能力」）。包名、仓库地址与发布资产都属于 fork：`@dsh-miaowu/dsh`、`zuiyi233/dsh-miaowu`。
 
 `oh-story-dsh` 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的社区插件，与 DeepSeek 无隶属关系。装上它，DSH Web 里多出四个创作工作台：小说、短剧、游戏、视频解说。Agent、会话、模型、权限审批和 Chat 仍然全是 DSH 原生的，插件只添加创作 Skills、专业 Roles、项目文件协议和工作台界面，不带第二套 Agent 运行时或项目数据库。
 
@@ -40,7 +42,7 @@
 | 游戏 | [NovelToGame 0.6.0](https://github.com/zenstory-ai/novel-to-game) · 7 Skills · 《金瓶梅》ADV 可玩示例（18+） | `/novel-to-game quick`、`/game-build`、`/game-qa` |
 | 视频 | [video-recap-skills 0.6.2](https://github.com/zenstory-ai/video-recap-skills/releases/tag/v0.6.2) · 7 Skills（3 个用户入口） | `/video-recap`、`/video-script`、`/video-reference` |
 
-> 最新版本 **v0.1.18**（2026-10-19）。默认安装固定使用 DeepSeek Harness `0.2.1-rc.2`；仍支持更早的 `0.2.0-rc.2`。变更见 [CHANGELOG.md](CHANGELOG.md) 与 [Releases](https://github.com/zenstory-ai/oh-story-dsh/releases)；升级步骤见常见问题[「升级到新版本后要做什么」](#升级到新版本后要做什么)。
+> 当前版本 **0.1.18**（2026-10-19）。默认安装固定使用 DeepSeek Harness `0.2.1-rc.2`；仍支持更早的 `0.2.0-rc.2`。变更见 [CHANGELOG.md](CHANGELOG.md) 与 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases)；npm 渠道尚未发布（`@dsh-miaowu/dsh` 在 npm registry 返回 404），当前安装请用[安装](#安装)一节的 GitHub Release 预构建包。升级步骤见常见问题[「升级到新版本后要做什么」](#升级到新版本后要做什么)。
 
 ## 四个工作台
 
@@ -87,26 +89,48 @@
 
 各工作台的边界与协议见[架构说明](docs/ARCHITECTURE.md)。
 
+## Fork 专有能力
+
+以下能力由本仓库（`dsh-miaowu`）在保留上游四个工作台的基础上提供，上游 `oh-story-dsh` 没有。检索、历史、任务、备份、伏笔、书架与保险库的状态默认落在工作区 `.oh-story/` 下的 JSON/JSONL 文件，不引入第二套数据库、Agent 运行时或会话存储；DSH 仍然拥有会话、模型、Provider、权限与运行记录。
+
+- **全文检索**：中文正文与拼音双通道，行级结果带文件、行号与偏移；索引落 `.oh-story/index/`，查询时按文件版本懒刷新，也可全量重建。
+- **版本历史 / 回滚 / 审计 / 行级批注**：每个文件保留最近 50 个快照，回滚用版本校验拒绝覆盖并发修改；`audit.jsonl` 留痕，批注按原文引用重锚，行号移动记 `moved`、找不到记 `stale` 而不丢批注。
+- **候选暂存**：Agent 用 `oh_story_task stage_candidate` 登记建议但不写文件，由你在「任务与候选」面板确认、修订或应用。
+- **run / checkpoint / resume**：长任务按 step 记录进度与检查点，中断后从最近暂停或失败的 run 恢复（内置 novel-chapter、drama-batch、game-content 三个 recipe）。
+- **备份三件套**：作品包、快照、整体备份；恢复一律写入新目录、不覆盖原项目，离线 JSON 导入走同一套校验。媒体文件只跳过字节，整体备份不含 DSH 会话与 Provider 凭据；启用保险库时 `.oh-story/vault/` 也会随 full 备份打包，请按敏感文件保管。
+- **伏笔闭环**：埋设、按章提醒、回收状态机与 snooze；可从拆书 sidecar 只读导入。
+- **书架**：发现并管理多作品；归档只隐藏记录，30 天回收站与永久移除都不删除工作区文件。
+- **可选凭据保险库**：AES-256-GCM，默认关闭；只有设置 `DSH_MIAOWU_VAULT_ENABLED=1` 才启用，不接管 DSH 环境凭据。
+- **三个自有 Skills**：`worldbuilding`（先建世界观）、`publishing`（投稿包与发行跟踪）、`finalize`（完结结算与伏笔回收门禁）。
+- **ComfyUI 本地接入**：短剧生产适配器与 `oh_story_comfyui` 工具，按 API-format 工作流的占位符调用本机 ComfyUI；未配置工作流时显式报错，不静默切换生图通道。
+- **喵呜小说工坊预设**：标准模式全能力加中文小说创作 persona，从源码 checkout 安装到 DSH 的 Agent 预设目录。
+- **文件树运行中自动刷新**：角色子代理、后台任务与脚本写入的新文件，在会话运行期间约每 4 秒安静重列；页面隐藏或请求进行中不刷新。
+- **按会话 / 工作区布局持久化**：三栏与浮动布局按会话保存，工作台开合按工作区记住；重置布局在布局设置里。
+
+各能力的启用方式、可选状态与 UI/工具边界见 [docs/FORK-FEATURES.md](docs/FORK-FEATURES.md)。
+
 ## 安装
 
-需要 Node.js 24+。安装命令会临时提供 pnpm，只装了 Node.js 的机器也能执行：
+需要 Node.js 24+。安装命令会临时提供 pnpm，只装了 Node.js 的机器也能执行。`@dsh-miaowu/dsh` 尚未发布到 npm，当前通过本仓库 GitHub Release 的预构建包安装：
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add @dsh-miaowu/dsh@0.1.18 &&
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.18/dsh-miaowu-dsh-0.1.18.tgz &&
 npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 ```
 
-保持终端运行，浏览器默认自动打开；没有自动打开就复制终端打印的完整 `http://127.0.0.1:3080/?token=...` 链接访问，首次认证需要链接里的 token。关闭终端会停止服务。安装与启动请使用同一个 dsh 版本。本页默认命令固定使用 npm `latest` 的 `0.2.1-rc.2`；本插件接受 `>=0.2.0-rc.2 <0.2.1-0` 与 `>=0.2.1-alpha.1 <0.2.2-0`。仍在用 `0.2.0-rc.2` 时，安装与启动两条命令都要换成 `@deepseek-ai/dsh@0.2.0-rc.2`；不要把两个宿主版本混用。DSH 会在安装与加载时检查版本，不匹配时给出明确提示（`dsh plugin allow-version` 可自担风险放行）。
+预构建包与校验和以 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) 页为准。
+
+保持终端运行，浏览器默认自动打开；没有自动打开就复制终端打印的完整 `http://127.0.0.1:3080/?token=...` 链接访问，首次认证需要链接里的 token。关闭终端会停止服务。安装与启动请使用同一个 dsh 版本。本页默认命令固定使用 npm `latest` 的 DSH `0.2.1-rc.2`；本插件接受 `>=0.2.0-rc.2 <0.2.1-0` 与 `>=0.2.1-alpha.1 <0.2.2-0`。仍在用 `0.2.0-rc.2` 时，安装与启动两条命令都要换成 `@deepseek-ai/dsh@0.2.0-rc.2`；不要把两个宿主版本混用。DSH 会在安装与加载时检查版本，不匹配时给出明确提示（`dsh plugin allow-version` 可自担风险放行）。
 
 开始 AI 创作前，在 DSH 的「设置 → 模型」中添加 Provider 并填入 API Key，或在启动前设置环境变量 `DEEPSEEK_API_KEY`。只查看已有作品可在首次引导中选择「稍后配置 / Configure later」。
 
 <details>
-<summary>从 GitHub Release 安装预构建包</summary>
+<summary>npm 安装（发布后可用）</summary>
 
-GitHub Release 中的预构建包经过同一套测试：
+`@dsh-miaowu/dsh` 目前不在 npm 上（registry 返回 404），下面的命令要等发布后才能用；当前请使用上面的 GitHub Release 预构建包。发布后 npm 与预构建包安装等价：
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.18/dsh-miaowu-dsh-0.1.18.tgz &&
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add @dsh-miaowu/dsh@0.1.18 &&
 npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 ```
 
@@ -150,7 +174,7 @@ npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 插件装进哪个 profile，那个 profile 的每个 Session 就都会加载创作 Skills。想让原版 `web` 保持干净，就把插件装进独立 profile：
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile story add @dsh-miaowu/dsh@0.1.18
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile story add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.18/dsh-miaowu-dsh-0.1.18.tgz
 ```
 
 新 profile 默认没有界面。编辑 `~/.dsh/profiles/story/package.json`，把 `dsh.profile.bundles` 改成：
@@ -299,11 +323,11 @@ IMG-JIANGCHEN-SHEET 在当前集内重复，后出现的条目会遮蔽前一条
 
 ### 右侧 Chat 里的长答复被下面的输入框遮住了？
 
-先按安装步骤更新插件并重启 DSH。当前版本仍能复现时，请带插件版本、DSH 版本、窗口宽度和操作步骤开 Issue。相关历史记录见 [#3](https://github.com/zenstory-ai/oh-story-dsh/issues/3) 与 [#26](https://github.com/zenstory-ai/oh-story-dsh/issues/26)。
+先按安装步骤更新插件并重启 DSH。当前版本仍能复现时，请带插件版本、DSH 版本、窗口宽度和操作步骤在本仓库开 Issue。上游历史记录见 [#3](https://github.com/zenstory-ai/oh-story-dsh/issues/3) 与 [#26](https://github.com/zenstory-ai/oh-story-dsh/issues/26)。
 
 ### 装好后工作台一片空白，面板和「创作工作台」按钮都不出现？
 
-先核对插件与 DSH 版本，再按[安装](#安装)使用同一条受支持的宿主线：默认 `0.2.1-rc.2`，或更早的 `0.2.0-rc.2`。安装和启动两条命令都要一致。检查同一 profile 中是否已加载插件；仍然空白时，附版本号和终端错误开 Issue。历史 Queue 接口故障见 [#50](https://github.com/zenstory-ai/oh-story-dsh/issues/50)。
+先核对插件与 DSH 版本，再按[安装](#安装)使用同一条受支持的宿主线：默认 `0.2.1-rc.2`，或更早的 `0.2.0-rc.2`。安装和启动两条命令都要一致。检查同一 profile 中是否已加载插件；仍然空白时，附版本号和终端错误在本仓库开 Issue。上游历史记录：[#50](https://github.com/zenstory-ai/oh-story-dsh/issues/50)。
 
 ### 我另外给 Codex 或 OpenCode 装过 Oh Story，DSH 里用的是哪一份？
 
@@ -327,7 +351,9 @@ DSH 的 `plugin add` 内部需要 pnpm，单独运行 `npx @deepseek-ai/dsh ... 
 
 ### 升级到新版本后要做什么？
 
-重新执行安装命令，把 `@dsh-miaowu/dsh@` 后的版本号换成目标版本，再重启 DSH。安装与启动使用同一个宿主版本；当前支持范围见[安装](#安装)。Skills 与 Roles 随插件打包，无需在项目里重新部署。
+重新执行[安装](#安装)命令，把预构建包 URL 里的版本号换成目标版本（npm 发布后也可把 `@dsh-miaowu/dsh@` 后的版本号换成目标版本），再重启 DSH。安装与启动使用同一个宿主版本；当前支持范围见[安装](#安装)。Skills 与 Roles 随插件打包，无需在项目里重新部署。
+
+本仓库 0.1.17 / 0.1.18 跟随上游 Oh Story 0.9.0 与 NovelToGame 0.6.0，并包含插件侧 P2/P3 界面修复；逐项变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 0.1.18 收尾 0.1.17 新用户审计里的界面问题（内置示例入口、视频环境检查、游戏预览状态、短剧 Python 3.9+），不用迁移，重装后重启即可。
 
@@ -353,11 +379,12 @@ DSH 的 `plugin add` 内部需要 pnpm，单独运行 `npx @deepseek-ai/dsh ... 
 - [原声与旁白分工](https://zenstory.ai/zh/video-recap/original-audio-and-narration)：先列出关键台词、画面依据和需要解说的空隙。
 - [写作环境对比](https://zenstory.ai/zh/compare/writing-workflows)：普通聊天、DSH 插件与托管工作台各适合什么。
 - [架构说明](docs/ARCHITECTURE.md)：DSH 与插件各自拥有什么，四个工作台的协议边界。
+- [Fork 专有能力](docs/FORK-FEATURES.md)：全文检索、版本历史、任务、备份、伏笔、书架、保险库、ComfyUI 与预设的边界。
 - [验证说明](docs/VALIDATION.md)：每一层测试覆盖什么，哪些证据不进 Pull Request CI。
 
 ## 贡献与交流
 
-- **GitHub Issues**：[Bug、输出质量 Case、功能请求](https://github.com/zenstory-ai/oh-story-dsh/issues/new/choose)，请带上插件版本、DSH 版本和复现步骤。
+- **GitHub Issues**：[Bug、输出质量 Case、功能请求](https://github.com/zuiyi233/dsh-miaowu/issues/new/choose)，请带上插件版本、DSH 版本和复现步骤。
 - 改代码前先读 [CONTRIBUTING.md](CONTRIBUTING.md)：`pnpm verify` 是每个 Pull Request 的质量门，`pnpm test:dsh` 会打包并装进隔离的官方 DSH Web 跑一遍。
 
 ## 致谢
@@ -369,7 +396,7 @@ DSH 的 `plugin add` 内部需要 pnpm，单独运行 `npx @deepseek-ai/dsh ... 
 
 ## ZenStory AI 项目
 
-Oh Story DSH 是 [ZenStory AI](https://zenstory.ai/zh) 的一部分——一组开源、面向 agent 的故事创作、改编与生产工具（GitHub 组织：[zenstory-ai](https://github.com/zenstory-ai)）。同组织项目：
+上游 Oh Story DSH 是 [ZenStory AI](https://zenstory.ai/zh) 的一部分——一组开源、面向 agent 的故事创作、改编与生产工具（GitHub 组织：[zenstory-ai](https://github.com/zenstory-ai)）。本仓库 `dsh-miaowu` 是它的授权 fork，由 fork 维护者独立发布。同组织项目与 fork 对照：
 
 | 项目 | 用途 |
 | --- | --- |
@@ -377,5 +404,6 @@ Oh Story DSH 是 [ZenStory AI](https://zenstory.ai/zh) 的一部分——一组�
 | [drama-skills](https://github.com/zenstory-ai/drama-skills) | AI 短剧 / 漫剧创作 skill 合集：剧本、资产、分镜、图片/视频提示词、独立审查 |
 | [novel-to-game](https://github.com/zenstory-ai/novel-to-game) | 面向原著改编、指定运行环境构建与运行证据 QA 的 agent skills |
 | [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | 将支持的视频文件制作成中文解说，可选导出可编辑的剪映/CapCut 草稿 |
-| [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | DeepSeek Harness 社区插件，提供小说、短剧、游戏和视频解说工作台（本仓库） |
+| [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | 上游项目：DeepSeek Harness 社区插件，提供小说、短剧、游戏和视频解说工作台 |
+| [dsh-miaowu](https://github.com/zuiyi233/dsh-miaowu) | 本仓库：`oh-story-dsh` 的授权 fork，保留四个工作台并增加 Fork 专有能力 |
 | [zenstory](https://github.com/zenstory-ai/zenstory) | 对话即创作的 AI 小说写作工作台（[app.zenstory.ai](https://app.zenstory.ai)） |
