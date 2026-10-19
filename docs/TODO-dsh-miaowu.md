@@ -1,13 +1,13 @@
 # dsh-miaowu 待开发清单
 
 > 来源：参考项目（DSH-better-sidebar / NarraLume / Scriverse / oh-story-dsh 上游）借鉴分析 + `docs/小说全流程覆盖评估.md` 差距核查
-> 基线：dsh-miaowu v0.1.6（oh-story-dsh fork + rebrand，2026-09-04）· 更新日期：2026-09-05
+> 基线：dsh-miaowu v0.1.6（oh-story-dsh fork + rebrand，2026-09-04）· 更新日期：2026-09-05 · 复核日期：2026-10-20
 > 实施状态：✅ 已完成（2026-09-05，四个 Phase 全部落库，`pnpm verify` 全绿）· ⏳ 部分/简化交付 · ⬜ 未做
 > 参考素材：`参考项目/` 目录下各调研文档（已被 git 忽略，仅本机留存）
 
 ## 2026-10-20 复核
 
-- **Phase A-D 已交付**：全文检索、候选暂存、长任务恢复、备份、版本/审计/批注、布局、拆书结构化、世界观、保险库等均已落库；`pnpm verify` 在代码状态 `f1f57e4` 退出 0（lint、typecheck、五项资产 parity、DSH boundary、release 24/24、upstream-update、56 个测试文件 / 561 项、build）。`client/index.tsx` 已拆为 16 行入口壳，900 行软上限债务关闭。
+- **Phase A-D 已交付**：全文检索、候选暂存、长任务恢复、备份、版本/审计/批注、布局、拆书结构化、世界观、保险库等均已落库；`pnpm verify` 在代码状态 `f1f57e4` 退出 0（lint、typecheck、五项资产 parity、DSH boundary、release 24/24、upstream-update、56 个测试文件 / 561 项、build）。`client/index.tsx` 已拆为 16 行入口壳，仅该入口脱离 900 行软上限；`client/creative-workbench.tsx` 仍为 1347 行，软上限债务未整体关闭。
 - **发布管线已适配 fork**：发布身份（仓库/包名/tarball 前缀）由 `packages/dsh-plugin/package.json` 派生；稳定 tag 为 `miaowu-vX.Y.Z`；`release.yml` 只接受该前缀，并拒绝上游 `v*` tag、缺 fork 入口或不在 `main` 祖先链上的提交；上游专用 `recover-v0.1.13.yml` 已删除。**仍待办**：npm 首次发布（granular `NPM_TOKEN`）与 0.1.16 之后的预构建包发布，目前 0.1.17 / 0.1.18 只有源码。
 - **剩余 P2 / 延后项**：短剧生产素材/分镜板浮动面板、esbuild 多入口拆包、`availableActions` 服务端下发（现为前端状态表）、保险库 UI；`scripts/native-dsh-smoke.ts` 在 `tsc -p tsconfig.lint.json --noEmit` 下有 41 个既有类型错误（不在 `pnpm verify` 门禁内）。
 - **明确不在范围**：改编 P3（有声/漫画/翻译/版权签约）不随本轮交付，见 `docs/小说全流程覆盖评估.md`。
