@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import type { PropsRuntime, PropsStore } from "@deepseek-ai/dsh-client-ui-slots";
 import { endpoint } from "./workbench-ui.js";
 import { json, type createWorkbenchStore, type WorkbenchMemory, type WorkspacePayload } from "./workbench-state.js";
-import { latestSettledMutation, latestSettledMutationTurn, openTurn, sameUndispatchedCalls, streamingAssistant, undispatchedCalls, type UndispatchedCall } from "./file-activity.js";
+import { latestSettledMutation, latestSettledMutationTurn, openTurn, sameUndispatchedCalls, shouldRefreshLiveWorkspace, streamingAssistant, undispatchedCalls, type UndispatchedCall } from "./file-activity.js";
 import { settledProductionIntents } from "./production-intents.js";
 import { productionQueueFromInbox } from "./production-runtime.js";
 import {
@@ -67,7 +67,11 @@ export function useWorkspace(sessionId: string, live: boolean): {
   useEffect(() => {
     if (!live) return;
     const timer = globalThis.setInterval(() => {
-      if (inFlight.current !== undefined || globalThis.document.visibilityState === "hidden") return;
+      if (!shouldRefreshLiveWorkspace({
+        live,
+        inFlight: inFlight.current !== undefined,
+        visibility: globalThis.document.visibilityState
+      })) return;
       setVersion((value) => value + 1);
     }, LIVE_WORKSPACE_REFRESH_MS);
     return () => { globalThis.clearInterval(timer); };

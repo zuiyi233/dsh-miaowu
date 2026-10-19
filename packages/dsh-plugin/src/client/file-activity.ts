@@ -305,6 +305,19 @@ export function openTurn(chat: ChatSnapshot): number | undefined {
   return chat.timeline.turns.get(turnNumber)?.status === "open" ? turnNumber : undefined;
 }
 
+/**
+ * Whether a live refresh tick may re-list the workspace now. The file tree is re-listed in the
+ * background only while the Session runs and the listing has no request in flight; a hidden page
+ * waits until it is visible again instead of polling unseen.
+ */
+export function shouldRefreshLiveWorkspace(input: {
+  readonly live: boolean;
+  readonly inFlight: boolean;
+  readonly visibility: string;
+}): boolean {
+  return input.live && !input.inFlight && input.visibility !== "hidden";
+}
+
 /** Convert a DSH tool path to the creative-relative path accepted by the narrow route. */
 export function creativeRelativePath(
   path: string | undefined,

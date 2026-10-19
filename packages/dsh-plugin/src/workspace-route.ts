@@ -480,7 +480,8 @@ export function mediaMimeTypeForPath(path: string): string | undefined {
   return MEDIA_TYPES.get(extname(path).toLocaleLowerCase());
 }
 
-async function workspaceRealmForSession(context: Context, rawId: string): Promise<WorkspaceRealm> {
+/** 由 sessionId 取工作区 realm;导出供负向契约测试直接断言子会话/未知会话的拒绝语义。 */
+export async function workspaceRealmForSession(context: Context, rawId: string): Promise<WorkspaceRealm> {
   if (rawId === "") throw new WorkspaceHttpError(400, "缺少 DSH sessionId。");
   const lookup = context.typert.lookups.get("agent");
   if (lookup === undefined) throw new WorkspaceHttpError(503, "DSH Agent lookup 当前不可用。");

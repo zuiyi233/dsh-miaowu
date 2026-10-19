@@ -14,6 +14,7 @@ import {
   preferredWorkbenchFile,
   previewMutation,
   sameUndispatchedCalls,
+  shouldRefreshLiveWorkspace,
   streamingAssistant,
   undispatchedCalls,
   workbenchModeForPath
@@ -327,6 +328,30 @@ describe("official DSH file activity", () => {
       { path: "short-drama.json" },
       { path: "剧集/EP001/screenplay.md" }
     ], "drama")).toBe("剧集/EP001/screenplay.md");
+  });
+});
+
+describe("live workspace refresh decision", () => {
+  it("re-lists only while the Session runs, nothing is in flight and the page is visible", () => {
+    const cases = [
+      { live: true, inFlight: false, visibility: "visible", expected: true },
+      { live: true, inFlight: false, visibility: "hidden", expected: false },
+      { live: true, inFlight: true, visibility: "visible", expected: false },
+      { live: true, inFlight: true, visibility: "hidden", expected: false },
+      { live: false, inFlight: false, visibility: "visible", expected: false },
+      { live: false, inFlight: false, visibility: "hidden", expected: false },
+      { live: false, inFlight: true, visibility: "visible", expected: false },
+      { live: false, inFlight: true, visibility: "hidden", expected: false }
+    ] as const;
+    for (const { expected, ...input } of cases) {
+      expect(shouldRefreshLiveWorkspace(input)).toBe(expected);
+    }
+  });
+
+  it("treats every non-hidden visibility state as visible", () => {
+    for (const visibility of ["visible", "prerender"]) {
+      expect(shouldRefreshLiveWorkspace({ live: true, inFlight: false, visibility })).toBe(true);
+    }
   });
 });
 
