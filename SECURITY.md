@@ -18,6 +18,8 @@ Vulnerabilities in DeepSeek Harness itself belong to the
 
 `@dsh-miaowu/dsh` is a Cordis plugin inside a DSH process. DSH owns models, credentials, sandbox policy, tool permissions and approvals. The plugin opens no network listener of its own and starts no second agent runtime. Host preflight checks whether media credentials are set; it returns configuration status, not key values. Media adapters run through the current DSH execution environment.
 
+Media and provider keys are host environment variables. The plugin reports only whether they are configured and never sends key values to the browser. The optional credential vault is off by default (`DSH_MIAOWU_VAULT_ENABLED`); while disabled, its routes return 403 and write nothing. Full backups can include `.oh-story/` text state (including vault ciphertext when the vault is enabled), so treat backups as sensitive and verify what one contains before sharing or migrating it.
+
 The plugin mounts `/oh-story` routes on DSH's existing web server for creative files, read-only media and game previews, and runtime preflight:
 
 - **Browser trust.** Workspace, file, media and preflight requests apply Host, `Origin` and Fetch Metadata checks matching DSH's native API boundary. Only loopback authorities are trusted by default. A non-loopback deployment must declare each authority in `trustedHosts`; malformed entries fail plugin loading. Generated-game previews additionally allow isolated document navigation under a trusted Host and apply a restrictive CSP to preview responses.

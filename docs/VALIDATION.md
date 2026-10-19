@@ -1,8 +1,18 @@
 # Validation
 
-Released: `@oh-story/dsh` 0.1.18 on DeepSeek Harness `0.2.1-rc.2`, with the earlier `0.2.0-rc.2` line covered. Local aggregate acceptance passed on 2026-10-19; the new-user product audit and paid-provider review are the 0.1.17 evidence below.
+Current source: `@dsh-miaowu/dsh` 0.1.18 on DeepSeek Harness `0.2.1-rc.2`, with the earlier `0.2.0-rc.2` line covered. Publication status (2026-10-20): 0.1.18 is source-only, `v0.1.16` is the last published prebuilt asset, and npm is unpublished (`@dsh-miaowu/dsh` returns 404). The 0.1.18 and 0.1.17 evidence below is inherited from the upstream release-candidate line, not a fork publication record; see [Fork distribution audit](#fork-distribution-audit-2026-10-20).
 
-## 0.1.18 release evidence
+## Fork distribution audit (2026-10-20)
+
+- Fork state: source version 0.1.18, last published prebuilt `v0.1.16`, npm unpublished. The default host is DSH `0.2.1-rc.2`, and `0.2.0-rc.2` remains covered; there is no separate alpha trial line.
+- On 2026-10-20, `pnpm verify` exited 0 on code state `f1f57e4` (the later docs commits do not change code): ESLint, TypeScript, the five asset parity checks, the DSH boundary audit, the release tests (24/24), the upstream-update tests, 56 test files / 561 tests, and the build.
+- Targeted suites: `workspace-safety.test.ts` 8/8, `file-activity.test.ts` 22/22 (including the live-refresh decision), and `release.test.mjs` 24/24.
+- Isolated `DSH_HOME` installs succeeded for both the source-built 0.1.18 tarball and the published `v0.1.16` tarball. The 0.1.18 GitHub asset and the npm package both return 404.
+- Pinned upstream sets: Oh Story 0.9.0 (`74080143dd1a`, 13 Skills / 7 Roles / `agents_version` 36), Drama 0.9.0 (`dafe80ee390e`, 11 Skills), NovelToGame 0.6.0 (`7758caa8d957`, 7 Skills) and video-recap 0.6.2 (`5785c33d8b51`, 7 Skills, 3 user-invocable).
+- The packaged smoke (`pnpm test:dsh`) and the paid real-provider run (`pnpm test:dsh:real`) are not recorded in this audit and are not claimed as passing here.
+- Known tooling debt outside the `pnpm verify` gate: `scripts/native-dsh-smoke.ts` has 41 pre-existing type errors under `tsc -p tsconfig.lint.json --noEmit`.
+
+## 0.1.18 release evidence (inherited from the upstream release line)
 
 0.1.18 fixes the plugin-owned P2/P3 findings left by the 0.1.17 new-user audit. Upstream Skill pins, the default host and the paid-provider surface are unchanged from 0.1.17.
 
@@ -26,7 +36,7 @@ Released: `@oh-story/dsh` 0.1.18 on DeepSeek Harness `0.2.1-rc.2`, with the earl
 - **Local aggregate acceptance:** passed 2026-10-19.
 - **New-user audit and paid provider:** not rerun. 0.1.18 changes only Browser workbench surfaces and host preflight floors. The 0.1.17 evidence below still applies to Skills, Roles and provider behaviour.
 
-## 0.1.17 release evidence
+## 0.1.17 release evidence (inherited from the upstream release line)
 
 ### Local evidence
 
@@ -162,10 +172,11 @@ The deterministic packaged Role path is part of the correctness gate. The paid r
 | --- | --- |
 | Capability catalog | Native DSH Session exposes 13 Oh Story Skills, 11 Drama Skills, 7 NovelToGame Skills and the 3 user-invocable video entries; provider tests retain all 7 upstream video Skills |
 | Upstream integrity | Four knowledge manifests verify pinned commits, catalogs, every bundled file hash, portable-source exclusions, the Drama creator-first contract and its assembly stage, and the absence of every standalone-dashboard file; all 11 bundled Drama selftests run without bytecode writes, the five demo documents verify recorded fixture hashes, NovelToGame parity covers the playable `jin-ping-mei` ADV build and authoring-material exclusions, and video-recap parity requires the complete seven-Skill pipeline plus its orchestrator/inspect entry points |
-| Plugin boundary | Host bundle and source audit keep all DSH imports inside `@oh-story/dsh` |
-| Workspace safety | Unit tests cover Host/Origin/Fetch Metadata trust and creative media allowlists, while the packaged route rejects traversal and exercises session-scoped reads, media byte ranges and atomic writes; generated-game CSP is browser-probed to reject workspace API access outside the preview asset prefix; child-session, absolute-path and symbolic-link negative cases remain follow-up contracts |
+| Plugin boundary | Host bundle and source audit keep all DSH imports inside `@dsh-miaowu/dsh` |
+| Release integrity | Release identity (repository, package and tarball prefix) is derived from the fork package; stable tags are `miaowu-vX.Y.Z`; the fork-source preflight rejects upstream `v*` tags and commits lacking the fork entry point or `main` ancestry; the upstream-only recovery workflow is absent from this branch (`release.test.mjs`, 24 cases) |
+| Workspace safety | Unit tests cover Host/Origin/Fetch Metadata trust and creative media allowlists, while the packaged route rejects traversal and exercises session-scoped reads, media byte ranges and atomic writes; generated-game CSP is browser-probed to reject workspace API access outside the preview asset prefix. Negative cases now cover child-session (403), empty session (400), unknown session (404), absolute path (403) and a resolved target that escapes the workspace after symlink normalization (403); a real-symlink packaged smoke remains a follow-up |
 | Editor concurrency | Versioned GET/PUT rejects stale saves; Chrome edits, saves, rereads and restores a real workspace file |
-| File following | Tests cover DSH Step location data, nested running calls, streamed write/edit previews, calls DSH holds between their finished step and dispatch, creative path classification and workbench switching |
+| File following | Tests cover DSH Step location data, nested running calls, streamed write/edit previews, calls DSH holds between their finished step and dispatch, creative path classification and workbench switching; the live refresh decision (live/in-flight/hidden) has unit coverage, while the full long-running Role browser case remains environment-dependent |
 | Markdown rendering | Component tests cover tables, task lists, fenced code, inline formatting, safe links and inert raw HTML |
 | JSONL rendering | Component tests cover typed record summaries, source line numbers, scalar records and per-line parse failures |
 | Three-column layout | Native DSH Chrome smoke checks ordered tree/editor/Chat geometry and minimum usable widths |
@@ -179,7 +190,7 @@ The deterministic packaged Role path is part of the correctness gate. The paid r
 | Media adapters | Unit tests pin the adapter catalog to the upstream provider script and its references, check the generated adapter config carries argv commands only, verify the produce Skill text names the config path and required variables, and confirm presence reporting never includes values. The generated generic profile deliberately omits `reference_roles`, so audio references fail closed; a creator-owned adapter config must explicitly opt a known model into `reference_audio`. |
 | Agent production operability | The packaged fixture model calls the registered `oh_story_production` tool in a real DSH turn; the durable successful call is rendered by the plugin tool view and focuses the requested EP001 production target without granting cosmetic canvas control. Unit tests reject traversal, duplicate sequence IDs, failed calls and malformed replay payloads. |
 | Roles and hooks | Real Cordis Fiber contracts cover plugin-runtime capture, `Context.get()` fallback and missing-runtime failure; packaged DSH deterministically completes one child-Agent Role invocation; unit contracts cover pinned reference reads, path escape and scoped-shadow rejection |
-| Package contents | Build and pack include all four pinned knowledge sets, the Jin Ping Mei playable build and QA record, package metadata and license while omitting source tests and the standalone Drama and video-recap dashboards |
+| Package contents | Build and pack include all five pinned knowledge sets, the Jin Ping Mei playable build and QA record, package metadata and license while omitting source tests and the standalone Drama and video-recap dashboards |
 
 The gate discovers all `*.test.ts` and `*.contract.test.ts` files. Coverage claims below are tied to executable behavior, not a manually maintained test-count snapshot.
 

@@ -5,6 +5,13 @@
 > 实施状态：✅ 已完成（2026-09-05，四个 Phase 全部落库，`pnpm verify` 全绿）· ⏳ 部分/简化交付 · ⬜ 未做
 > 参考素材：`参考项目/` 目录下各调研文档（已被 git 忽略，仅本机留存）
 
+## 2026-10-20 复核
+
+- **Phase A-D 已交付**：全文检索、候选暂存、长任务恢复、备份、版本/审计/批注、布局、拆书结构化、世界观、保险库等均已落库；`pnpm verify` 在代码状态 `f1f57e4` 退出 0（lint、typecheck、五项资产 parity、DSH boundary、release 24/24、upstream-update、56 个测试文件 / 561 项、build）。`client/index.tsx` 已拆为 16 行入口壳，900 行软上限债务关闭。
+- **发布管线已适配 fork**：发布身份（仓库/包名/tarball 前缀）由 `packages/dsh-plugin/package.json` 派生；稳定 tag 为 `miaowu-vX.Y.Z`；`release.yml` 只接受该前缀，并拒绝上游 `v*` tag、缺 fork 入口或不在 `main` 祖先链上的提交；上游专用 `recover-v0.1.13.yml` 已删除。**仍待办**：npm 首次发布（granular `NPM_TOKEN`）与 0.1.16 之后的预构建包发布，目前 0.1.17 / 0.1.18 只有源码。
+- **剩余 P2 / 延后项**：短剧生产素材/分镜板浮动面板、esbuild 多入口拆包、`availableActions` 服务端下发（现为前端状态表）、保险库 UI；`scripts/native-dsh-smoke.ts` 在 `tsc -p tsconfig.lint.json --noEmit` 下有 41 个既有类型错误（不在 `pnpm verify` 门禁内）。
+- **明确不在范围**：改编 P3（有声/漫画/翻译/版权签约）不随本轮交付，见 `docs/小说全流程覆盖评估.md`。
+
 ## 第一优先（高价值，直接对应现有差距）
 
 | # | 功能 | 借鉴来源 | 落点 | 状态 | 落点（实施后） |
@@ -39,8 +46,8 @@
 
 - ✅ 已核实（2026-09-05）：`story` skill 引用的 `scripts/dashboard-server.mjs` 在**上游 `oh-story-dsh@main` 全树同样不存在**（`packages/knowledge/oh-story/skills/story/scripts/` 仅含 `author_memory_commit.py`），本地 fork 该目录与上游 diff 为空；`build-dsh-plugin.ts` / `knowledge-assets.ts` 显式排除、`check-upstream-parity.ts` 跳过——系上游刻意不随包分发 Dashboard 服务，但 `SKILL.md`「Dashboard 工作台」引用未同步清除（短剧侧 `dashboard_server.py` 同模式）。处置：回馈上游（issue 文案已备，本机 `gh` 未装待手动贴出），本地保持基线不改。
 
-## 工程注记（实施后）
+## 工程注记（实施后，2026-09-05，历史）
 
 - 扩展缝：`src/services/registry.ts`（registerWorkspaceExtension + onWorkspaceWrite）+ `src/client/features/registry.ts`（registerWorkbenchFeature + registerFileViewer），并行代理据此无冲突交付
 - 客户端构建已开 esbuild 完整 minify（403KB → 266KB，预算 400KB 内重新有富余）
-- 已知债务：`client/index.tsx` 约 2060 行超 900 行软上限（拆组件/多功能面板独立文件为后续重构项）；短剧生产素材板独立浮动、esbuild 多入口拆包、availableActions 服务端下发（现为前端状态表）为后续项
+- 历史债务（2026-09-05）：`client/index.tsx` 约 2060 行超 900 行软上限；该债务已于 Phase A-D 拆为 16 行入口壳（见 2026-10-20 复核）。仍延后：短剧生产素材板独立浮动、esbuild 多入口拆包、availableActions 服务端下发（现为前端状态表）

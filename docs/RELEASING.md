@@ -111,8 +111,9 @@ Once enabled, a `miaowu-v*` tag push makes `.github/workflows/release.yml`:
    heading, and that the source passed the newest `main` CI attempt;
 4. uploads the tarball, the SHA-256 checksum file and the release manifest to a GitHub
    Release;
-5. publishes the identical tarball to npm with provenance, once credentials or Trusted
-   Publishing exist.
+5. publishes the identical tarball to npm with provenance once a granular `NPM_TOKEN`
+   exists; Trusted Publishing can be configured only after the package exists on the
+   registry, so it cannot serve a first publish.
 
 The deterministic public manifest records the source commit, tool versions,
 tarball size, SHA-256, and npm-compatible SHA-512 integrity. Separate CI and
