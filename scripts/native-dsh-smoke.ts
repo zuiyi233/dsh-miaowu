@@ -743,7 +743,10 @@ async function stop(child: ChildProcess): Promise<void> {
 function canonicalTempDirectory(): string {
   try {
     return realpathSync.native(tmpdir());
-  } catch {
+  } catch (error) {
+    process.stderr.write(
+      `[smoke] warning: could not resolve ${tmpdir()} to its long path (${error instanceof Error ? error.message : String(error)}); the Host may fail to save settings.\n`
+    );
     return tmpdir();
   }
 }
