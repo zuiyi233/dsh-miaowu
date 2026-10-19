@@ -7,7 +7,7 @@
 
 ## 2026-10-20 复核
 
-- **Phase A-D 已交付**：全文检索、候选暂存、长任务恢复、备份、版本/审计/批注、布局、拆书结构化、世界观、保险库等均已落库；`pnpm verify` 在代码状态 `03eadba` 退出 0（lint、typecheck、五项资产 parity、DSH boundary、release 25/25、upstream-update、56 个测试文件 / 561 项、build）。打包冒烟 `pnpm test:dsh` 与 `pnpm test:dsh:rc` 在 DSH 0.2.1-rc.2 / 0.2.0-rc.2 上均为 `"ok": true`（2026-10-20，修复 Windows 8.3 临时路径后）。`client/index.tsx` 已拆为 16 行入口壳，仅该入口脱离 900 行软上限；`client/creative-workbench.tsx` 仍为 1347 行，软上限债务未整体关闭。
+- **Phase A-D 已交付**：全文检索、候选暂存、长任务恢复、备份、版本/审计/批注、布局、拆书结构化、世界观、保险库等均已落库；`pnpm verify` 在代码状态 `abacaa3` 退出 0（lint、typecheck、五项资产 parity、DSH boundary、release 25/25、upstream-update、56 个测试文件 / 561 项、build）。打包冒烟 `pnpm test:dsh` 与 `pnpm test:dsh:rc` 在 DSH 0.2.1-rc.2 / 0.2.0-rc.2 上均为 `"ok": true`（2026-10-20，修复 Windows 8.3 临时路径后）。`client/index.tsx` 已拆为 16 行入口壳，仅该入口脱离 900 行软上限；`client/creative-workbench.tsx` 仍为 1347 行，软上限债务未整体关闭。
 - **发布管线已适配 fork**：发布身份（仓库/包名/tarball 前缀）由 `packages/dsh-plugin/package.json` 派生；稳定 tag 为 `miaowu-vX.Y.Z`；`release.yml` 只接受该前缀，并拒绝上游 `v*` tag、缺 fork 入口或源提交不在 `main` 上（`main` 的祖先）的发布；上游专用 `recover-v0.1.13.yml` 已删除。**仍待办**：npm 首次发布（granular `NPM_TOKEN`）与 0.1.16 之后的预构建包发布，目前 0.1.17 / 0.1.18 只有源码；发布前还需在 GitHub 为 `main` 开启分支保护（`ci-proof` 要求 `branches/main.protected === true`，2026-10-20 仍为 false），并启用当前 `disabled_manually` 的 Release 工作流。
 - **剩余 P2 / 延后项**：短剧生产素材/分镜板浮动面板、esbuild 多入口拆包、`availableActions` 服务端下发（现为前端状态表）、保险库 UI；`scripts/native-dsh-smoke.ts` 在 `tsc -p tsconfig.lint.json --noEmit` 下有 41 个既有类型错误（不在 `pnpm verify` 门禁内）。
 - **明确不在范围**：改编 P3（有声/漫画/翻译/版权签约）不随本轮交付，见 `docs/小说全流程覆盖评估.md`。
