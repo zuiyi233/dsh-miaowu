@@ -335,11 +335,15 @@ async function resolveReleaseSourceRef(tag) {
   return "HEAD";
 }
 
-async function resolveMainRef(gitCommand) {
-  for (const candidate of ["main", "origin/main"]) {
-    if (await gitRefExists(candidate, gitCommand)) return candidate;
+async function resolveMainRefs(gitCommand) {
+  // Either ref may lag behind the commit a tag was cut from; accept the source
+  // when it is on the history of any available default-branch ref.
+  const refs = [];
+  for (const candidate of ["origin/main", "main"]) {
+    if (await gitRefExists(candidate, gitCommand)) refs.push(candidate);
   }
-  throw new Error("release source preflight requires a local main or origin/main branch");
+  if (refs.length === 0) throw new Error("release source preflight requires a local main or origin/main branch");
+  return refs;
 }
 
 export async function assertForkReleaseSource(ref, dependencies = {}) {
@@ -363,11 +367,17 @@ export async function assertForkReleaseSource(ref, dependencies = {}) {
     entrySource.includes("createDshMiaowuSkillProvider"),
     `release source ${source} is not a fork main commit (missing createDshMiaowuSkillProvider)`,
   );
-  const mainRef = await resolveMainRef(gitCommand);
-  try {
-    await gitCommand(["merge-base", "--is-ancestor", source, mainRef]);
-  } catch {
-    throw new Error(`release source ${source} is not on ${mainRef} (not an ancestor of the default branch)`);
+  const mainRefs = await resolveMainRefs(gitCommand);
+  let onMain = false;
+  for (const mainRef of mainRefs) {
+    try {
+      await gitCommand(["merge-base", "--is-ancestor", source, mainRef]);
+      onMain = true;
+      break;
+    } catch { /* try the other default-branch ref */ }
+  }
+  if (!onMain) {
+    throw new Error(`release source ${source} is not on main (not an ancestor of ${mainRefs.join(" or ")})`);
   }
   return source;
 }

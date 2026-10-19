@@ -239,23 +239,23 @@ test("fork-source preflight rejects a ref that is not on main", async () => {
         throw new Error(`unexpected git ${args.join(" ")}`);
       },
     }),
-    /is not on main/,
+    /is not on (?:origin\/)?main/,
   );
 });
 
-test("fork-source preflight checks the source against origin/main when main is absent", async () => {
+test("fork-source preflight falls back to a local main when origin/main is absent", async () => {
   const ancestry = [];
   await assertForkReleaseSource("tagref", {
     git: async (args) => {
       if (args[0] === "cat-file") return "";
       if (args[0] === "show") return "export const marker = createDshMiaowuSkillProvider;\n";
       if (args[0] === "rev-parse") {
-        if (args[2] === "main^{commit}") {
+        if (args[2] === "origin/main^{commit}") {
           const missing = new Error("git exited with 1");
           missing.code = 1;
           throw missing;
         }
-        return "origin/main\n";
+        return "main\n";
       }
       if (args[0] === "merge-base") {
         ancestry.push(args[2], args[3]);
@@ -264,7 +264,7 @@ test("fork-source preflight checks the source against origin/main when main is a
       throw new Error(`unexpected git ${args.join(" ")}`);
     },
   });
-  assert.deepEqual(ancestry, ["tagref", "origin/main"]);
+  assert.deepEqual(ancestry, ["tagref", "main"]);
 });
 
 test("CI proof selects the newest exact-SHA main push attempt and rejects stale success", () => {
