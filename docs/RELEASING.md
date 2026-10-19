@@ -35,13 +35,13 @@ The release pipeline now matches this fork's identity:
   Release channel exists, and its only release is `v0.1.16`; versions 0.1.17 and 0.1.18 are
   source-only.
 
-The fork's Release workflow is currently disabled in GitHub Actions, so a `miaowu-v*` tag
-push starts no run until it is enabled. Enable it from the Actions tab, or list the fork's
-workflows with `gh workflow list` and enable the Release entry by its own ID. The ID
-`350173456` in older notes pointed at this fork's upstream-era Release workflow; IDs are
-per repository and can change when a workflow is re-created, so read the current ID from
-the Actions UI or `gh api repos/zuiyi233/dsh-miaowu/actions/workflows` before enabling
-rather than reusing a hard-coded one.
+The fork's Release workflow is currently disabled in GitHub Actions: the API reports its
+state as `disabled_manually`, so a `miaowu-v*` tag push starts no run until it is enabled.
+Enable it from the Actions tab, or list the fork's workflows with `gh workflow list` and
+enable the Release entry by its own ID. In this fork that ID is `350173456`, but a workflow
+ID can change when a workflow is deleted and re-created, so confirm the current ID from the
+Actions UI or `gh api repos/zuiyi233/dsh-miaowu/actions/workflows` before enabling instead
+of trusting a saved number.
 
 ## One-time npm setup
 
@@ -50,11 +50,12 @@ public `@dsh-miaowu/dsh` package. Store a granular publish token as the reposito
 secret `NPM_TOKEN`; never commit it or put it in an issue, workflow file, or
 release note.
 
-This setup is not complete. Prior existence on npm is not the blocker: a first publish is
-allowed once a credential exists — a granular `NPM_TOKEN` or npm Trusted Publishing,
-permitted to create the public package. While neither is configured, the `Publish npm
-package` job fails, `Verify public channels` is skipped because it needs that job, and the
-run is red. The GitHub Release job does not depend on them.
+This setup is not complete. The first publish must use a granular `NPM_TOKEN` permitted to
+create the public package: npm only lets you configure Trusted Publishing on a package that
+already exists on the registry, so Trusted Publishing cannot serve a first publish. While no
+publish credential exists, the `Publish npm package` job fails, `Verify public channels` is
+skipped because it needs that job, and the run is red. The GitHub Release job does not
+depend on them.
 
 After the first publication, configure npm Trusted Publishing for:
 
