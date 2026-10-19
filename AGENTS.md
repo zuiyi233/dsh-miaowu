@@ -41,7 +41,7 @@
 1. **空名工具 bug 的历史证据（2026-09 隔离结论）**：宿主内置 `read`/`write` 发给模型时函数名丢空 → `Error: unknown tool ""` → 400。当时做了三级隔离（完整 profile / 摘本插件 / 双插件全摘只剩官方底座）均复现，结论是与本插件无关；当时在 `0.2.1-alpha.4` 与 `0.2.1-rc.1` 复现，该结论不覆盖现在的全局 `0.2.1-alpha.5`，重新验证前不要当成现行结论引用。手册 `docs/faq.md` 有同族根因（SSE 流式覆盖赋值，`translate.ts` 累加 + 严格类型校验），修宿主源码前先对一下手册方案。
 2. **畸形 tool 消息污染会话**：空名失败回合的 `tool/result`（`callId: ""`）会被持久化，重载时网关校验 `message must have tool source` 失败 → “历史加载失败”。纯文本会话不受影响。用户真实会话若报此错，先摘畸形消息再谈修复。
 3. **`workspace.json` 是双表结构**：`tables.workspaces` 明细 + `global.workspaceIds` 顺序表。删工作区必须两处一起删，否则 `dsh web` 启动报 `registry order references missing workspace` 直接起不来。改前必备份。
-4. **真实 profile 是生产环境**：`~/.dsh/profiles/web` + 全局 rc.1 CLI。对真实 profile 跑探针/冒烟必污染 `~/.dsh/sessions` 与 `workspace.json`，跑完必须清理（删探针会话目录 + 移除索引条目 + 清 `%TEMP%` 残留），或一开始就用隔离 `DSH_HOME` 跑。
+4. **真实 profile 是生产环境**：`~/.dsh/profiles/web` + 全局 `0.2.1-alpha.5` CLI（仓库默认宿主 `0.2.1-rc.2`）。对真实 profile 跑探针/冒烟必污染 `~/.dsh/sessions` 与 `workspace.json`，跑完必须清理（删探针会话目录 + 移除索引条目 + 清 `%TEMP%` 残留），或一开始就用隔离 `DSH_HOME` 跑。
 5. **空目录没有 UI 是设计**：`hasCreativeProject` 为假且无报错时工作台返回 null，连按钮都不画。冷启动走对话（`story-setup` DSH 版只建小说目录）或手动建 `正文/`，不要当成“插件没加载”。
 6. **Windows 命令行坑**：MSYS tar 遇 `D:/` 盘符当远程主机（加 `--force-local` 或纯 Node）；curl URL 被路径转换（`MSYS_NO_PATHCONV=1`）；`kill $PID` 只杀 wrapper，按 `netstat -ano` 找 LISTENING 真 PID 再 `taskkill //F //T`。
 

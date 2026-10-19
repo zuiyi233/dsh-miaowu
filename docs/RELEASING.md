@@ -28,15 +28,20 @@ The release pipeline now matches this fork's identity:
   `packages/dsh-plugin/src/services/index.ts` and `createDshMiaowuSkillProvider`, or that
   is not descended from `main` (`origin/main` in a tag checkout). Upstream release
   commits and upstream `v*` tags fail before any build starts.
-- The upstream-only `recover-v0.1.13.yml` workflow has been removed.
+- The upstream-only `recover-v0.1.13.yml` workflow is deleted in this branch. Until that
+  deletion is pushed and merged, GitHub still lists it on the default branch; confirm it is
+  gone there before assuming the remote has no such workflow.
 - npm is unpublished: `@dsh-miaowu/dsh` returns 404 from the registry. Only the GitHub
   Release channel exists, and its only release is `v0.1.16`; versions 0.1.17 and 0.1.18 are
   source-only.
 
 The fork's Release workflow is currently disabled in GitHub Actions, so a `miaowu-v*` tag
 push starts no run until it is enabled. Enable it from the Actions tab, or list the fork's
-workflows with `gh workflow list` and enable the Release entry by its own ID. Do not copy a
-workflow ID from another repository or from older instructions.
+workflows with `gh workflow list` and enable the Release entry by its own ID. The ID
+`350173456` in older notes pointed at this fork's upstream-era Release workflow; IDs are
+per repository and can change when a workflow is re-created, so read the current ID from
+the Actions UI or `gh api repos/zuiyi233/dsh-miaowu/actions/workflows` before enabling
+rather than reusing a hard-coded one.
 
 ## One-time npm setup
 
@@ -45,10 +50,11 @@ public `@dsh-miaowu/dsh` package. Store a granular publish token as the reposito
 secret `NPM_TOKEN`; never commit it or put it in an issue, workflow file, or
 release note.
 
-This setup is not complete: the package has never been published and Trusted Publishing is
-not configured. Until the package exists on npm, the workflow's `Publish npm package` and
-`Verify public channels` jobs cannot succeed; the GitHub Release job does not depend on
-them.
+This setup is not complete. Prior existence on npm is not the blocker: a first publish is
+allowed once a credential exists — a granular `NPM_TOKEN` or npm Trusted Publishing,
+permitted to create the public package. While neither is configured, the `Publish npm
+package` job fails, `Verify public channels` is skipped because it needs that job, and the
+run is red. The GitHub Release job does not depend on them.
 
 After the first publication, configure npm Trusted Publishing for:
 
@@ -136,8 +142,8 @@ check-suite, source, status, conclusion, or GitHub Actions application change.
 After both publishers finish, the workflow anonymously downloads the GitHub
 tarball, waits a bounded time for npm registry propagation, compares
 `dist.integrity`, and installs the exact public npm version with lifecycle
-scripts disabled. A timeout or channel mismatch leaves the workflow red. Until
-npm is configured, the `npm` and `verify-public` jobs cannot pass; the GitHub
+scripts disabled. A timeout or channel mismatch leaves the workflow red. Until an npm
+credential is configured, the `npm` job fails and `verify-public` is skipped; the GitHub
 Release job still publishes.
 
 ## Dry-run and failure outcomes
