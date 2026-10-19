@@ -907,7 +907,7 @@ async function main(): Promise<void> {
     await compactFirstRunPage.close();
     // The bundled example is playable before any creative work exists, and its preview reports
     // the build on screen as loaded, not failed, across the loopback-alias isolation.
-    await welcome.getByRole("button", { name: "先玩内置示例《金瓶梅 · 风月总账》", exact: true }).click();
+    await firstRunGuide.getByRole("button", { name: "先玩内置示例《金瓶梅 · 风月总账》", exact: true }).click();
     const firstRunGame = firstRunPage.locator(".oh-game-studio");
     await firstRunGame.locator('iframe[title="《金瓶梅 · 风月总账》可试玩预览"]').waitFor({ state: "visible", timeout: 20_000 });
     await firstRunGame.locator(".oh-game-runtime-state").filter({ hasText: /^预览已载入/u }).waitFor({ state: "visible", timeout: 20_000 });
@@ -924,7 +924,7 @@ async function main(): Promise<void> {
     const rememberedLayout = await firstRunPage.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("oh-story.workbench.")));
     if (rememberedLayout.length !== 0) throw new Error(`The example visit was remembered for the workspace: ${JSON.stringify(rememberedLayout)}`);
     await firstRunVideo.getByRole("button", { name: "收起创作工作台", exact: true }).click();
-    await welcome.waitFor({ state: "visible", timeout: 10_000 });
+    await firstRunGuide.waitFor({ state: "visible", timeout: 10_000 });
 
 
     const storyWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: string; readonly title: string } }>(origin, "workspace/create", { request: { path: storyRoot } });
