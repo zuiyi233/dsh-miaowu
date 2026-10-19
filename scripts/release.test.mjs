@@ -79,6 +79,17 @@ test("release tooling carries no upstream repository or package identity", async
   assert.doesNotMatch(source, /zenstory-ai|@oh-story\/dsh|oh-story-dsh/);
 });
 
+test("real-provider test identifies the packed plugin through the shared fork identity", async () => {
+  const source = await readFile(path.join("scripts", "native-dsh-real.ts"), "utf8");
+  assert.match(source, /import \{ isPackedPluginSkillPath \} from "\.\/release-identity\.mjs";/);
+  assert.doesNotMatch(source, /@oh-story\/dsh/);
+  const callSites = source.match(/isPackedPluginSkillPath\(/g) ?? [];
+  assert.ok(
+    callSites.length >= 2,
+    `expected the story and short-drama review flows to use isPackedPluginSkillPath, found ${callSites.length} call sites`,
+  );
+});
+
 test("release metadata requires a fork stable tag, matching versions, and a dated changelog heading", () => {
   assert.deepEqual(
     validateReleaseMetadata({

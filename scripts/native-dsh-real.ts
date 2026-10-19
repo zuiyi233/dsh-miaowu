@@ -7,6 +7,8 @@ import { dirname, join, relative, resolve } from "node:path";
 import { parseEnv } from "node:util";
 import { fileURLToPath } from "node:url";
 
+import { isPackedPluginSkillPath } from "./release-identity.mjs";
+
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dshVersion = process.env.DSH_TEST_VERSION ?? "0.2.1-rc.2";
 /** Exact WebSocket route carrying every Typert Remote stream. */
@@ -287,9 +289,8 @@ async function main(): Promise<void> {
     }
     await rpc(origin, "session/selectModel", { request: { sessionId: session.sessionId, provider: deepseek.id, model: selectedModel } });
 
-    const fromPlugin = (skill: { readonly path?: string } | undefined): boolean => (skill?.path ?? "").replaceAll("\\", "/").includes("/@oh-story/dsh/lib/");
     const skills = await rpc<{ readonly skills: readonly { readonly name: string; readonly path?: string }[] }>(origin, "skills/list", { request: { sessionId: session.sessionId } });
-    if (!fromPlugin(skills.skills.find((skill) => skill.name === "story-review"))) throw new Error("story-review was not registered by the packed plugin in the DSH Session.");
+    if (!isPackedPluginSkillPath(skills.skills.find((skill) => skill.name === "story-review")?.path)) throw new Error("story-review was not registered by the packed plugin in the DSH Session.");
     await rpc(origin, "session/prompt", {
       request: {
         requestId: crypto.randomUUID(),
@@ -334,7 +335,7 @@ async function main(): Promise<void> {
     const dramaSession = await rpc<{ readonly sessionId: string }>(origin, "session/create", { request: { workspaceId: workspace.workspace.workspaceId } });
     await rpc(origin, "session/selectModel", { request: { sessionId: dramaSession.sessionId, provider: deepseek.id, model: selectedModel } });
     const dramaSkills = await rpc<{ readonly skills: readonly { readonly name: string; readonly path?: string }[] }>(origin, "skills/list", { request: { sessionId: dramaSession.sessionId } });
-    if (!fromPlugin(dramaSkills.skills.find((skill) => skill.name === "short-drama-review"))) throw new Error("short-drama-review was not registered by the packed plugin in the DSH Session.");
+    if (!isPackedPluginSkillPath(dramaSkills.skills.find((skill) => skill.name === "short-drama-review")?.path)) throw new Error("short-drama-review was not registered by the packed plugin in the DSH Session.");
     await rpc(origin, "session/prompt", {
       request: {
         requestId: crypto.randomUUID(),
