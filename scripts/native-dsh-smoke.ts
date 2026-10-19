@@ -443,6 +443,13 @@ async function isolateFirstUseWorkspace(dshHome: string, documents: string): Pro
     .map((line) => line.trim())
     .filter((line) => line !== "" && !line.startsWith("#"));
   const emptyDocument = contentLines.length === 0 || (contentLines.length === 1 && contentLines[0] === "[]");
+  const firstContentLine = contentLines[0] ?? "";
+  const flowStyle = contentLines.length === 1 && !emptyDocument
+    && (firstContentLine.startsWith("[") || firstContentLine.startsWith("{"));
+  const strayEmpty = contentLines.length > 1 && contentLines.includes("[]");
+  if (flowStyle || strayEmpty) {
+    throw new Error(`Unsupported profile patch shape in ${patchPath}; expected an empty or block-style YAML sequence.`);
+  }
   const emptyArrayLine = /^\s*\[\]\s*$/mu;
   await writeFile(
     patchPath,
@@ -732,13 +739,22 @@ async function stop(child: ChildProcess): Promise<void> {
   if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
 }
 
+/** tmpdir() may return an 8.3 name; resolve it to the one canonical form the Host sees. */
+function canonicalTempDirectory(): string {
+  try {
+    return realpathSync.native(tmpdir());
+  } catch {
+    return tmpdir();
+  }
+}
+
 async function main(): Promise<void> {
   // Windows hands out the 8.3 form (C:\Users\ADMINI~1\...) from tmpdir(). Installing
   // the Host under it makes the profile resolve the same Host modules through both
   // the short and long paths, which duplicates module state: a settings write then
   // reports "profile reload requires the root Include entry". Resolve the name
   // before creating the root so every Host path has one canonical form.
-  const temporaryRoot = await mkdtemp(join(realpathSync.native(tmpdir()), "oh-story-native-dsh-smoke-"));
+  const temporaryRoot = await mkdtemp(join(canonicalTempDirectory(), "oh-story-native-dsh-smoke-"));
   const packDirectory = join(temporaryRoot, "pack");
   const installation = join(temporaryRoot, "dsh");
   const dshHome = join(temporaryRoot, "home");
