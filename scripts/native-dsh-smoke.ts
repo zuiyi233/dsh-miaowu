@@ -1,6 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { gunzipSync } from "node:zlib";
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { createServer as createHttpServer, request as httpRequest, type Server as HttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -431,8 +432,62 @@ async function authorizeDsh(origin: string, logs: readonly string[]): Promise<st
  */
 async function isolateFirstUseWorkspace(dshHome: string, documents: string): Promise<void> {
   await mkdir(documents, { recursive: true });
-  await writeFile(join(dshHome, "profiles", "web", "cordis.patch.yml"),
-    `- id: workspace-controller\n  config:\n    documentsDirectory: ${JSON.stringify(documents)}\n`);
+  const patchPath = join(dshHome, "profiles", "web", "cordis.patch.yml");
+  // The Host persists onboarding acknowledgements (for example ui-settings-general's
+  // welcomeNoticeVersion) in this same patch layer, so preserve existing rows and
+  // append the workspace redirect instead of replacing the file.
+  const existing = await readFile(patchPath, "utf8").catch(() => "");
+  const entry = `- id: workspace-controller\n  config:\n    documentsDirectory: ${JSON.stringify(documents)}\n`;
+  const contentLines = existing
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"));
+  const emptyDocument = contentLines.length === 0 || (contentLines.length === 1 && contentLines[0] === "[]");
+  const emptyArrayLine = /^\s*\[\]\s*$/mu;
+  await writeFile(
+    patchPath,
+    emptyDocument && emptyArrayLine.test(existing)
+      ? existing.replace(emptyArrayLine, () => entry)
+      : existing.trim() === "" ? entry : `${existing.trimEnd()}\n${entry}`,
+  );
+}
+
+/**
+ * Accept the Host's product preview notice before the browser opens. The Host
+ * stores the acknowledgement in the same settings layer the first-run dialog
+ * writes to; doing it here keeps the plugin surface test from depending on that
+ * host-chrome round trip. Returns why no write happened when older Hosts have no
+ * notice or the profile does not serve its namespace.
+ */
+async function acknowledgeHostPreviewNotice(origin: string, installation: string): Promise<string> {
+  const source = await readFile(
+    join(installation, "node_modules", "@deepseek-ai", "dsh-client-ui-settings-models", "lib", "client.js"),
+    "utf8"
+  ).catch(() => "");
+  const version = /const WELCOME_NOTICE_VERSION = "([^"]+)"/u.exec(source)?.[1];
+  if (version === undefined) return "no-notice";
+  const write = async (): Promise<string | undefined> => {
+    const view = await rpc<{
+      readonly namespaces: readonly { readonly ns: string; readonly revision: number }[];
+    }>(origin, "settings/describe", {});
+    const welcome = view.namespaces.find((namespace) => namespace.ns === "ui-settings-general");
+    if (welcome === undefined) return "unserved";
+    await rpc(origin, "settings/mutate", {
+      ns: "ui-settings-general",
+      ops: [{ op: "set", path: ["welcomeNoticeVersion"], value: version }],
+      expectedRevision: welcome.revision
+    });
+    return undefined;
+  };
+  try {
+    const skipped = await write();
+    if (skipped !== undefined) return skipped;
+    return "acknowledged";
+  } catch {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    const skipped = await write();
+    return skipped ?? "acknowledged-after-retry";
+  }
 }
 
 /** Every request to DSH carries the session cookie obtained by {@link authorizeDsh}. */
@@ -678,7 +733,12 @@ async function stop(child: ChildProcess): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const temporaryRoot = await mkdtemp(join(tmpdir(), "oh-story-native-dsh-smoke-"));
+  // Windows hands out the 8.3 form (C:\Users\ADMINI~1\...) from tmpdir(). Installing
+  // the Host under it makes the profile resolve the same Host modules through both
+  // the short and long paths, which duplicates module state: a settings write then
+  // reports "profile reload requires the root Include entry". Resolve the name
+  // before creating the root so every Host path has one canonical form.
+  const temporaryRoot = await mkdtemp(join(realpathSync.native(tmpdir()), "oh-story-native-dsh-smoke-"));
   const packDirectory = join(temporaryRoot, "pack");
   const installation = join(temporaryRoot, "dsh");
   const dshHome = join(temporaryRoot, "home");
@@ -857,6 +917,7 @@ async function main(): Promise<void> {
     child.stdout?.on("data", (chunk: Buffer) => logs.push(chunk.toString("utf8")));
     child.stderr?.on("data", (chunk: Buffer) => logs.push(chunk.toString("utf8")));
     const dshTokenUrl = await authorizeDsh(origin, logs);
+    const previewNotice = await acknowledgeHostPreviewNotice(origin, installation);
 
     // A real first launch has no workspace or Session. Previously all browser
     // coverage started after fixture Sessions existed and missed this surface.
@@ -864,7 +925,13 @@ async function main(): Promise<void> {
     const firstRunContext = await firstRunBrowser.newContext({ viewport: { width: 1_440, height: 900 } });
     const firstRunPage = await firstRunContext.newPage();
     const firstRunErrors: string[] = [];
+    const firstRunNetwork: string[] = [];
     firstRunPage.on("pageerror", (error) => firstRunErrors.push(error.message));
+    firstRunPage.on("console", (message) => firstRunNetwork.push(`console.${message.type()}: ${message.text()}`));
+    firstRunPage.on("requestfailed", (request) => firstRunNetwork.push(`requestfailed: ${request.method()} ${request.url()} ${request.failure()?.errorText ?? ""}`));
+    firstRunPage.on("response", (response) => {
+      if (response.status() >= 400) firstRunNetwork.push(`http ${String(response.status())}: ${response.request().method()} ${response.url()}`);
+    });
     await firstRunPage.goto(dshTokenUrl, { waitUntil: "networkidle" });
     // Notices mount after the page loads and may stack (release notes, then the
     // first-use guide), so wait for one before closing it and take the action button
@@ -879,7 +946,54 @@ async function main(): Promise<void> {
       else await firstRunPage.keyboard.press("Escape");
       await firstRunPage.waitForTimeout(600);
     }
-    await firstRunPage.getByRole("dialog").waitFor({ state: "detached", timeout: 10_000 });
+    try {
+      await firstRunPage.getByRole("dialog").waitFor({ state: "detached", timeout: 10_000 });
+    } catch (error) {
+      const diagnostics = await firstRunPage.evaluate(() => ({
+        dialogs: [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].map((dialog) => ({
+          label: dialog.getAttribute("aria-label"),
+          text: (dialog.textContent ?? "").slice(0, 800),
+          buttons: [...dialog.querySelectorAll<HTMLButtonElement>("button")].map((button) => ({
+            text: button.textContent,
+            disabled: button.disabled
+          }))
+        })),
+        alerts: [...document.querySelectorAll<HTMLElement>('[role="alert"]')].map((alert) => alert.textContent),
+        body: (document.body.innerText ?? "").slice(0, 1_500)
+      }));
+      // The notice hides the Host's settings rejection, so replay the write through
+      // the same Remote the page uses and keep the server's error envelope.
+      const settings = await rpc<{
+        readonly writable: boolean;
+        readonly namespaces: readonly { readonly ns: string; readonly revision: number }[];
+      }>(origin, "settings/describe", {}).then(async (view) => {
+        const welcome = view.namespaces.find((namespace) => namespace.ns === "ui-settings-general");
+        if (welcome === undefined) return { writable: view.writable, namespaces: view.namespaces.map((namespace) => namespace.ns) };
+        const mutation = await rpc(
+          origin,
+          "settings/mutate",
+          {
+            ns: "ui-settings-general",
+            ops: [{ op: "set", path: ["welcomeNoticeVersion"], value: "oh-story-smoke-diagnostic" }],
+            expectedRevision: welcome.revision
+          }
+        ).then(() => ({ mutate: "accepted" })).catch((mutationError: unknown) => ({
+          mutate: mutationError instanceof Error ? mutationError.message : String(mutationError)
+        }));
+        return { writable: view.writable, namespace: welcome.ns, revision: welcome.revision, ...mutation };
+      }).catch((describeError: unknown) => ({
+        describe: describeError instanceof Error ? describeError.message : String(describeError)
+      }));
+      throw new Error(
+        `First-run notices did not close: ${JSON.stringify({
+          ...diagnostics,
+          settings,
+          pageErrors: firstRunErrors,
+          network: firstRunNetwork.slice(-20)
+        })}`,
+        { cause: error }
+      );
+    }
     // A fresh Host shows one of two guides: DSH 0.2.1+ opens a default blank Session
     // right away, so the creative-project onboarding takes the place of the no-Session
     // welcome that older Hosts still render.
@@ -2877,6 +2991,7 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
     process.stdout.write(`${JSON.stringify({
       ok: true,
       dshVersion,
+      previewNotice,
       architecture: "pure-plugin",
       sessionApi: true,
       skills: ohStorySkills.length,
