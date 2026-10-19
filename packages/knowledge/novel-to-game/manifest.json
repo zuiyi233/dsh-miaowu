@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "upstream": {
     "repository": "https://github.com/zenstory-ai/novel-to-game.git",
-    "commit": "bf0ffbc0cedf20b3f40ba9b60212af27f6713221",
-    "releaseVersion": "0.5.0"
+    "commit": "7758caa8d9578f19780349e7b4e4115ef831fd7a",
+    "releaseVersion": "0.6.0"
   },
-  "generatedAt": "2026-10-15T10:50:57.961Z",
+  "generatedAt": "2026-10-19T08:12:54.284Z",
   "skills": [
     "game-art-direction",
     "game-build",
@@ -26,17 +26,17 @@
     },
     {
       "path": "README.md",
-      "sha256": "c7706c8e5ae9ecefed260c46ea455e52db8d34d4632e81a868373bf47af0c7b1",
-      "bytes": 38229
+      "sha256": "dc046f8d7f8cee9af8cc3882b51b274ba04b51d04ff3b3eafaf555b1cc10f1e0",
+      "bytes": 38777
     },
     {
       "path": "README_ZH.md",
-      "sha256": "86a84a37646ac018a495e10ad330b43a2623615a476d7ffd0dbde9522fff147e",
-      "bytes": 34306
+      "sha256": "5332bdb07c7744e8b556d253d28d1c3edd8e7feb04990d8a109fe19a643ff6ca",
+      "bytes": 34810
     },
     {
       "path": "VERSION",
-      "sha256": "a0ad50640139a524f86591157145bf1d4674ea9c065bfea21558f0f7b04430c8",
+      "sha256": "97a5d6e540a6120d09c39ddb667e0e8e2bac7fcc2ffef813b82e08fd60365bce",
       "bytes": 6
     },
     {
@@ -586,18 +586,23 @@
     },
     {
       "path": "skills/game-art-direction/references/art-direction-method.md",
-      "sha256": "8e9879bae6cedc01047792d305154e6bd9419ec9c455c541162b372be7395bdd",
-      "bytes": 2811
+      "sha256": "367b8d421b99c64151582f3803b9b07689ded244b32125cb50c86cf49cb19f41",
+      "bytes": 3162
     },
     {
       "path": "skills/game-build/SKILL.md",
-      "sha256": "895ab4669782f09e3ac72fc8ec89550cc186264c4fc7a4f292655003a199e720",
-      "bytes": 4882
+      "sha256": "4a1b79ed036d2f149fb0a19f68609bf7fd0a5335a171321b7bd67175cd6671d2",
+      "bytes": 5563
     },
     {
       "path": "skills/game-build/agents/openai.yaml",
       "sha256": "4fea64c3910933415a5e601bc3f423d22f0e5cfed8d7ab5c2aa38f60a3105cf0",
       "bytes": 272
+    },
+    {
+      "path": "skills/game-build/references/baked-sprite-workflow.md",
+      "sha256": "aa7cbf2c255bae747a65b4d8eaef060ec77a4e3da137636d090e1b4583e390a5",
+      "bytes": 1671
     },
     {
       "path": "skills/game-build/references/blender-asset-workflow.md",
@@ -636,8 +641,8 @@
     },
     {
       "path": "skills/game-concept/references/concept-method.md",
-      "sha256": "ae45e4ffafe6c253e66ea06636d836f81485bf0b705fc3e6fbb4be8f94a0c859",
-      "bytes": 2939
+      "sha256": "c34c47b3920740957dbf4b8e64c7258e1b584604eff671ca2718baf340bc9538",
+      "bytes": 3284
     },
     {
       "path": "skills/game-qa/SKILL.md",
@@ -701,8 +706,8 @@
     },
     {
       "path": "skills/novel-to-game/SKILL.md",
-      "sha256": "12c82429d8bfeff5fa12bc839c618ef03897c97cb1126e0002236c59b3837957",
-      "bytes": 4223
+      "sha256": "b8ed42dd6d6e2d0a38f8f4014948b3d5a35f95199e364054878a256413105258",
+      "bytes": 4485
     },
     {
       "path": "skills/novel-to-game/agents/openai.yaml",
@@ -711,13 +716,13 @@
     },
     {
       "path": "skills/novel-to-game/references/intake-method.md",
-      "sha256": "33dc2c9f43f0e4cb840ad016fa6fb1d58b14d0a96ac7286442a8500dcaddd2bd",
-      "bytes": 2966
+      "sha256": "6ded64de535ed03f996e336fcc413adf358b454cc2b3e04331d83400b7daffae",
+      "bytes": 3112
     },
     {
       "path": "skills/novel-to-game/references/pipeline-contract.md",
-      "sha256": "96375b18d8babc7f73ca429c64ef18bf1607d7058f92109fdc4002531b22cfa7",
-      "bytes": 2942
+      "sha256": "ce943fec9b9de37914b4ae949b76ce82e774f154ec0ac5a63e6fae6b2044962d",
+      "bytes": 3998
     }
   ]
 }

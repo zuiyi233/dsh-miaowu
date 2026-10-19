@@ -36,7 +36,7 @@ export function listTarEntries(bytes: Uint8Array): string[] {
 }
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const dshVersion = process.env.DSH_TEST_VERSION ?? process.argv[2] ?? "0.2.1-alpha.4";
+const dshVersion = process.env.DSH_TEST_VERSION ?? process.argv[2] ?? "0.2.1-rc.2";
 /** Exact WebSocket route carrying every Typert Remote stream. */
 const REMOTE_STREAM_MUX_PATH = "/api/remote.mux";
 /** ChatFlow may wrap rows in its slot; nested process rows do not belong to the main tail. */
@@ -905,6 +905,26 @@ async function main(): Promise<void> {
       throw new Error("First-launch guide overflowed the compact viewport.");
     }
     await compactFirstRunPage.close();
+    // The bundled example is playable before any creative work exists, and its preview reports
+    // the build on screen as loaded, not failed, across the loopback-alias isolation.
+    await welcome.getByRole("button", { name: "先玩内置示例《金瓶梅 · 风月总账》", exact: true }).click();
+    const firstRunGame = firstRunPage.locator(".oh-game-studio");
+    await firstRunGame.locator('iframe[title="《金瓶梅 · 风月总账》可试玩预览"]').waitFor({ state: "visible", timeout: 20_000 });
+    await firstRunGame.locator(".oh-game-runtime-state").filter({ hasText: /^预览已载入/u }).waitFor({ state: "visible", timeout: 20_000 });
+    if (await firstRunGame.locator(".oh-game-preview-shell").getAttribute("data-state") !== "ready") {
+      throw new Error("The bundled example preview did not report the loaded build as ready.");
+    }
+    // Video lists its runtime requirements before any video project exists.
+    await firstRunGame.getByRole("tablist", { name: "创作工作台" }).getByRole("tab", { name: "视频", exact: true }).click();
+    const firstRunVideo = firstRunPage.locator(".oh-video-studio");
+    await firstRunVideo.getByText("还没有视频项目", { exact: true }).waitFor({ state: "visible", timeout: 10_000 });
+    await firstRunVideo.getByLabel("视频运行环境").getByText(/^Python /u).waitFor({ state: "visible", timeout: 10_000 });
+    // The visit is the Session's alone: nothing is remembered for the workspace, and collapsing
+    // returns the blank Session to its guide (DSH 0.2.0 reuses this Session for New session).
+    const rememberedLayout = await firstRunPage.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("oh-story.workbench.")));
+    if (rememberedLayout.length !== 0) throw new Error(`The example visit was remembered for the workspace: ${JSON.stringify(rememberedLayout)}`);
+    await firstRunVideo.getByRole("button", { name: "收起创作工作台", exact: true }).click();
+    await welcome.waitFor({ state: "visible", timeout: 10_000 });
 
 
     const storyWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: string; readonly title: string } }>(origin, "workspace/create", { request: { path: storyRoot } });
@@ -2135,8 +2155,7 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
       await videoStudio.getByRole("button", { name: /运行清单 recap_run_manifest\.json/u }).click();
       await videoStudio.getByText('"edit_mode": "cut"', { exact: false }).waitFor({ state: "visible", timeout: 10_000 });
       await captureDemoFrame(page, "video", 3);
-      await videoStudio.getByRole("button", { name: "检查环境", exact: true }).click();
-      await videoStudio.getByText(/^Python /u).waitFor({ state: "visible", timeout: 10_000 });
+      await videoStudio.getByLabel("视频运行环境").getByText(/^Python /u).waitFor({ state: "visible", timeout: 10_000 });
       await captureDemoFrame(page, "video", 4);
       await videoStudio.getByRole("tab", { name: "小说", exact: true }).click();
       await storyTree.waitFor({ state: "visible", timeout: 10_000 });

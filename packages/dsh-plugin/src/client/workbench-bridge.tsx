@@ -19,7 +19,10 @@ import { CreativeWorkbench } from "./creative-workbench.js";
 /** 宿主重排/虚拟化时锚点闪断的宽限:连续 N 次查不到才真正卸载,避免 :has() 瞬间失配。 */
 const BRIDGE_ANCHOR_MISS_LIMIT = 3;
 
-export function useWorkspace(sessionId: string): {
+/** How often the workspace is re-listed while the Session runs; see {@link useWorkspace}. */
+const LIVE_WORKSPACE_REFRESH_MS = 4_000;
+
+export function useWorkspace(sessionId: string, live: boolean): {
   readonly workspace: WorkspacePayload | undefined;
   readonly error: string | undefined;
   readonly loading: boolean;
@@ -29,22 +32,46 @@ export function useWorkspace(sessionId: string): {
   const [workspace, setWorkspace] = useState<WorkspacePayload>();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
+  const listed = useRef<string | undefined>(undefined);
+  const inFlight = useRef<AbortController | undefined>(undefined);
   const reload = useCallback(() => {
     setLoading(true);
     setVersion((value) => value + 1);
   }, []);
   useEffect(() => {
     const controller = new AbortController();
-    setError(undefined);
+    inFlight.current = controller;
     void fetch(endpoint("workspace", sessionId), { signal: controller.signal })
       .then((response) => json<WorkspacePayload>(response))
-      .then(setWorkspace)
+      .then((payload) => {
+        // 只在成功时清错误:安静刷新再次失败不该把错误闪掉。
+        setError(undefined);
+        // 列表没变就复用旧对象,安静刷新不触发重渲染。
+        const text = JSON.stringify(payload);
+        if (text === listed.current) return;
+        listed.current = text;
+        setWorkspace(payload);
+      })
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason));
       })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+      .finally(() => {
+        // 被取消的请求会在后继请求开始后才 settle,只有当前持有者才能清掉标志。
+        if (inFlight.current === controller) inFlight.current = undefined;
+        if (!controller.signal.aborted) setLoading(false);
+      });
     return () => { controller.abort(); };
   }, [sessionId, version]);
+  // 子角色、后台任务与脚本的写入不经过本会话自己的工具调用,整轮结束前不会有事件;
+  // 会话运行期间安静地重新列目录,让新文件及时出现在文件树里。
+  useEffect(() => {
+    if (!live) return;
+    const timer = globalThis.setInterval(() => {
+      if (inFlight.current !== undefined || globalThis.document.visibilityState === "hidden") return;
+      setVersion((value) => value + 1);
+    }, LIVE_WORKSPACE_REFRESH_MS);
+    return () => { globalThis.clearInterval(timer); };
+  }, [live]);
   return { workspace, error, loading, reload };
 }
 
@@ -122,7 +149,7 @@ function SessionWorkbenchBridge({ sessionId, useSession, useProjection, useChat,
   ), [inboxRows, pendingSubmissions]);
   const chat = useChat((snapshot) => snapshot);
   const productionIntents = useMemo(() => settledProductionIntents(chat), [chat]);
-  const { workspace, error, loading: workspaceLoading, reload } = useWorkspace(sessionId);
+  const { workspace, error, loading: workspaceLoading, reload } = useWorkspace(sessionId, sessionRunning);
   const chosenPreference = useStore((memory) => memory.workbenchPreference);
   const creativeProject = hasCreativeProject(workspace);
   // DSH 0.1.7 opens a fresh home straight into a blank Session in its default workspace, so

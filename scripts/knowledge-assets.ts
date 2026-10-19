@@ -41,6 +41,8 @@ const platformGlue = [
   "story-setup/scripts/merge-antigravity-hooks.py",
   "story-setup/scripts/merge-claude-settings.py",
   "story-setup/scripts/merge-codex-hooks.py",
+  // Oh Story 0.9.0 merges managed blocks into host CLAUDE.md/AGENTS.md; DSH replaces deployment.
+  "story-setup/scripts/merge-project-instructions.py",
   "story-setup/scripts/copy-path-safety.py",
   "story-setup/UPGRADING.md"
 ] as const;

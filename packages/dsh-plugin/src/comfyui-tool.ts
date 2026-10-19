@@ -5,7 +5,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { JsonValue } from "@deepseek-ai/dsh-util-values";
 import { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import { readWorkspaceComfyuiConfigFile, resolveComfyuiConfig } from "./comfyui-status.js";
-import { hostPython } from "./host-python.js";
+import { DRAMA_PYTHON, hostPython } from "./host-python.js";
 
 export const OH_STORY_COMFYUI_TOOL_NAME = "oh_story_comfyui";
 
@@ -444,7 +444,7 @@ export function createOhStoryComfyuiTool(deps: ComfyuiToolDeps = {}): ToolDefini
       if (inputImage !== undefined) await base.resolveInside(inputImage, "input_image");
       const pythonCommand = deps.pythonCommand !== undefined
         ? await deps.pythonCommand()
-        : (await hostPython()).command;
+        : (await hostPython(DRAMA_PYTHON)).command;
       const runnerPath = deps.runnerPath ?? resolveComfyuiRunnerPath(deps.moduleUrl ?? import.meta.url);
       const env = deps.env ?? process.env;
       const readConfig = deps.readWorkspaceConfig ?? readWorkspaceComfyuiConfigFile;

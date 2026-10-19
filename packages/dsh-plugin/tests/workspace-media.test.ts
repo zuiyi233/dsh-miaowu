@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { assertCreativePath, mediaMimeTypeForPath, parseByteRange } from "../src/workspace-route.js";
 
 describe("DSH workspace media boundary", () => {
+  it("lets the novel workbench edit a short story's three root files and nothing else at the root", () => {
+    for (const name of ["正文.md", "设定.md", "小节大纲.md"]) {
+      expect(() => { assertCreativePath(name, "text"); }).not.toThrow();
+    }
+    expect(() => { assertCreativePath("笔记.md", "text"); }).toThrow();
+    expect(() => { assertCreativePath("README.md", "text"); }).toThrow();
+  });
+
   it("allows previewable media only inside creator-owned workspace roots", () => {
     expect(() => { assertCreativePath("剧集/EP001/制作成果/SHOT-001/job-001.mp4", "media"); }).not.toThrow();
     expect(() => { assertCreativePath("交付/EP001/final.mov", "media"); }).not.toThrow();

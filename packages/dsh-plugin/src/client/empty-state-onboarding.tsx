@@ -72,8 +72,10 @@ async function copyText(text: string): Promise<boolean> {
  * fails the prompt is copied to the clipboard instead so the creator can paste
  * it manually. Styling follows plugin.css DSW tokens via class names only.
  */
-export function EmptyStateOnboarding({ onCreate }: {
+export function EmptyStateOnboarding({ onCreate, onPlayExample }: {
   readonly onCreate: (prompt: string) => Promise<void>;
+  /** 打开随包内置示例游戏;只有工作区列出了示例时才提供。 */
+  readonly onPlayExample?: (() => void) | undefined;
 }): React.JSX.Element {
   const [pendingKey, setPendingKey] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
@@ -97,7 +99,8 @@ export function EmptyStateOnboarding({ onCreate }: {
   };
   return <section className="oh-story-empty" aria-label="创作工程引导">
     <h2 className="oh-story-empty-title">尚未检测到创作工程</h2>
-    <p className="oh-story-empty-desc">选一条产物线开始，点击后会把建项请求发送给当前会话的 AI。</p>
+    <p className="oh-story-empty-desc">选一条产物线开始，点击后会把建项请求发送给当前会话的 AI；也可以直接在下方输入框说你想写什么（例如「写一篇 8000 字的重生复仇短篇」）。</p>
+    <p className="oh-story-empty-desc">不选文件夹也能开始，作品会写进 DSH 的默认工作区；想放进自己的文件夹，点左侧「添加工作区」选择即可。输入框右下角显示模型名就说明模型已配置好，只查看已有作品无需 API Key。</p>
     <div className="oh-story-empty-grid">
       {ONBOARDING_ENTRIES.map((entry) => <button
         key={entry.key}
@@ -109,6 +112,10 @@ export function EmptyStateOnboarding({ onCreate }: {
         onClick={() => { create(entry); }}
       ><b>{pendingKey === entry.key ? "发送中…" : entry.label}</b><span>{entry.hint}</span></button>)}
     </div>
+    {onPlayExample !== undefined && <div className="oh-story-welcome-example">
+      <button type="button" onClick={onPlayExample}>先玩内置示例《金瓶梅 · 风月总账》</button>
+      <span>随插件附带的完整 ADV 游戏，不用 API Key。内容 18+，进入前会确认年龄。</span>
+    </div>}
     {notice !== undefined && <p className="oh-story-empty-notice" role="status">{notice}</p>}
   </section>;
 }

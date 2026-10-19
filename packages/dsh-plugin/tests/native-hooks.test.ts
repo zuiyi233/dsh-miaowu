@@ -159,8 +159,8 @@ describe("native DSH prose guards", () => {
   });
 
   it("opens the import window with DSH's marker only while Tracking state is absent", async () => {
-    // Upstream story-import Phase 3-L: Step 1 creates 大纲/ and 追踪/, Step 2
-    // copies the manuscript into 正文/, Step 6 writes 细纲, Step 7 runs init.
+    // Upstream story-import structure-mapping-long.md: Step 1 creates 大纲/ and 追踪/,
+    // Step 2 copies the manuscript into 正文/, Step 10 writes 细纲, Phase 4 runs init.
     expect(IMPORT_MARKER).toBe(".story/work/导入中.md");
     const root = await workspace("oh-story-hook-import-");
     await mkdir(join(root, "大纲"));

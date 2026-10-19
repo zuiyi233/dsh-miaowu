@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSyn
 import {
   creativeRelativePath,
   fileMutations,
+  initialWorkbenchMode,
   mutatingCallIds,
   preferredWorkbenchFile,
   previewMutation,
@@ -28,6 +29,7 @@ import type { SettledProductionIntent } from "./production-intents.js";
 import { VideoStudio } from "./video-studio.js";
 import {
   readWorkbenchLayoutRaw,
+  readWorkbenchPreference,
   workbenchPreferenceStorage,
   writeWorkbenchLayoutRaw,
   writeWorkbenchPreference,
@@ -221,8 +223,20 @@ export function CreativeWorkbench({
   const setWorkbenchPreference = actions.setWorkbenchPreference;
   const applyWorkbenchPreference = useCallback((preference: WorkbenchPreference): void => {
     setWorkbenchPreference(preference);
-    writeWorkbenchPreference(workbenchPreferenceStorage(), workspace?.cwd, preference);
-  }, [setWorkbenchPreference, workspace?.cwd]);
+    // 没有创作产物时唯一的入口是内置示例,那是一次性访问:记住它会让创作者在这个工作区里
+    // 第一个真实项目的布局由示例决定。工作区已经记住的选择仍然由创作者自己改。
+    const storage = workbenchPreferenceStorage();
+    if (creativeProject || readWorkbenchPreference(storage, workspace?.cwd) !== undefined) {
+      writeWorkbenchPreference(storage, workspace?.cwd, preference);
+    }
+  }, [creativeProject, setWorkbenchPreference, workspace?.cwd]);
+  const exampleGameId = workspace?.games.find((game) => game.source === "example")?.id;
+  const playExample = exampleGameId === undefined ? undefined : (): void => {
+    setGameProjectId(exampleGameId);
+    setGameTab("preview");
+    setWorkbench("game");
+    applyWorkbenchPreference("open");
+  };
   const compactTabsId = useId();
   const compactStudioId = `${compactTabsId}-studio-panel`;
   const compactVideoStudioId = `${compactTabsId}-video-studio-panel`;
@@ -358,6 +372,14 @@ export function CreativeWorkbench({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const editorPositions = useRef(new Map<string, { readonly scrollTop: number; readonly selectionStart: number; readonly selectionEnd: number }>());
   const editorReady = buffer !== undefined && buffer.missing !== true;
+  // 会话先落在「小说」;每个工作区只做一次,移动到真正有作品的标签。
+  const initialWorkbenchFor = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (workspace === undefined || initialWorkbenchFor.current === workspace.cwd) return;
+    initialWorkbenchFor.current = workspace.cwd;
+    const next = initialWorkbenchMode(workbench, workspace.files, workspace.games, workspace.videos);
+    if (next !== workbench) setWorkbench(next);
+  }, [setWorkbench, workbench, workspace]);
   const workspaceKind = workbench === "game" || workbench === "video" ? undefined : workbench;
   const featureList = useMemo(() => {
     if (workspaceKind === undefined) return [];
@@ -1019,7 +1041,7 @@ export function CreativeWorkbench({
       // 不是工作台面：无工程的会话必须保持官方布局（#29），空态入口只是浮层。
       return <div ref={surfaceRef} className="oh-story-empty-host" data-open="false">
         <style>{styles}</style>
-        <EmptyStateOnboarding onCreate={sendProductionPrompt} />
+        <EmptyStateOnboarding onCreate={sendProductionPrompt} onPlayExample={playExample} />
       </div>;
     }
     if (!creativeProject && error === undefined) return null;

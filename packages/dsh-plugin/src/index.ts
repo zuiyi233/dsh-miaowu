@@ -6,7 +6,7 @@ import type {} from "@deepseek-ai/dsh-tools";
 import z from "@deepseek-ai/schemastery";
 import { createDramaSkillProvider, createDshMiaowuSkillProvider, createNovelToGameSkillProvider, createOhStorySkillProvider, createVideoRecapSkillProvider, defaultDramaSkillRoot } from "./skill-provider.js";
 import { ensureDramaAdapterConfig } from "./drama-adapters.js";
-import { hostPython } from "./host-python.js";
+import { DRAMA_PYTHON, hostPython } from "./host-python.js";
 import { registerOhStoryHooks } from "./native-hooks.js";
 import { registerOhStoryComfyuiTool } from "./comfyui-tool.js";
 import { registerOhStoryRoleTool } from "./role-tool.js";
@@ -61,7 +61,7 @@ export async function apply(context: Context, config: Config = {}): Promise<void
   // Register the bundled media adapters for this host up front so the first
   // short-drama-produce run has a config to pass; the preflight route repeats
   // this and reports the outcome, so a failure here only delays the message.
-  await ensureDramaAdapterConfig(defaultDramaSkillRoot(), { python: (await hostPython()).command });
+  await ensureDramaAdapterConfig(defaultDramaSkillRoot(), { python: (await hostPython(DRAMA_PYTHON)).command });
 }
 
 export default { name, inject, Config, apply };

@@ -65,9 +65,9 @@ gh api -X PUT repos/zuiyi233/dsh-miaowu/actions/workflows/350173456/enable
 1. Update the root and package versions, installation examples, and
    `CHANGELOG.md` for the intended release.
 2. Run `pnpm verify:release` locally. For 0.1.13 and later, retain fresh packaged
-   Chrome E2E evidence on both the default DSH `0.2.0-rc.2` line and the explicit
-   `0.2.1-alpha.4` opt-in line; alpha support must not be announced from peer
-   metadata or unit tests alone.
+   Chrome E2E evidence on both the default DSH `0.2.1-rc.2` line and the earlier
+   `0.2.0-rc.2` line; a host line must not be announced from peer metadata or
+   unit tests alone.
 3. Merge the release branch through a protected Pull Request after all four
    required CI checks pass, then wait for the newest main-push CI run for that
    exact merge commit to pass all four jobs.
@@ -173,18 +173,18 @@ metadata and manifest integrity rather than resubmit while processing.
 Do not announce a release until the registry reports the exact version:
 
 ```bash
-VERSION=0.1.16
+VERSION=0.1.18
 npm view "@dsh-miaowu/dsh@$VERSION" version dist.integrity
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.0-rc.2 dsh plugin --profile web add "@dsh-miaowu/dsh@$VERSION"
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add "@dsh-miaowu/dsh@$VERSION"
 ```
 
-The default public smoke pins DSH `0.2.0-rc.2`. After it passes,
+The default public smoke pins DSH `0.2.1-rc.2`. After it passes,
 repeat the isolated install/start/browser smoke with
-`@deepseek-ai/dsh@0.2.1-alpha.4`; never mix host versions within one profile or
-describe the alpha line as supported before its Chrome run passes.
+`@deepseek-ai/dsh@0.2.0-rc.2`; never mix host versions within one profile or
+describe a host line as supported before its Chrome run passes.
 
 The GitHub Release tarball remains a registry-independent installation path:
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.0-rc.2 dsh plugin --profile web add "https://github.com/zuiyi233/dsh-miaowu/releases/download/v$VERSION/dsh-miaowu-dsh-$VERSION.tgz"
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add "https://github.com/zuiyi233/dsh-miaowu/releases/download/v$VERSION/dsh-miaowu-dsh-$VERSION.tgz"
 ```

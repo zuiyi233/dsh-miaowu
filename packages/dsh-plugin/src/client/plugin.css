@@ -16,6 +16,10 @@
 .oh-story-welcome h2 { margin: 0 0 8px; font-size: 20px; }
 .oh-story-welcome p { margin: 8px 0 0; }
 .oh-story-welcome ol { margin: 12px 0; padding-left: 24px; }
+.oh-story-welcome-example { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding-top: 12px; border-top: 1px solid var(--dsw-alias-border-l2); }
+.oh-story-welcome-example button { min-height: 32px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; padding: 4px 12px; color: inherit; background: var(--dsw-alias-bg-layer-1); cursor: pointer; font: inherit; font-weight: 600; }
+.oh-story-welcome-example button:hover { background: var(--dsw-alias-button-ghost-active-fill); }
+.oh-story-welcome-example span { color: var(--dsw-alias-label-secondary); font-size: 12px; }
 .oh-story-split-surface { display: contents; font-family: var(--dsw-font-family); }
 
 /* Collapsed, the plugin owns nothing but this control: DSH renders the
@@ -322,20 +326,9 @@
 .oh-game-reload { display: inline-flex; align-items: center; gap: 5px; }
 .oh-game-reload b { font: inherit; font-weight: 500; }
 .oh-game-preview-shell iframe { width: 100%; height: 100%; min-width: 0; min-height: 0; border: 0; background: var(--game-stage); }
-.oh-game-focus-hint {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  z-index: 2;
-  padding: 4px 8px;
-  border: 1px solid rgb(255 255 255 / 12%);
-  border-radius: 6px;
-  color: rgb(255 255 255 / 62%);
-  background: rgb(8 10 9 / 82%);
-  pointer-events: none;
-  font-size: 10px;
-}
+.oh-game-focus-hint { flex: none; margin-left: auto; color: rgb(255 255 255 / 52%); font-size: 10px; white-space: nowrap; }
 .oh-game-focus-hint[data-focused] { color: var(--game-accent); }
+.oh-game-studio[data-oh-game-narrow] .oh-game-focus-hint { display: none; }
 
 .oh-game-preview-empty,
 .oh-game-design-empty {
@@ -1090,7 +1083,8 @@
 [data-conversation-scroll][data-oh-story-workbench="game"][data-oh-story-layout="compact"] .oh-game-preview-status button { min-height: 36px; }
 [data-conversation-scroll][data-oh-story-workbench="game"][data-oh-story-layout="compact"] .oh-game-reload b { display: none; }
 [data-conversation-scroll][data-oh-story-workbench="game"][data-oh-story-layout="compact"] .oh-game-preview-status { padding-left: 8px; }
-[data-conversation-scroll][data-oh-story-workbench="game"][data-oh-story-layout="compact"] .oh-game-preview-status > span { max-width: 40%; }
+[data-conversation-scroll][data-oh-story-workbench="game"][data-oh-story-layout="compact"] .oh-game-preview-status > .oh-game-runtime-state { max-width: 40%; }
+[data-conversation-scroll][data-oh-story-workbench="game"][data-oh-story-layout="compact"] .oh-game-focus-hint { display: none; }
 .oh-game-runtime-state > em { display: block; overflow: hidden; min-width: 0; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 
 /* DSH may keep its navigation drawer open at a 500 px browser viewport,
@@ -1128,7 +1122,7 @@
   padding-right: 6px;
   padding-left: 6px;
 }
-[data-conversation-scroll][data-oh-story-workbench="game"][data-oh-story-layout="compact"] .oh-game-studio[data-oh-game-narrow] .oh-game-preview-status > span { max-width: 36%; }
+[data-conversation-scroll][data-oh-story-workbench="game"][data-oh-story-layout="compact"] .oh-game-studio[data-oh-game-narrow] .oh-game-preview-status > .oh-game-runtime-state { max-width: 36%; }
 
 @media (prefers-reduced-motion: reduce) {
   .oh-game-preview-shell[data-state="building"] { animation: none; }
@@ -1296,6 +1290,10 @@
 .oh-video-prompt-example { max-width: 560px; margin-top: 10px; padding: 12px 14px; border: 1px solid rgb(255 255 255 / 11%); border-radius: 9px; background: rgb(255 255 255 / 4%); text-align: left; }
 .oh-video-prompt-example span { display: block; margin-bottom: 4px; color: var(--video-accent); font-size: 10px; font-weight: 600; }
 .oh-video-prompt-example q { quotes: none; }
+.oh-video-preview-empty .oh-video-environment { width: min(100%, 420px); box-sizing: border-box; margin: 10px 0 0; border-color: rgb(255 255 255 / 11%); background: rgb(255 255 255 / 4%); text-align: left; }
+.oh-video-preview-empty .oh-video-environment strong { color: rgb(255 255 255 / 92%); }
+.oh-video-preview-empty .oh-video-environment span,
+.oh-video-preview-empty .oh-video-environment em { color: rgb(244 248 255 / 70%); font-size: 11px; }
 
 .oh-video-artifacts { display: grid; min-width: 0; min-height: 0; flex: 1; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); overflow: hidden; }
 .oh-video-artifacts > aside { display: flex; min-height: 0; flex-direction: column; overflow: hidden; padding: 8px; border-right: 1px solid var(--os-border); background: var(--dsw-alias-bg-layer-1); }

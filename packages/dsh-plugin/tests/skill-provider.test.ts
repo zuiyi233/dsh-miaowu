@@ -43,6 +43,7 @@ describe("Oh Story bundled skill provider", () => {
     for (const candidate of candidates) {
       const bridged = await provider.get(candidate, {});
       for (const authorRule of [
+        "reply in the language the author writes in, and keep progress updates in that language while you wait for oh_story_role or any other background helper to return",
         "reply and report in the author's writing terms (book, chapter, outline, settings), never in script, field, or state names",
         "attach a raw error only when something failed",
         "A template block marked <!-- author-report --> is only a format reference: output its text directly, without that marker and without a code fence.",
@@ -84,6 +85,10 @@ describe("Oh Story bundled skill provider", () => {
     expect(routeCandidate?.description).toContain("记住我的写作习惯");
     expect(route?.content).toContain("无当前书的\n  通用习惯默认交 story-long-write");
     expect(route?.content).toContain("路由层不读写作者记忆文件");
+    // Oh Story 0.9.0 story/SKILL.md 「书目录判定」: one rule for routing, review and cover.
+    for (const phrase of [".active-book", "最多 4 层", "有 正文/\n或 设定/ 子目录的是长篇，有 正文.md 或 设定.md 文件的是短篇"]) {
+      expect(route?.content).toContain(phrase);
+    }
     expect(route?.content).not.toContain("加载本 skill 的");
     for (const phrase of ["灵感库", "跨书灵感聚合", "更新灵感库", "不写正文", "「开一本长篇或接着写」", "「更多（拆书、扫榜、导入旧稿、审稿、封面）」"]) {
       expect(route?.content).toContain(phrase);
@@ -113,9 +118,16 @@ describe("Oh Story bundled skill provider", () => {
     // Oh Story 0.8.2: scan conclusions hand off to the writing Skills through files.
     const longScan = await provider.get(candidates.find((value) => value.name === "story-long-scan")!, {});
     expect(longScan?.content).toContain("选题决策.md");
+    // Oh Story 0.9.0: Phase 1 asks every missing condition at once; 推荐选题 names benchmark books to analyze.
+    for (const phrase of ["缺的一次问齐", "看新书里在冒头的还是成熟\n   大盘", "建议拆的对标书", "趋势写「未比较」"]) {
+      expect(longScan?.content).toContain(phrase);
+    }
     expect((await provider.get(candidates.find((value) => value.name === "story-short-scan")!, {}))?.content).toContain("短篇扫榜结论.md");
     const shortScan = await provider.get(candidates.find((value) => value.name === "story-short-scan")!, {});
     expect(shortScan?.content).toContain("可信度：样本多少篇、来自哪几个榜");
+    for (const phrase of ["知乎盐言", "征稿要求.md", "在架数量", "可行性最高写「中」"]) {
+      expect(shortScan?.content).toContain(phrase);
+    }
     for (const name of ["story-long-analyze", "story-import"]) {
       const analysis = await provider.get(candidates.find((value) => value.name === name)!, {});
       for (const rule of [
@@ -136,9 +148,10 @@ describe("Oh Story bundled skill provider", () => {
     await expect(readFile(resolve(analyzeScripts, "manage_analysis_run.py"), "utf8")).resolves.toContain("\"commit\"");
     const importSkill = await provider.get(candidates.find((value) => value.name === "story-import")!, {});
     for (const importRule of [
-      "Keep upstream's order: Phase 3-L Step 2 copies the manuscript into 正文/, Step 10 reverse-builds the 细纲 in batches, and Phase 4 initialises Tracking.",
+      "Keep upstream's order: in the long-form structure migration (references/structure-mapping-long.md) Step 2 copies the manuscript into 正文/, Step 10 reverse-builds the 细纲 in batches, and Phase 4 initialises Tracking.",
+      "/story-long-write 写第N章",
       "never offer the author Step 4's choice to install a writing environment with /story-setup",
-      "build_outline_brief.py, tracking_commit.py init and check with Python 3; check-outline-contract.js with Node",
+      "build_outline_brief.py, outline_view.py --check --strict, tracking_commit.py init and check with Python 3; check-outline-contract.js with Node",
       "mirrors the outline gate of upstream proseBlockReason for books with 大纲/ or 追踪/",
       "open an import window before Step 2 copies any chapter: create .story/work/导入中.md in the book directory",
       "delete it right after Phase 4's tracking_commit.py init and check both succeed",
@@ -190,7 +203,9 @@ describe("Oh Story bundled skill provider", () => {
   });
 
   it("makes the three deslop methods available to Skills and the native writer Role", async () => {
-    for (const name of ["story-deslop", "story-long-write", "story-short-write", "story-review", "story-setup/references/agent-references"]) {
+    // Oh Story 0.9.0 dropped story-long-write's copies; its writer Role still reads them from agent-references.
+    await expect(stat(resolve(skillRoot, "story-long-write/references/expression.md"))).rejects.toMatchObject({ code: "ENOENT" });
+    for (const name of ["story-deslop", "story-short-write", "story-review", "story-setup/references/agent-references"]) {
       const referenceRoot = name.endsWith("agent-references") ? resolve(skillRoot, name) : resolve(skillRoot, name, "references");
       for (const method of ["expression.md", "narrative-focus.md", "story-logic.md"]) {
         await expect(readFile(resolve(referenceRoot, method), "utf8")).resolves.toMatch(/\S/u);
@@ -199,7 +214,7 @@ describe("Oh Story bundled skill provider", () => {
     }
     const deslop = await readFile(resolve(skillRoot, "story-deslop/SKILL.md"), "utf8");
     expect(deslop).toContain("用户只要检测或标注时，只出诊断，不修改正文");
-    expect(deslop).toContain("作者已授权的剧情重写直接执行，不重复询问同一授权");
+    expect(deslop).toContain("作者已授权的剧情重写按执行边界直接执行或转交，不重复询问同一授权");
     for (const name of ["story-deslop", "story-review"]) {
       const source = await readFile(resolve(skillRoot, name, "SKILL.md"), "utf8");
       expect(source).toContain("只接收调用方已有的作者偏好，不查询或记录作者记忆");
@@ -354,6 +369,8 @@ describe("NovelToGame bundled provider", () => {
       expect(skill?.content).toContain("explicitly wire each locked-in image into build/app/");
       expect(skill?.content).toContain("six-item minimum QA");
       expect(skill?.content).toContain("- ID：ART-*");
+      expect(skill?.content).toContain("run it as a DSH subagent visible in this preset, giving it only the playable entry and normal player input");
+      expect(skill?.content).toContain("tell the user in one sentence that they can already play it in the 游戏 tab");
       expect(skill?.resourceBase).toEqual({ kind: "directory", path: resolve(gameRoot, candidate.name) });
     }
     const route = await provider.get(listed.find((candidate) => candidate.name === "novel-to-game")!, {});

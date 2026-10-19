@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { build, type Plugin } from "esbuild";
@@ -133,6 +134,22 @@ await cp(dshMiaowuRoot, resolve(outputRoot, "dsh-miaowu"), {
       && !source.endsWith("/.DS_Store");
   }
 });
+// The plugin's own package.json declares "type": "module", which would make Node load every
+// bundled upstream .js script (require-based checkers such as check-outline-contract.js) as ESM
+// and fail. Upstream installs them with no enclosing package type, so give each knowledge root
+// a package.json without "type": Node's default resolution then matches the upstream install.
+for (const knowledgeRoot of ["oh-story", "drama", "novel-to-game", "video-recap", "dsh-miaowu"]) {
+  await writeFile(resolve(outputRoot, knowledgeRoot, "package.json"),
+    `${JSON.stringify({ private: true, description: "Bundled upstream Skills; no module type so scripts resolve as in an upstream install." }, null, 2)}\n`);
+}
+// A require-based checker must load as CommonJS from the bundle: it prints its JSON verdict for a
+// missing outline file instead of failing to load.
+const outlineCheck = spawnSync(process.execPath, [
+  resolve(outputRoot, "oh-story/skills/story-long-write/scripts/check-outline-contract.js"), "--json", resolve(outputRoot, "missing-outline.md")
+], { encoding: "utf8" });
+if (!outlineCheck.stdout.includes("story-long-write.outline-contract")) {
+  throw new Error(`Bundled CommonJS checker failed to load: ${outlineCheck.stderr.slice(0, 300)}`);
+}
 
 for (const excluded of [
   "oh-story/skills/browser-cdp/scripts/setup-cdp-chrome.js",

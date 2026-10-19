@@ -44,6 +44,8 @@ export interface WorkspaceFilePath {
 
 const STORY_DIRECTORIES = new Set(["正文", "大纲", "设定", "追踪", "对标", "参考资料"]);
 const DRAMA_DIRECTORIES = new Set(["输入", "项目开发", "设定集", "剧集", "交付", "创作者决策", "审查"]);
+/** Oh Story short fiction: one book as three files at the workspace root. */
+export const SHORT_STORY_FILES: ReadonlySet<string> = new Set(["正文.md", "设定.md", "小节大纲.md"]);
 const GAME_DIRECTORY = "game-adaptations";
 const VIDEO_DIRECTORY = "video-recaps";
 const EDITABLE_EXTENSION = /\.(?:md|txt|json|jsonl|html|css|[cm]?js|tsx?|jsx)$/iu;
@@ -325,13 +327,14 @@ export function creativeRelativePath(
     && books?.has(directory) === true
     && (parts[1] !== undefined && STORY_DIRECTORIES.has(parts[1]));
   const creative = directory !== undefined && (STORY_DIRECTORIES.has(directory) || DRAMA_DIRECTORIES.has(directory) || directory === GAME_DIRECTORY || directory === VIDEO_DIRECTORY);
-  if (((!creative && !bookNested) && relative !== "short-drama.json") || !EDITABLE_EXTENSION.test(relative)) return undefined;
+  if (((!creative && !bookNested) && relative !== "short-drama.json" && !SHORT_STORY_FILES.has(relative)) || !EDITABLE_EXTENSION.test(relative)) return undefined;
   if (relative.split("/").some((part) => part === ".." || part === "." || part === "")) return undefined;
   return relative;
 }
 
 export function workbenchModeForPath(path: string | undefined, bookDirectories: readonly string[] | undefined = undefined): WorkbenchMode | undefined {
   if (path === "short-drama.json") return "drama";
+  if (path !== undefined && SHORT_STORY_FILES.has(path)) return "story";
   const parts = path?.split("/") ?? [];
   const [directory, second] = parts;
   // 两段书名路径一律归小说工作台(书名目录下只发现 STORY_DIRECTORIES)。
@@ -342,6 +345,24 @@ export function workbenchModeForPath(path: string | undefined, bookDirectories: 
   if (directory === GAME_DIRECTORY) return "game";
   if (directory === VIDEO_DIRECTORY) return "video";
   return undefined;
+}
+
+/**
+ * The workbench to show when a Session first opens a workspace: the current one when it has
+ * work, otherwise the first of 小说, 短剧, 游戏, 视频 that does. The bundled game example is
+ * not the creator's work, so it never selects the game workbench.
+ */
+export function initialWorkbenchMode(
+  current: WorkbenchMode,
+  files: readonly WorkspaceFilePath[],
+  games: readonly { readonly source: "workspace" | "example" }[],
+  videos: readonly unknown[]
+): WorkbenchMode {
+  const hasWork = (mode: WorkbenchMode): boolean => mode === "game"
+    ? games.some((game) => game.source === "workspace")
+    : mode === "video" ? videos.length > 0 : files.some((file) => workbenchModeForPath(file.path) === mode);
+  if (hasWork(current)) return current;
+  return (["story", "drama", "game", "video"] as const).find(hasWork) ?? current;
 }
 
 /** Choose the first useful document when a creative workbench opens. */
@@ -357,7 +378,7 @@ export function preferredWorkbenchFile(
   const storyText = bookPrefix !== undefined ? `(?:${bookPrefix})?正文/.*\\.md` : "^正文/.*\\.md";
   const storyOutline = bookPrefix !== undefined ? `(?:${bookPrefix})?大纲/.*\\.md` : "^大纲/.*\\.md";
   const preferences = mode === "story"
-    ? [new RegExp(`${storyText}$`, "u"), new RegExp(`${storyOutline}$`, "u"), /\.md$/u]
+    ? [new RegExp(`${storyText}$`, "u"), new RegExp(`${storyOutline}$`, "u"), /^正文\/.*\.md$/u, /^正文\.md$/u, /^小节大纲\.md$/u, /^大纲\/.*\.md$/u, /\.md$/u]
     : mode === "drama" ? [
         /^剧集\/EP0*1\/剧本\.md$/u,
         /^剧集\/.*\/剧本\.md$/u,

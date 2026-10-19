@@ -20,7 +20,8 @@ const forbiddenPortableAssets = manifest.files.filter(({ path }) =>
     || /^skills\/story-setup\/references\/deploy-[a-z-]+\.md$/u.test(path)
     || path === "skills/story-setup/scripts/deploy-antigravity-skills.py"
     || path === "skills/story-setup/scripts/generate-antigravity-agents.mjs"
-    || path === "skills/story-setup/scripts/merge-antigravity-hooks.py");
+    || path === "skills/story-setup/scripts/merge-antigravity-hooks.py"
+    || path === "skills/story-setup/scripts/merge-project-instructions.py");
 if (forbiddenPortableAssets.length > 0) {
   throw new Error(`Bundled knowledge retained upstream workspace/platform artifacts: ${forbiddenPortableAssets.map(({ path }) => path).join(", ")}`);
 }

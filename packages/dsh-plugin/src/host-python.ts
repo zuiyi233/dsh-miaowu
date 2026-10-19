@@ -3,7 +3,14 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-export interface PythonProbe { readonly ok: boolean; readonly version?: string | undefined }
+export interface PythonProbe { readonly ok: boolean; readonly version?: string | undefined; readonly minimum: string }
+
+/** A Python version floor as `[major, minor]`. */
+export type PythonFloor = readonly [major: number, minor: number];
+/** Every bundled Drama script declares `MINIMUM_PYTHON = (3, 9)`. */
+export const DRAMA_PYTHON: PythonFloor = [3, 9];
+/** video-recap-skills documents Python 3.10 or newer. */
+export const VIDEO_PYTHON: PythonFloor = [3, 10];
 
 export async function commandOutput(command: string, args: readonly string[]): Promise<string | undefined> {
   try {
@@ -12,13 +19,14 @@ export async function commandOutput(command: string, args: readonly string[]): P
   } catch { return undefined; }
 }
 
-/** Upstream Skills require Python 3.10+. */
-export function pythonVersion(value: string | undefined): PythonProbe {
+/** Each upstream Skill set has its own floor, so the caller names the one it runs. */
+export function pythonVersion(value: string | undefined, floor: PythonFloor): PythonProbe {
+  const minimum = `${String(floor[0])}.${String(floor[1])}`;
   const match = /Python\s+(\d+)\.(\d+)(?:\.(\d+))?/u.exec(value ?? "");
-  if (match === null) return { ok: false };
+  if (match === null) return { ok: false, minimum };
   const major = Number(match[1]);
   const minor = Number(match[2]);
-  return { ok: major > 3 || (major === 3 && minor >= 10), version: match[0].replace(/^Python\s+/u, "") };
+  return { ok: major > floor[0] || (major === floor[0] && minor >= floor[1]), version: match[0].replace(/^Python\s+/u, ""), minimum };
 }
 
 /**
@@ -28,12 +36,15 @@ export function pythonVersion(value: string | undefined): PythonProbe {
  * `python` at 3.12. The command is written into the adapter config's argv, so
  * this is the same choice everywhere the plugin starts Python.
  */
-export async function hostPython(probe: (command: string, args: readonly string[]) => Promise<string | undefined> = commandOutput): Promise<{ readonly command: string; readonly probe: PythonProbe }> {
+export async function hostPython(
+  floor: PythonFloor,
+  probe: (command: string, args: readonly string[]) => Promise<string | undefined> = commandOutput
+): Promise<{ readonly command: string; readonly probe: PythonProbe }> {
   let fallback: { readonly command: string; readonly probe: PythonProbe } | undefined;
   for (const command of ["python3", "python"]) {
-    const parsed = pythonVersion(await probe(command, ["--version"]));
+    const parsed = pythonVersion(await probe(command, ["--version"]), floor);
     if (parsed.ok) return { command, probe: parsed };
     if (parsed.version !== undefined) fallback ??= { command, probe: parsed };
   }
-  return fallback ?? { command: "python3", probe: { ok: false } };
+  return fallback ?? { command: "python3", probe: { ok: false, minimum: pythonVersion(undefined, floor).minimum } };
 }

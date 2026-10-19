@@ -1,6 +1,6 @@
 // 从 src/client/index.tsx 原样迁移的状态/类型层(签名、注释、逻辑逐字保持,仅加 export 并调整 import 来源)。
 import { defineStore } from "@deepseek-ai/dsh-client-store";
-import type { WorkbenchMode } from "./file-activity.js";
+import { SHORT_STORY_FILES, type WorkbenchMode } from "./file-activity.js";
 import type { GameQaSummary } from "./game-qa.js";
 import type { VideoProject } from "./video-studio.js";
 import type { DramaProductionSection } from "./drama-production.js";
@@ -230,7 +230,7 @@ export class WorkspaceRequestError extends Error {
 }
 
 export const GROUP_ORDER: Readonly<Record<WorkbenchMode, readonly string[]>> = {
-  story: ["正文", "大纲", "设定", "追踪", "对标", "参考资料"],
+  story: ["短篇", "正文", "大纲", "设定", "追踪", "对标", "参考资料"],
   drama: ["项目", "输入", "项目开发", "设定集", "剧集", "审查", "创作者决策", "交付"],
   game: ["game-adaptations"],
   video: ["video-recaps"]
@@ -242,7 +242,10 @@ export const GAME_FLOAT_ID = "game-studio";
 export const VIDEO_FLOAT_ID = "video-studio";
 
 export function groupForPath(path: string): string {
-  return path === "short-drama.json" ? "项目" : path.split("/", 1)[0] ?? "其他";
+  if (path === "short-drama.json") return "项目";
+  // Oh Story short fiction keeps one book as three files at the workspace root.
+  if (SHORT_STORY_FILES.has(path)) return "短篇";
+  return path.split("/", 1)[0] ?? "其他";
 }
 
 export async function json<T>(response: Response): Promise<T> {

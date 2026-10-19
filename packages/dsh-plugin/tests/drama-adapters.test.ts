@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -14,7 +14,7 @@ import {
   dramaAdapterSummary,
   ensureDramaAdapterConfig
 } from "../src/drama-adapters.js";
-import { hostPython } from "../src/host-python.js";
+import { DRAMA_PYTHON, hostPython, VIDEO_PYTHON } from "../src/host-python.js";
 import { createDramaSkillProvider } from "../src/skill-provider.js";
 
 const execFileAsync = promisify(execFile);
@@ -22,6 +22,11 @@ const execFileAsync = promisify(execFile);
 const dramaRoot = resolve(import.meta.dirname, "../../knowledge/drama/skills");
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
+
+async function bundledDramaScripts(): Promise<{ readonly path: string; readonly source: string }[]> {
+  const paths = (await readdir(dramaRoot, { recursive: true })).filter((path) => path.endsWith(".py"));
+  return Promise.all(paths.map(async (path) => ({ path, source: await readFile(join(dramaRoot, path), "utf8") })));
+}
 
 describe("bundled Drama media adapters", () => {
   it("names the upstream provider adapters plus the plugin-owned ComfyUI adapters", async () => {
@@ -164,7 +169,7 @@ _, _, custom_roles = tool["_load_adapter"](Path(sys.argv[3]), "seedance", Path(s
 tool["_require_adapter_roles"](job, custom_roles)
 print("generic rejected; explicit profile admitted")
 `;
-    const result = await execFileAsync((await hostPython()).command, ["-B", "-c", script,
+    const result = await execFileAsync((await hostPython(DRAMA_PYTHON)).command, ["-B", "-c", script,
       resolve(dramaRoot, "short-drama-produce/scripts/production_tool.py"), generic, custom, project], { encoding: "utf8" });
     expect(result.stdout.trim()).toBe("generic rejected; explicit profile admitted");
   });
@@ -259,10 +264,21 @@ describe("adapter config hardening", () => {
 });
 
 describe("host Python selection", () => {
-  it("prefers the first interpreter meeting the 3.10 floor over an older one that answers first", async () => {
+  it("prefers the first interpreter meeting the video 3.10 floor over an older one that answers first", async () => {
     const outputs: Record<string, string | undefined> = { python3: "Python 3.9.18", python: "Python 3.12.1" };
-    expect(await hostPython((command) => Promise.resolve(outputs[command]))).toEqual({ command: "python", probe: { ok: true, version: "3.12.1" } });
-    expect(await hostPython((command) => Promise.resolve(command === "python3" ? "Python 3.9.18" : undefined))).toEqual({ command: "python3", probe: { ok: false, version: "3.9.18" } });
-    expect(await hostPython(() => Promise.resolve(undefined))).toEqual({ command: "python3", probe: { ok: false } });
+    expect(await hostPython(VIDEO_PYTHON, (command) => Promise.resolve(outputs[command]))).toEqual({ command: "python", probe: { ok: true, version: "3.12.1", minimum: "3.10" } });
+    expect(await hostPython(VIDEO_PYTHON, (command) => Promise.resolve(command === "python3" ? "Python 3.9.18" : undefined))).toEqual({ command: "python3", probe: { ok: false, version: "3.9.18", minimum: "3.10" } });
+    expect(await hostPython(VIDEO_PYTHON, () => Promise.resolve(undefined))).toEqual({ command: "python3", probe: { ok: false, minimum: "3.10" } });
+  });
+
+  it("accepts the Python 3.9 that every bundled Drama script declares as its floor", async () => {
+    expect(await hostPython(DRAMA_PYTHON, (command) => Promise.resolve(command === "python3" ? "Python 3.9.6" : undefined))).toEqual({ command: "python3", probe: { ok: true, version: "3.9.6", minimum: "3.9" } });
+    expect(await hostPython(DRAMA_PYTHON, () => Promise.resolve("Python 3.8.18"))).toEqual({ command: "python3", probe: { ok: false, version: "3.8.18", minimum: "3.9" } });
+  });
+
+  it("matches the floor the bundled Drama scripts declare", async () => {
+    const scripts = await bundledDramaScripts();
+    const floors = new Set(scripts.flatMap(({ source }) => [...source.matchAll(/^MINIMUM_PYTHON = \((\d+), (\d+)\)$/gmu)].map((match) => `${match[1] ?? ""}.${match[2] ?? ""}`)));
+    expect(floors).toEqual(new Set([DRAMA_PYTHON.join(".")]));
   });
 });

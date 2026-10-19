@@ -7,6 +7,7 @@ import { workbenchLabel, type WorkbenchMode } from "./file-activity.js";
 import { isGameArtImage } from "./game-art.js";
 import { GameQa } from "./game-qa.js";
 import { MarkdownPreview } from "./markdown-preview.js";
+import { gamePreviewStatus, previewUrls } from "./game-preview-state.js";
 import { endpoint, handleTabKey } from "./workbench-ui.js";
 import { json } from "./workbench-state.js";
 import type {
@@ -17,33 +18,25 @@ import type {
   WorkspacePayload
 } from "./workbench-state.js";
 
-export function isolatedPreviewUrl(path: string, version: string, revision: number): { readonly href: string; readonly isolated: boolean } {
-  const url = new URL(path, globalThis.location.origin);
-  if (url.hostname === "127.0.0.1") url.hostname = "localhost";
-  else if (url.hostname === "localhost") url.hostname = "127.0.0.1";
-  url.searchParams.set("build", version);
-  url.searchParams.set("reload", String(revision));
-  return { href: url.toString(), isolated: url.origin !== globalThis.location.origin };
-}
-
 /**
  * An iframe fires `load`, not `error`, when a navigation commits an HTTP error response, so the
  * frame's own events cannot tell a working preview from the route's JSON error body. Probe the
- * same URL out of band and report a non-OK or non-HTML answer as a real failure.
+ * same build out of band (on the page's own origin, see previewUrls) and report a non-OK or
+ * non-HTML answer as a real failure.
  */
-export function PreviewProbe({ href, onFailed }: { readonly href: string; readonly onFailed: () => void }) {
+export function PreviewProbe({ href, onResult }: { readonly href: string; readonly onResult: (href: string, result: "ok" | "failed") => void }) {
   // Hold the callback in a ref so an inline arrow from the caller cannot re-trigger the probe.
-  const failedRef = useRef(onFailed);
-  useEffect(() => { failedRef.current = onFailed; }, [onFailed]);
+  const resultRef = useRef(onResult);
+  useEffect(() => { resultRef.current = onResult; }, [onResult]);
   useEffect(() => {
     const controller = new AbortController();
     void fetch(href, { signal: controller.signal })
       .then((response) => {
         if (controller.signal.aborted) return;
         const type = response.headers.get("content-type") ?? "";
-        if (!response.ok || !type.includes("text/html")) failedRef.current();
+        resultRef.current(href, response.ok && type.includes("text/html") ? "ok" : "failed");
       })
-      .catch(() => { if (!controller.signal.aborted) failedRef.current(); });
+      .catch(() => { if (!controller.signal.aborted) resultRef.current(href, "failed"); });
     return () => { controller.abort(); };
   }, [href]);
   return null;
@@ -56,6 +49,7 @@ export function GamePreview({ project, building }: { readonly project: GameProje
   const [focused, setFocused] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [probe, setProbe] = useState<{ readonly href: string; readonly result: "ok" | "failed" }>();
   const [revision, setRevision] = useState(0);
   const [loadedVersion, setLoadedVersion] = useState(project.previewVersion);
   useEffect(() => {
@@ -75,7 +69,7 @@ export function GamePreview({ project, building }: { readonly project: GameProje
     <p>在右侧 Chat 使用 <code>/novel-to-game quick</code>，产物写入 <code>game-adaptations/&lt;project&gt;/build/app/</code> 后会自动出现在这里。</p>
     <div className="oh-game-prompt-example"><span>描述示例</span><q>把《作品名》改编成网页互动游戏，目标玩家是……，核心玩法是……，希望整体风格……</q></div>
   </div>;
-  const preview = isolatedPreviewUrl(project.previewUrl, loadedVersion, revision);
+  const preview = previewUrls(project.previewUrl, loadedVersion, revision, globalThis.location.origin);
   const pending = project.previewVersion !== loadedVersion;
   /** Accept the newer build the creator just chose. */
   const reload = (): void => {
@@ -90,27 +84,34 @@ export function GamePreview({ project, building }: { readonly project: GameProje
     setLoadError(false);
     setRevision((value) => value + 1);
   };
-  const runtimeState = loadError ? "预览载入失败 · 可重新载入"
-    : building ? "Agent 正在更新游戏文件 · 当前预览保持不变"
-      : pending ? "新版本已就绪 · 由你决定何时载入"
-        : loaded ? (preview.isolated ? "预览已载入" : "预览已载入 · 当前部署无法隔离来源，存档功能不可用")
-          : "正在载入预览…";
+  const status = gamePreviewStatus({
+    frameLoaded: loaded,
+    frameError: loadError,
+    // 早先 URL 的探测结果描述的是画面已经不再显示的构建。
+    probe: probe?.href === preview.probeHref ? probe.result : "pending",
+    building,
+    pending,
+    isolated: preview.isolated
+  });
+  const runtimeState = status.label;
   const fullscreen = (): void => {
     const shell = shellRef.current;
     if (shell === null) return;
     restoreFullscreenFocus.current = true;
     void shell.requestFullscreen().catch(() => { restoreFullscreenFocus.current = false; });
   };
-  return <div ref={shellRef} className="oh-game-preview-shell" data-state={loadError ? "error" : building ? "building" : loaded ? "ready" : "loading"}>
+  return <div ref={shellRef} className="oh-game-preview-shell" data-state={status.tone}>
     <div className="oh-game-preview-status">
       <span className="oh-game-runtime-state" role="status" aria-live="polite" title={runtimeState}><i aria-hidden /><em>{runtimeState}</em></span>
+      {/* 放在状态栏而不是盖在画面上:游戏自己的角落控件要保持可点。 */}
+      <span className="oh-game-focus-hint" data-focused={focused || undefined}>{focused ? "游戏正在接收键鼠输入" : "点击画面进入试玩"}</span>
       <div>
         {pending && !building && <button type="button" onClick={reload}>载入新版本</button>}
         <button className="oh-game-reload" type="button" onClick={refresh} aria-label="重新载入游戏"><span aria-hidden>↻</span><b>刷新</b></button>
         <button ref={fullscreenButtonRef} type="button" onClick={fullscreen}>全屏试玩</button>
       </div>
     </div>
-    <PreviewProbe href={preview.href} onFailed={() => { setLoaded(false); setLoadError(true); }} />
+    <PreviewProbe href={preview.probeHref} onResult={(href, result) => { setProbe({ href, result }); }} />
     <iframe
       key={`${project.id}:${loadedVersion}:${String(revision)}`}
       src={preview.href}
@@ -121,12 +122,11 @@ export function GamePreview({ project, building }: { readonly project: GameProje
       allow="autoplay; fullscreen; gamepad"
       allowFullScreen
       referrerPolicy="no-referrer"
-      onLoad={() => { setLoadError(false); setLoaded(true); }}
+      onLoad={() => { setLoaded(true); }}
       onError={() => { setLoaded(false); setLoadError(true); }}
       onFocus={() => { setFocused(true); }}
       onBlur={() => { setFocused(false); }}
     />
-    <div className="oh-game-focus-hint" data-focused={focused || undefined}>{focused ? "游戏正在接收键鼠输入" : "点击画面进入试玩"}</div>
   </div>;
 }
 

@@ -6,9 +6,9 @@
 
 `oh-story-dsh` 是基于 DeepSeek Harness（DSH）构建的社区小说、短剧、互动游戏与视频解说创作插件。以下清单对应当前源码；已发布包按各自的 manifest 固定上游提交。
 
-- 13 个 Oh Story 0.8.6 小说 Skills 与 7 个专业 Roles；
+- 13 个 Oh Story 0.9.0 小说 Skills 与 7 个专业 Roles；
 - 11 个 Drama Skills 0.9.0 短剧流程，每集按请求维护最多五份创作 Markdown（剧本、视觉设定、分镜、图片提示词、视频提示词），成片装配另写《剪辑单.md》；
-- 7 个 NovelToGame 0.5.0 Skills、`game-adaptations/<project>` 产物协议与《金瓶梅 · 风月总账》ADV 可玩构建；
+- 7 个 NovelToGame 0.6.0 Skills、`game-adaptations/<project>` 产物协议与《金瓶梅 · 风月总账》ADV 可玩构建（18+，欢迎卡「先玩内置示例」即可试玩）；
 - 7 个 video-recap-skills 0.6.2 Skills（3 个用户入口）、`video-recaps/<project>` 项目约定与轻量视频预览工作台；
 - 小说协议 hooks 与安全的 Session workspace 文件路由；
 - 小说/短剧的文件树、编辑器、Chat 三栏工作台，以及游戏/视频的“左侧工作台 + 右侧 Chat”制作面板；
@@ -23,20 +23,20 @@
 安装命令会临时提供 pnpm；只安装 Node.js 的机器也能执行。DSH 的 `plugin add` 内部需要 pnpm，单独运行 `npx @deepseek-ai/dsh ... plugin add` 不会自动补上它。
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.0-rc.2 dsh plugin --profile web add @dsh-miaowu/dsh@0.1.16 &&
-npx -y @deepseek-ai/dsh@0.2.0-rc.2 web
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add @dsh-miaowu/dsh@0.1.18 &&
+npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 ```
 
 也可以直接安装 GitHub Release 中的预构建包：
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.0-rc.2 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.16/dsh-miaowu-dsh-0.1.16.tgz &&
-npx -y @deepseek-ai/dsh@0.2.0-rc.2 web
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.18/dsh-miaowu-dsh-0.1.18.tgz &&
+npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 ```
 
 保持终端运行。若浏览器未自动打开，访问终端打印的完整 `http://127.0.0.1:3080/?token=...` 链接完成首次认证。
 
-本页默认命令固定使用 `0.2.0-rc.2`。也可把安装、启动两条命令中的版本同时改为 `0.2.1-alpha.4` 试用 alpha；插件接受 `>=0.2.0-rc.2 <0.2.1-0` 或 `>=0.2.1-alpha.1 <0.2.2-0`，两条线不要混装。
+本页默认命令固定使用 npm `latest` 的 `0.2.1-rc.2`。仍在用 `0.2.0-rc.2` 时把安装、启动两条命令中的版本同时改回它；插件接受 `>=0.2.0-rc.2 <0.2.1-0` 或 `>=0.2.1-alpha.1 <0.2.2-0`，不要混装宿主版本。
 
 需要 Node.js 24+。开始 AI 创作前需要在 DSH 的「设置 → 模型」中添加 Provider 并填入 API Key，或在启动前设置环境变量 `DEEPSEEK_API_KEY`。
 
@@ -66,9 +66,9 @@ npx -y @deepseek-ai/dsh@0.2.0-rc.2 web
 给 /path/to/video.mp4 做一个 3 分钟中文解说成片，保留关键原声，字幕烧进画面。
 ```
 
-宿主机需要 Python 3.10+、`PATH` 上的 ffmpeg/ffprobe，以及 `MIMO_API_KEY`；Fish Audio TTS 另需 `FISH_API_KEY`，自建 IndexTTS 需 `INDEX_TTS_ENDPOINT` 与 `INDEX_TTS_VOICE`（`TTS_PROVIDER=index-tts`）。Debian/Ubuntu 用 `sudo apt install ffmpeg`；有 libass `subtitles` 滤镜时烧录字幕，没有时交付外部 SRT（也可另装带 libass 的构建）。工作台的「运行环境」检查只报告 DSH Host 进程是否就绪，不返回 Key 内容，密钥也不会写入项目；Agent 实际的执行世界以 `video-recap --doctor` 为准。
+宿主机需要 Python 3.10+、`PATH` 上的 ffmpeg/ffprobe，以及 `MIMO_API_KEY`；Fish Audio TTS 另需 `FISH_API_KEY`，自建 IndexTTS 需 `INDEX_TTS_ENDPOINT` 与 `INDEX_TTS_VOICE`（`TTS_PROVIDER=index-tts`）。Debian/Ubuntu 用 `sudo apt install ffmpeg`；有 libass `subtitles` 滤镜时烧录字幕，没有时交付外部 SRT（也可另装带 libass 的构建）。Key 与 `PATH` 在启动 DSH 的终端里设置，重启后生效。视频空状态和「产物」页的「运行环境」检查只报告 DSH Host 进程是否就绪，不返回 Key 内容，密钥也不会写入项目；Agent 实际的执行世界以 `video-recap --doctor` 为准。
 
-短剧生产的图片、视频、语音与音乐不由 DeepSeek 生成，而是由 `short-drama-produce` 调用 GPT Image 2（`OPENAI_API_KEY`）、Seedance（`ARK_API_KEY` + `SEEDANCE_MODEL`）、MiniMax H3（`MINIMAX_API_KEY` + `MINIMAX_VIDEO_MODEL` + `MINIMAX_VIDEO_RESOLUTIONS` + `MINIMAX_VIDEO_MIN_DURATION`/`MINIMAX_VIDEO_MAX_DURATION`）、MiniMax Speech（`MINIMAX_API_KEY`）或 MiniMax Music（`MINIMAX_API_KEY`）生成；Key 在启动 DSH 前写入环境变量，「生产」视图会显示每个供应商是否就绪，插件只向界面返回配置是否存在，不返回 Key 的值。内置 adapter 会自动登记到一份不含凭据的配置文件，自定义时用 `OH_STORY_DRAMA_ADAPTER_CONFIG` 指向自己的文件。
+短剧生产的图片、视频、语音与音乐不由 DeepSeek 生成，而是由 `short-drama-produce` 调用 GPT Image 2（`OPENAI_API_KEY`）、Seedance（`ARK_API_KEY` + `SEEDANCE_MODEL`）、MiniMax H3（`MINIMAX_API_KEY` + `MINIMAX_VIDEO_MODEL` + `MINIMAX_VIDEO_RESOLUTIONS` + `MINIMAX_VIDEO_MIN_DURATION`/`MINIMAX_VIDEO_MAX_DURATION`）、MiniMax Speech（`MINIMAX_API_KEY`）或 MiniMax Music（`MINIMAX_API_KEY`）生成；生产与检查脚本需要 Python 3.9+；Key 在启动 DSH 前写入环境变量，「生产」视图会显示 Python 与每个供应商是否就绪，插件只向界面返回配置是否存在，不返回 Key 的值。内置 adapter 会自动登记到一份不含凭据的配置文件，自定义时用 `OH_STORY_DRAMA_ADAPTER_CONFIG` 指向自己的文件。
 
 声音参考需要额外显式配置：自动生成的通用 profile 不声明 `reference_audio`，因为环境变量里的具体模型未必支持声音输入；只有确认所选模型支持后，才在项目外的自定义 adapter 配置里为该 profile 声明 `reference_roles`（包含 `reference_audio`），并用 `OH_STORY_DRAMA_ADAPTER_CONFIG` 指向它。未声明时会在付费提交前拒绝，不会静默丢掉声音。
 
@@ -76,7 +76,7 @@ Drama Skills 0.6.0 不支持把 v0.5 结构化项目原地升级为 creator-firs
 
 0.8.1 的角色参考音频必须绑定具体角色，并通过严格的 `reference_roles`、身份与禁控校验；音频不会出现在图片参考选择器里。NovelToGame 0.5.0 的 ADV 示例不迁移旧存档，升级后清除旧站点存储并重新开始。video-recap 0.6.1 改用 QC schema 2，删除旧 QC 标志/路径；升级既有 `work/` 时可能重新生成 ASR、剪辑、TTS 与索引，不得沿用或伪造旧 PASS。0.6.2 起 dub（英译中原声复刻）必须带 `--confirm-voice-rights`，包括旧 `work/` 打印的续跑命令；没有 `MIMO_API_KEY` 时旁白评审直接退出，不再外发稿件。
 
-Oh Story 0.8.6 的作者习惯由长篇、短篇写作入口管理，沿用已有记忆数据；独立审稿与去味只消费本次提供的偏好，检测或标注不会改正文。Drama 0.9 继续按当前需要维护 Markdown 创作文档，旧模板不再补建。
+Oh Story 0.9.0 按写书步骤重整参考资料，书稿、设定、追踪和作者记忆不用迁移；之前导入的长篇续写前，先让 `/story-long-write` 把旧剧情单元改写成单元卡。作者习惯仍由长篇、短篇写作入口管理，独立审稿与去味只消费本次提供的偏好，检测或标注不会改正文。Drama 0.9 继续按当前需要维护 Markdown 创作文档，旧模板不再补建。
 
 ## 没看到界面时
 
@@ -90,7 +90,7 @@ Oh Story 0.8.6 的作者习惯由长篇、短篇写作入口管理，沿用已�
 插件装进哪个 profile，那个 profile 的每个 Session 都能发现创作 Skills，具体指令在使用时读取；工作台只在有创作项目时显示。想让原版 `web` 保持干净、只在创作时打开工作台，就装进独立 profile：
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.0-rc.2 dsh plugin --profile story add @dsh-miaowu/dsh@0.1.16
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile story add @dsh-miaowu/dsh@0.1.18
 ```
 
 新 profile 默认没有界面。编辑 `~/.dsh/profiles/story/package.json`，把 `dsh.profile.bundles` 改成 `["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsh-miaowu/dsh"]`，顺序照抄，这个包不用另外安装。
@@ -98,8 +98,8 @@ npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.0-rc.2 dsh plugin --
 `@deepseek-ai/dsh-web-app` 是 DSH 自带的 Web 界面包，需要在创作插件之前加载。
 
 ```bash
-npx -y @deepseek-ai/dsh@0.2.0-rc.2 web                          # 原版 DSH
-npx -y @deepseek-ai/dsh@0.2.0-rc.2 --profile story --port 3081  # 创作工作台
+npx -y @deepseek-ai/dsh@0.2.1-rc.2 web                          # 原版 DSH
+npx -y @deepseek-ai/dsh@0.2.1-rc.2 --profile story --port 3081  # 创作工作台
 ```
 
 模型、凭据、workspace 与历史会话由 DSH 统一保存，切换 profile 不会丢。安装与启动请使用同一个 dsh 版本。

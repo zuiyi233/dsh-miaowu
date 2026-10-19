@@ -26,7 +26,7 @@ const DSH_SKILL_BRIDGE = [
   "Use only DSH-visible tools. DSH sandbox and permission policy remain authoritative.",
   // Upstream deploys these 「与作者协作」 rules only in its CLAUDE.md/AGENTS.md
   // templates, which DSH does not install.
-  "Working with the author: reply and report in the author's writing terms (book, chapter, outline, settings), never in script, field, or state names; attach a raw error only when something failed. A template block marked <!-- author-report --> is only a format reference: output its text directly, without that marker and without a code fence.",
+  "Working with the author: reply in the language the author writes in, and keep progress updates in that language while you wait for oh_story_role or any other background helper to return; reply and report in the author's writing terms (book, chapter, outline, settings), never in script, field, or state names; attach a raw error only when something failed. A template block marked <!-- author-report --> is only a format reference: output its text directly, without that marker and without a code fence.",
   "Manage a writing habit or preference only through story-long-write or story-short-write and that writing Skill's references/author-memory.md and scripts/author_memory_commit.py; never keep it in a host or DSH memory. The story entry only routes memory requests. story-deslop and story-review consume only preferences already supplied by their caller and never query or record author memory themselves. Simply follow a one-off request without recording it.",
   "Never edit the bundled Skill files (SKILL.md, references/, scripts/). When a Skill script fails, stop and show the author the command you ran and its error instead of patching or working around it.",
   "</dsh-miaowu-integration>"
@@ -46,7 +46,7 @@ const DSH_SKILL_OVERRIDES: Readonly<Partial<Record<string, string>>> = {
   "story-long-analyze": `Use oh_story_role for chapter extraction or specialist analysis. Never inspect platform agent directories or require a deployed external Agent definition. ${DSH_ANALYSIS_BATCHES}`,
   "story-long-write": `All named Roles are provided through oh_story_role. Do not check platform agent files. Keep the upstream writing, Tracking, lint, outline, revision, and quality workflows. Create and assemble 正文/ chapter files only with the write and edit tools, never through shell redirection, cp, mv, tee, or a script, so that DSH's outline guard, its Tracking reminder, and the 小说 view observe the write; upstream's own in-place chapter fixes such as storyctl.py chapter check --fix-punctuation stay as upstream describes. ${DSH_AUTHOR_MEMORY_WORKSPACE}`,
   "story-review": "All named reviewer Roles are provided through oh_story_role. Do not check platform agent files; full/lean review may use the bundled Roles directly. When a review falls back to solo in DSH, the reason is that oh_story_role or DSH's spawn runtime is unavailable in this Session (Fallback agent tool unavailable -> solo) or a Role run failed (Fallback spawn failed -> solo); say that in one plain sentence. Never tell the author that the reviewers are not installed, missing, or outdated, and never tell them to run /story-setup.",
-  "story-import": `All named Roles are provided through oh_story_role. Do not require story-setup to deploy them, never inspect platform agent directories or .story-deployed, and never offer the author Step 4's choice to install a writing environment with /story-setup: in DSH record 写作环境 in .story/work/导入记录.md as installed, with the analysis helper and story-architect both available. Phase 2 runs the story-long-analyze pipeline the DSH way below; an import counts as automatic continuation, so it uses the limited-parallel tier without asking. ${DSH_ANALYSIS_BATCHES} Run the scripts this Skill needs (build_outline_brief.py, tracking_commit.py init and check with Python 3; check-outline-contract.js with Node) the same way. Keep upstream's order: Phase 3-L Step 2 copies the manuscript into 正文/, Step 10 reverse-builds the 细纲 in batches, and Phase 4 initialises Tracking. DSH's prose guard mirrors the outline gate of upstream proseBlockReason for books with 大纲/ or 追踪/, so open an import window before Step 2 copies any chapter: create .story/work/导入中.md in the book directory (the workspace root in DSH's usual single-book layout) with one line naming the book being imported, and delete it right after Phase 4's tracking_commit.py init and check both succeed. The window only holds while 追踪/_tracking-state.json is absent. 导入中.md is DSH's own marker; keep upstream's 导入记录.md exactly as the Skill describes.`,
+  "story-import": `All named Roles are provided through oh_story_role. Do not require story-setup to deploy them, never inspect platform agent directories or .story-deployed, and never offer the author Step 4's choice to install a writing environment with /story-setup: in DSH record 写作环境 in .story/work/导入记录.md as installed, with the analysis helper and story-architect both available. Phase 2 runs the story-long-analyze pipeline the DSH way below; an import counts as automatic continuation, so it uses the limited-parallel tier without asking. ${DSH_ANALYSIS_BATCHES} Run the scripts this Skill needs (build_outline_brief.py, outline_view.py --check --strict, tracking_commit.py init and check with Python 3; check-outline-contract.js with Node) the same way. Keep upstream's order: in the long-form structure migration (references/structure-mapping-long.md) Step 2 copies the manuscript into 正文/, Step 10 reverse-builds the 细纲 in batches, and Phase 4 initialises Tracking. After the import, tell the author to continue a long book with /story-long-write 写第N章 (N is the next chapter after the imported ones) and a short story with /story-short-write by asking it to 补完构思. DSH's prose guard mirrors the outline gate of upstream proseBlockReason for books with 大纲/ or 追踪/, so open an import window before Step 2 copies any chapter: create .story/work/导入中.md in the book directory (the workspace root in DSH's usual single-book layout) with one line naming the book being imported, and delete it right after Phase 4's tracking_commit.py init and check both succeed. The window only holds while 追踪/_tracking-state.json is absent. 导入中.md is DSH's own marker; keep upstream's 导入记录.md exactly as the Skill describes.`,
   "story-deslop": "Use the bundled narrative-writer Role through oh_story_role when specialist review is useful. Never inspect platform agent directories.",
   "story-short-analyze": "Use oh_story_role for specialist analysis. Never inspect platform agent directories or require external Agent deployment.",
   "story-short-write": `All named Roles are provided through oh_story_role. Do not inspect platform agent files; preserve the upstream short-fiction workflow and quality gates. ${DSH_AUTHOR_MEMORY_WORKSPACE}`,
@@ -89,11 +89,14 @@ const DSH_GAME_BRIDGE = [
   "The 游戏 tab is the playable Game Studio. Never start a second Agent runtime, dashboard, session transport, or model configuration.",
   "Keep the complete upstream seven-Skill pipeline and write adaptation artifacts under game-adaptations/<project>/ exactly as the upstream contracts specify.",
   "For a web target, keep the authoritative playable entry at build/app/index.html so Game Studio can preview it. Do not silently replace a requested non-web runtime with a web build.",
+  "The first time build/app/index.html becomes playable, tell the user in one sentence that they can already play it in the 游戏 tab and what work remains, then continue; keep the Todo list in step with the pipeline stage.",
   "Use only DSH-visible tools and approvals. qa/verification.json remains the sole machine QA truth and must cover launch, render, input, coreLoop, outcome, and restart with real execution evidence.",
   "Visual and art assets may be generated through the oh_story_comfyui tool into game-adaptations/<project>/art/ when it is visible and a ComfyUI workflow is configured; when it is not, state the limitation instead of pretending media was generated.",
   "A finished image under game-adaptations/<project>/art/ is only material-ready, never integration-complete: game-build must explicitly wire each locked-in image into build/app/ (for example the title-screen background, scene cards, or character portrait slots), and the reference paths must be recorded in both the game code and design/ART_DIRECTION.md.",
   "After wiring art, re-run the game-qa six-item minimum QA (launch, render, input, coreLoop, outcome, restart) with real rendering evidence for every scene that references art, and record the on-screen art evidence in the corresponding qa/verification.json checks.",
   "Every wired image keeps one stable `- ID：ART-*` line in design/ART_DIRECTION.md, following the short-drama VISUAL-* stable-ID practice; game code references the file registered under that ID.",
+  // NovelToGame 0.6.0 pipeline-contract.md: with no target player available, the whitebox playtest uses a fresh agent that has not read the design or source.
+  "When the whitebox playtest calls for a fresh agent that has not read the design documents or source, run it as a DSH subagent visible in this preset, giving it only the playable entry and normal player input; in director mode, ask the user in this Session first whether a real target player can try it.",
   "The bundled Jin Ping Mei project is a read-only example, not a template to copy mechanically and not proof that another adaptation passed QA.",
   "</novel-to-game-dsh-integration>"
 ].join("\n");
@@ -124,20 +127,30 @@ const DSH_NATIVE_SKILLS: Readonly<Partial<Record<string, string>>> = {
 - 长篇规划与写作（讨论长篇结构、规划剧情、开书、写大纲、补细纲、写正文、日更）：
   story-long-write。只要结构、大纲、卷纲或细纲时只交付所请求的规划，不写正文；
   用户明确要求写正文才进入正文流程
-- 长篇选题/扫榜：story-long-scan；长篇拆文：story-long-analyze
+- 长篇选题/扫榜：story-long-scan；长篇拆文：story-long-analyze。只说「选题」「看看写什么」
+  又没说篇幅时，先问一句长篇还是短篇
 - 灵感库、提炼灵感、跨书灵感聚合、更新灵感库：story-long-analyze 的可选灵感库管道
   （单书拆文不自动入库）
 - 短篇选题/拆文/写作：story-short-scan、story-short-analyze、story-short-write
-- 导入已有作品：story-import
+- 导入已有作品：story-import。导完长篇说 /story-long-write 写第N章（N 是导入后的下一章）
+  续写；导完短篇用 /story-short-write 补完构思
 - 审稿与去 AI 味：story-review、story-deslop
 - 封面：story-cover
 - 查本书的角色、伏笔、进度或设定：用 oh_story_role 调用 story-explorer；查外部资料：
-  story-researcher。回答讲故事里的事，编号只跟着故事描述出现
+  story-researcher。助手返回的英文字段和缺口说明由你翻成白话再说；回答讲故事里的事，
+  编号只跟着故事描述出现
 - 管理作者习惯（记住/查看/确认/替换/忘掉写作偏好）：按作者指定的长篇/短篇类型，
-  加载 story-long-write 或 story-short-write，由对应写作 skill 管理；未指定时按当前
-  书类型选择：正文/ 为长篇，正文.md 与小节大纲.md 或设定.md 为短篇。无当前书的
+  加载 story-long-write 或 story-short-write，由对应写作 skill 管理；未指定时按下方
+  「当前书」的篇幅选择。无当前书的
   通用习惯默认交 story-long-write；只限定本书却无法定位时问哪本书，不要求先建书。
   路由层不读写作者记忆文件。仅管理习惯时完成即停，不建书、不写正文。
+
+当前书：项目根有 .active-book 且指向项目内存在的目录就是它（DSH 常见的单书布局里，
+工作区根本身就是书目录）；否则从工作区根往下最多 4 层找，跳过以 . 开头的目录、
+node_modules、拆文库/、对标/，含 追踪/、正文/ 子目录或 正文.md 文件、含
+设定/题材定位.md、或同时有 设定.md 与 小节大纲.md 的目录都算书。找到多本又没有
+.active-book 时问作者是哪本，选定后把相对路径写进项目根 .active-book。篇幅：有 正文/
+或 设定/ 子目录的是长篇，有 正文.md 或 设定.md 文件的是短篇。审稿和封面按同一规则找书。
 
 只说 /story、看不出意图时，不贴路由表，给四个白话选项：「开一本长篇或接着写」→
 story-long-write；「写一篇短篇」→ story-short-write；「把一章改得不那么 AI」→
@@ -150,7 +163,8 @@ Agent 过程通过右侧动态栏或官方 Chat 查看。禁止启动独立 Dash
 只初始化或校验当前 DSH workspace 中的小说数据，不部署任何 Agent 平台文件。
 
 1. 检查现有正文、设定、大纲和追踪文件，已有内容绝不覆盖。
-2. 根据用户声明与现有结构判断长篇/短篇；无法可靠判断时请求确认。
+2. 根据用户声明与现有结构判断长篇/短篇：有 正文/ 或 设定/ 子目录的是长篇，有 正文.md
+   或 设定.md 文件的是短篇；无法可靠判断时请求确认。
 3. 长篇按需建立 正文/、设定/、大纲/。初始化、开书、大纲和细纲阶段都不建 追踪/，
    也不写 追踪/_tracking-state.json：追踪在第一章正文动笔前，由 story-long-write
    单章流程用它的 scripts/tracking_commit.py init 初始化（事务 JSON 放书目录
@@ -185,20 +199,25 @@ Agent 过程通过右侧动态栏或官方 Chat 查看。禁止启动独立 Dash
 基于可核验样本识别长篇网文趋势，不运行打包脚本、不提取登录凭据，也不绕过验证码、
 访问控制或站点限制。
 
-1. 明确平台、频道和题材方向；只有答案会改变采样范围时才问一个问题。
+1. 沿用作者已给的条件；缺的一次问齐并给选项：平台（起点/番茄/晋江/七猫/刺猬猫/
+   多个平台对比）、频道（只有番茄、七猫分男频/女频/都看）、看新书里在冒头的还是成熟
+   大盘、有没有关注的题材方向（没有就做全榜概览）。
 2. 数据来源依次为：用户提供的数据或链接、当前 DSH Preset 可见的网页工具、
    references/genre-trends.md 中的历史趋势。无法获取实时数据时必须明确标为历史假设。
 3. 每个样本记录来源 URL、采集日期、榜单口径、有效条目数、缺失字段和异常项；
    不把搜索摘要、推断或过期缓存写成页面事实。
 4. 按题材分布、新题材信号、经典题材变化、篇幅与更新、书名模式、开头卖点和
-   差异化元素分析。需要决策门禁时使用 references/topic-decision.md。
+   差异化元素分析。题材热度按热度中位从高到低排，与全平台比较用白话（如「比全平台
+   四分之三的书都热」）；头部老书只代表存量读者；没有可比的上期样本时趋势写「未比较」。需要决策门禁时使用 references/topic-decision.md。
 5. 输出市场概况、题材热度、证据与可信度、风险、三项可执行方向和下次复扫时间。
 6. 报告写给作者：讲市场结论和能写的方向；脚本名、命令和采集状态码不进报告。
    某个榜没采到，就用一句话说明「XX 榜这次没拿到（原因），结论不含它」。
 7. 每次扫榜新建 扫榜/{YYYYMMDD}/（同日再扫加 -2），样本记录存在这里；报告同时按
    references/topic-decision.md 的模板写进该目录的 选题决策.md（带「扫榜日期」），
    作为「扫榜结论」一节，作者要选题时再写「推荐选题」一节。story-long-write 开书时
-   从这份文件接上，所以结论要落盘，不只留在对话里。
+   从这份文件接上，所以结论要落盘，不只留在对话里。「推荐选题」每个选题按模板列
+   1-2 本建议拆的对标书（优先新书榜、书库新书中字数不多的同方向书，头部老书只作
+   参照），并告诉作者可用 story-long-analyze 拆它们来验证「能爆的原因」。
 
 当前 Preset 没有网页能力且用户也未提供样本时，使用内置参考完成方法论分析，
 并列出仍需核验的榜单；不要启动 CDP、独立浏览器或并行运行时。`,
@@ -207,19 +226,25 @@ Agent 过程通过右侧动态栏或官方 Chat 查看。禁止启动独立 Dash
 基于可核验样本识别短篇市场的情绪、题材与传播信号，不运行打包脚本、不读取 Cookie
 或 token，也不绕过验证码、登录或访问控制。
 
-1. 明确平台与方向；只有答案会改变采样范围时才问一个问题。
+1. 沿用作者已给的平台或方向，缺项一次问齐：想看哪个平台、男频还是女频、哪类短篇；
+   知乎盐言、番茄和七猫短篇请作者发榜单截图、文字或链接；手里有编辑的征稿要求也一起
+   发来。征稿要求原文存进本次扫榜目录的 征稿要求.md，题材、字数、截止日期当硬条件。
 2. 数据来源依次为：用户提供的数据或链接、当前 DSH Preset 可见的网页工具、
    references/real-market-data.md 中的历史资料。无法联网时必须把结论标为候选假设。
 3. 记录来源 URL、采集日期、榜单口径、有效样本数、缺失字段和异常项。
-4. 分析情绪类型、题材热点、篇幅、开头、结尾、标题、人设与传播触发点；
-   给每个趋势标注证据强度、饱和风险和有效期。
+4. 分析情绪类型（意难平/反转震撼/爽感释放/治愈温暖/细思极恐/共鸣感动）、题材热点、
+   篇幅、开头、结尾、标题、人设与传播触发点；给每个趋势标注证据强度、饱和风险和有效期。
+   点众、黑岩是在架书目而非热度榜：只有它们的数据时写「在架数量」，不说哪篇火。
+   只有一期样本时不写「变化」。
 5. 输出市场概况（扫榜时间、核心发现和可信度：样本多少篇、来自哪几个榜，并建议
    哪天前后再扫一次）、情绪热度、题材热点、关键数据、风口预警、三项可写方向。
 6. 报告写给作者：讲市场结论和能写的方向；脚本名、命令和 SKIP 这类采集状态不进报告。
    某个平台没采到，就用一句话说明「XX 这次没拿到（原因），结论不含它」。
 7. 每次扫榜新建 扫榜/{YYYYMMDD}/（同日再扫加 -2），样本记录存在这里；报告同时按
    references/topic-match.md 的模板写进该目录的 短篇扫榜结论.md，作为「扫榜结论」
-   一节，结合项目条件再写「选题匹配」一节。story-short-write 从这份文件接上选题。
+   一节，结合项目条件再写「选题匹配」一节，目标平台按 topic-match.md 的平台对照写。
+   作者不答投稿平台、素材和字数时按样本给方向，可行性最高写「中」。
+   story-short-write 从这份文件接上选题。
    作者自己给榜单时，按 references/manual-rank-input.md 的格式整理。
 
 当前 Preset 没有网页能力且用户也未提供样本时，只做历史资料分析并列出验证动作；

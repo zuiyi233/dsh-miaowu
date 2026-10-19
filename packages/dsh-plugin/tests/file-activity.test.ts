@@ -5,6 +5,7 @@ import { PartialArguments } from "@deepseek-ai/dsh-util-values";
 import {
   creativeRelativePath,
   fileMutations,
+  initialWorkbenchMode,
   jsonStringPrefix,
   latestSettledMutation,
   latestSettledMutationTurn,
@@ -277,6 +278,28 @@ describe("official DSH file activity", () => {
     expect(creativeRelativePath(".short-drama/private.json", cwd)).toBeUndefined();
     expect(workbenchModeForPath("剧集/第01集.md")).toBe("drama");
     expect(workbenchModeForPath("正文/第001章.md")).toBe("story");
+  });
+
+  it("recognizes an Oh Story short story kept as three files at the workspace root", () => {
+    const cwd = "/books/short";
+    for (const name of ["正文.md", "设定.md", "小节大纲.md"]) {
+      expect(creativeRelativePath(`/books/short/${name}`, cwd)).toBe(name);
+      expect(workbenchModeForPath(name)).toBe("story");
+    }
+    expect(creativeRelativePath("/books/short/笔记.md", cwd)).toBeUndefined();
+    expect(workbenchModeForPath("笔记.md")).toBeUndefined();
+    expect(preferredWorkbenchFile([{ path: "设定.md" }, { path: "小节大纲.md" }, { path: "正文.md" }], "story")).toBe("正文.md");
+  });
+
+  it("opens a new Session on the workbench that holds the workspace's work", () => {
+    const sample = [{ source: "example" as const }];
+    expect(initialWorkbenchMode("story", [{ path: "剧集/EP001/剧本.md" }], sample, [])).toBe("drama");
+    expect(initialWorkbenchMode("story", [], [...sample, { source: "workspace" }], [])).toBe("game");
+    expect(initialWorkbenchMode("story", [], sample, [{}])).toBe("video");
+    expect(initialWorkbenchMode("story", [{ path: "正文.md" }, { path: "剧集/EP001/剧本.md" }], sample, [])).toBe("story");
+    expect(initialWorkbenchMode("drama", [{ path: "正文/第001章.md" }, { path: "剧集/EP001/剧本.md" }], sample, [])).toBe("drama");
+    // The bundled example alone is not the creator's work.
+    expect(initialWorkbenchMode("story", [], sample, [])).toBe("story");
   });
 
   it("recognizes NovelToGame artifacts and prefers the product brief", () => {

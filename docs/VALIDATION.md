@@ -1,6 +1,59 @@
 # Validation
 
-Released: `@oh-story/dsh` 0.1.16 on DeepSeek Harness `0.2.0-rc.2`, with explicit `0.2.1-alpha.4` coverage. Local aggregate acceptance and paid-provider review passed on 2026-10-16.
+Released: `@oh-story/dsh` 0.1.18 on DeepSeek Harness `0.2.1-rc.2`, with the earlier `0.2.0-rc.2` line covered. Local aggregate acceptance passed on 2026-10-19; the new-user product audit and paid-provider review are the 0.1.17 evidence below.
+
+## 0.1.18 release evidence
+
+0.1.18 fixes the plugin-owned P2/P3 findings left by the 0.1.17 new-user audit. Upstream Skill pins, the default host and the paid-provider surface are unchanged from 0.1.17.
+
+### Local evidence
+
+- Fixed findings:
+  - The bundled Jin Ping Mei example (18+) is reachable from the welcome card before any creative work.
+  - The empty 视频 state runs the runtime check.
+  - The game preview probe reads the build on the page's own origin. It no longer reports a false 「预览载入失败」 beside a working game.
+  - The drama Python floor follows the bundled scripts' declared 3.9; video stays 3.10.
+  - The file tree re-lists the workspace while a Session runs.
+  - Game project names drop the brief label, dash and wrapping 书名号.
+- New unit tests cover the preview status rules, the same-origin probe address, project-name cleanup, the empty-video runtime check, and the drama Python floor checked against every bundled script's `MINIMUM_PYTHON`.
+- The packaged smoke covers the example entry, the loaded preview status across the loopback-alias isolation, the empty-video runtime check, and the absence of a stored workspace layout after the example visit.
+- On 2026-10-19, `pnpm verify:release` passed on the merged source (`4648ca2`): lint, typecheck, four parity checks, the DSH boundary, release and upstream-update tests, 198 unit/contract tests across 25 files, and the build. Packaged Chrome on DSH `0.2.1-rc.2` and `0.2.0-rc.2` returned `"ok": true`.
+- An independent review found no blockers. Its should-fix and nit findings were fixed before merge: the error flickering during quiet refreshes, the in-flight flag race, the stored layout choice, and the ARIA role.
+- The live file-tree refresh has no automated test, because the fixture model starts no long-running writing Role.
+
+### Release gates
+
+- **Local aggregate acceptance:** passed 2026-10-19.
+- **New-user audit and paid provider:** not rerun. 0.1.18 changes only Browser workbench surfaces and host preflight floors. The 0.1.17 evidence below still applies to Skills, Roles and provider behaviour.
+
+## 0.1.17 release evidence
+
+### Local evidence
+
+- Oh Story 0.9.0 (`74080143dd1a`), 13 Skills, 7 Roles and `agents_version` 36; NovelToGame 0.6.0 (`7758caa8d957`), 7 Skills. Both were synced from clean clones of the release tags. Drama 0.9.0 (`dafe80ee390e`) and video-recap 0.6.2 (`5785c33d8b51`) keep their pins. Upstream's new `story-setup/scripts/merge-project-instructions.py` is excluded by the synchronizer and rejected by parity.
+- Between DSH `0.2.1-alpha.4` and `0.2.1-rc.2`, every `@deepseek-ai` package the plugin imports has byte-identical type declarations, and every DOM selector the packaged smoke uses is still present.
+- The candidate (`ba64b81`) passed clean-source `pnpm verify:release`: lint, typecheck, four parity checks, the DSH boundary, release and upstream-update tests, 179 unit/contract tests and the build. Packaged Chrome on both DSH `0.2.1-rc.2` and `0.2.0-rc.2` returned `"ok": true`.
+
+### New-user audit
+
+- Four personas (short story, long-form serial, short drama, game/video) used the packed candidate on a fresh DSH `0.2.1-rc.2` home, following the README install, with a real DeepSeek model. Each completed its main task: an 8052-character short story, a book opening with 5 chapters, a 60-episode outline with the first three scripts, and a playable five-ending game from a user-written story. Output quality scored 4.0–4.6. There were no P0 findings.
+- The audit found four plugin defects, all fixed before release:
+  - The bundled require-based checkers failed under the package's ESM type. This affected short-story design, outline contract, deslop detection and the chapter check.
+  - Short stories at the workspace root never showed in the 小说 workbench.
+  - Drama and game workspaces opened on an empty 小说 tab.
+  - The welcome card implied that adding a folder came first.
+- The build now runs a bundled checker and fails if it cannot load. The rebuilt candidate was re-checked on a fresh DSH `0.2.1-rc.2`: the short-story workspace shows 小说 · 短篇, and a drama-only workspace opens on 短剧 before and after a reload.
+- Findings that belong to the DSH host are recorded for upstream follow-up rather than claimed as fixed: stop not cascading to subagents, the native folder picker's missing page feedback, English progress, and token-only usage. So are findings that belong to the upstream Skills: long first-turn latency, short chapters, and editing on a vague request without asking first.
+
+### Paid provider
+
+- On 2026-10-19, `pnpm test:dsh:real` on the fixed source (`bac50b1`) passed on DSH `0.2.1-rc.2` with `deepseek-official/deepseek-flash`. Both review Skills resolved to the installed plugin. There were 2 Role calls, and both required Roles returned successful, non-empty results. Story and drama produced 130 and 66 durable events, and the project digest remained unchanged. The operator-authorized credential was read from a 0600 temporary file and never appeared in logs.
+
+### Release gates
+
+- **Local aggregate acceptance:** passed 2026-10-19. This is the full `pnpm verify:release` with packaged Chrome on `0.2.1-rc.2` and `0.2.0-rc.2`, repeated on the final source after the audit fixes.
+- **New-user audit:** passed 2026-10-19. No P0 findings, and every plugin-owned P1 was fixed and re-verified on DSH.
+- **Paid provider:** passed 2026-10-19. Native Story and Drama review succeeded, with both required Roles returning results.
 
 ## 0.1.16 release evidence
 
@@ -160,7 +213,7 @@ The gate discovers all `*.test.ts` and `*.contract.test.ts` files. Coverage clai
 - running + queued submissions read from the host `inbox` projection, exact Queue removal, current-Turn cancellation with the remaining Queue preserved but not auto-executed, and a late real MP4 that upgrades a completed batch from 0/22 to an explicit 1/22 partial result without a render loop;
 - a complete mixed sequence whose creator explicitly selects `交付/EP001/`'s IMG still for SHOT-EP001-001 ahead of an available video while the other 21 shots use video; it previews the actual still/video sources, dispatches the ordered native assembly request to `/short-drama-edit`, refuses a second composition while the first is unsettled, and completes only after the fixed upstream deliverable `制作成果/成片/成片.mp4` appears in the Agent FileSystem;
 - the short-drama production shot board, two-version selection and restoration, same-episode delivery artifact discovery, explicit IMG selection, accepted SHOT keyframe fallback, mixed-source sequence reorder/blockers, asset board, relationship canvas, keyboard layout movement, native `/short-drama-produce` Conversation dispatch, realistic image/video version backfill and cross-document source navigation;
-- first-launch guidance in the blank default-workspace Session a fresh DSH opens (its first-use Documents folder redirected into the temporary root), its containment at 500 px, its retirement after that Session's first prompt, and removal when entering a creative Session;
+- first-launch guidance in the blank default-workspace Session a fresh DSH opens (its first-use Documents folder redirected into the temporary root), its containment at 500 px, its 「先玩内置示例」 entry opening the Jin Ping Mei preview as loaded (not failed) across the loopback-alias isolation, the empty 视频 state's runtime check, no workspace layout remembered after the example visit and the guide's return when it is collapsed, its retirement after that Session's first prompt, and removal when entering a creative Session;
 - blank-session mounting, Session-switch draft recovery after DSH releases the Session's Store, source editing, conflict isolation and saved-state behavior;
 - ordered tree/editor/Chat geometry at desktop and 500 px widths, a Composer that remains fixed during long-message scrolling, and anchor clearance in wide, medium and compact layouts.
 

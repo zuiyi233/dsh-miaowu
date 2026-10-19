@@ -39,12 +39,12 @@ The table describes the current source. Published packages pin their upstream co
 
 | Workbench | Upstream capability (pinned, bundled with the plugin) | Main entry points |
 | --- | --- | --- |
-| Novel | [Oh Story 0.8.6](https://github.com/zenstory-ai/oh-story-claudecode/releases/tag/v0.8.6) · 13 Skills · 7 Roles | `/story`, `/story-long-write`, `/story-review` |
+| Novel | [Oh Story 0.9.0](https://github.com/zenstory-ai/oh-story-claudecode/releases/tag/v0.9.0) · 13 Skills · 7 Roles | `/story`, `/story-long-write`, `/story-review` |
 | Short drama | [Drama Skills 0.9.0](https://github.com/zenstory-ai/drama-skills/releases/tag/v0.9.0) · 11 Skills | `/short-drama`, `/short-drama-write`, `/short-drama-storyboard`, `/short-drama-edit` |
-| Game | [NovelToGame 0.5.0](https://github.com/zenstory-ai/novel-to-game) · 7 Skills · playable 《金瓶梅》 ADV sample | `/novel-to-game quick`, `/game-build`, `/game-qa` |
+| Game | [NovelToGame 0.6.0](https://github.com/zenstory-ai/novel-to-game) · 7 Skills · playable 《金瓶梅》 ADV sample (18+) | `/novel-to-game quick`, `/game-build`, `/game-qa` |
 | Video | [video-recap-skills 0.6.2](https://github.com/zenstory-ai/video-recap-skills/releases/tag/v0.6.2) · 7 Skills (3 user entry points) | `/video-recap`, `/video-script`, `/video-reference` |
 
-> Latest release **v0.1.16** (2026-10-16). The default install pins DeepSeek Harness `0.2.0-rc.2`; explicit opt-in to `0.2.1-alpha.4` is also supported. See [CHANGELOG.md](CHANGELOG.md) and [Releases](https://github.com/zenstory-ai/oh-story-dsh/releases); upgrade steps are in the FAQ entry [“What do I do after upgrading?”](#what-do-i-do-after-upgrading).
+> Latest release **v0.1.18** (2026-10-19). The default install pins DeepSeek Harness `0.2.1-rc.2`; the earlier `0.2.0-rc.2` remains supported. See [CHANGELOG.md](CHANGELOG.md) and [Releases](https://github.com/zenstory-ai/oh-story-dsh/releases); upgrade steps are in the FAQ entry [“What do I do after upgrading?”](#what-do-i-do-after-upgrading).
 
 ## The four workbenches
 
@@ -66,13 +66,13 @@ Each episode maintains up to five core creative Markdown files as needed: `剧�
 
 ![Game workbench](docs/images/game-workbench-demo.gif)
 
-Live playtest on the left, Chat on the right. Output from `/novel-to-game quick` goes to `game-adaptations/<project>/`; once `build/app/index.html` is ready the project appears in the list and can be refreshed, made full-screen or switched. Games run on a separate origin inside an iframe sandbox.
+Live playtest on the left, Chat on the right. Output from `/novel-to-game quick` goes to `game-adaptations/<project>/`; once `build/app/index.html` is ready the project appears in the list and can be refreshed, made full-screen or switched. Games run on a separate origin inside an iframe sandbox. The bundled Jin Ping Mei ADV sample plays without an API key: before you have any work, click 「先玩内置示例」 (play the bundled sample) on the welcome card; afterwards pick it under 「内置示例」 in the 「游戏项目」 (game project) list. Adapted from the classical novel, it contains adult content (18+) and asks you to confirm your age before it starts.
 
 ### Video recap
 
 ![Video workbench](docs/images/video-workbench-demo.gif)
 
-Preview on the left, Chat on the right. Projects live in `video-recaps/<project>/`: source footage in `sources/`, working files in `work/`, deliverables in `outputs/`. Switch between source, rough cut and final, and inspect stage hints, the run checklist and QC artifacts; video streams over HTTP Range.
+Preview on the left, Chat on the right. Projects live in `video-recaps/<project>/`: source footage in `sources/`, working files in `work/`, deliverables in `outputs/`. Switch between source, rough cut and final, and inspect stage hints, the run checklist and QC artifacts; video streams over HTTP Range. Before any video project exists, the empty state lists the runtime check: whether Python 3.10+, ffmpeg/ffprobe and `MIMO_API_KEY` are ready.
 
 ### Rules shared by all four
 
@@ -87,11 +87,11 @@ Boundaries and protocols for each workbench are in the [architecture notes](docs
 Requires Node.js 24+. The install command provides pnpm temporarily, so a machine with only Node.js can run it:
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.0-rc.2 dsh plugin --profile web add @oh-story/dsh@0.1.16 &&
-npx -y @deepseek-ai/dsh@0.2.0-rc.2 web
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add @oh-story/dsh@0.1.18 &&
+npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 ```
 
-Keep the terminal running; the browser opens automatically by default. If it does not, copy the full `http://127.0.0.1:3080/?token=...` link printed in the terminal — first-time authentication needs the token in the link. Closing the terminal stops the service. Use the same dsh version for install and start. The commands on this page pin `0.2.0-rc.2` as the default. The peer range accepts `>=0.2.0-rc.2 <0.2.1-0`, plus the separate alpha opt-in line `>=0.2.1-alpha.1 <0.2.2-0`. To try the alpha, explicitly use `@deepseek-ai/dsh@0.2.1-alpha.4` in both the install and start commands; do not mix the two lines. DSH checks compatibility while adding and loading the plugin and reports mismatches (`dsh plugin allow-version` overrides it at your own risk).
+Keep the terminal running; the browser opens automatically by default. If it does not, copy the full `http://127.0.0.1:3080/?token=...` link printed in the terminal — first-time authentication needs the token in the link. Closing the terminal stops the service. Use the same dsh version for install and start. The commands on this page pin `0.2.1-rc.2`, the npm `latest`. The plugin accepts `>=0.2.0-rc.2 <0.2.1-0` and `>=0.2.1-alpha.1 <0.2.2-0`. If you stay on `0.2.0-rc.2`, use `@deepseek-ai/dsh@0.2.0-rc.2` in both the install and start commands; do not mix host versions. DSH checks compatibility while adding and loading the plugin and reports mismatches (`dsh plugin allow-version` overrides it at your own risk).
 
 Before creating with AI, add a Provider and API key under DSH's Settings → Models, or set the `DEEPSEEK_API_KEY` environment variable before starting. To only browse existing work, choose "Configure later" in the first-run guide.
 
@@ -101,8 +101,8 @@ Before creating with AI, add a Provider and API key under DSH's Settings → Mod
 The prebuilt package in the GitHub Release passes the same test suite:
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.0-rc.2 dsh plugin --profile web add https://github.com/zenstory-ai/oh-story-dsh/releases/download/v0.1.16/oh-story-dsh-0.1.16.tgz &&
-npx -y @deepseek-ai/dsh@0.2.0-rc.2 web
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add https://github.com/zenstory-ai/oh-story-dsh/releases/download/v0.1.18/oh-story-dsh-0.1.18.tgz &&
+npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 ```
 
 </details>
@@ -110,14 +110,14 @@ npx -y @deepseek-ai/dsh@0.2.0-rc.2 web
 <details>
 <summary>Host dependencies for the video workbench</summary>
 
-The video pipeline additionally needs Python 3.10+ and ffmpeg/ffprobe on the host (Debian/Ubuntu `sudo apt install ffmpeg`). With the libass `subtitles` filter it burns subtitles in; without that filter it delivers an external SRT, or you can install a libass-enabled build. Video recaps use `MIMO_API_KEY` (Fish Audio TTS additionally needs `FISH_API_KEY`).
+The video pipeline additionally needs Python 3.10+ and ffmpeg/ffprobe on the host (Debian/Ubuntu `sudo apt install ffmpeg`). With the libass `subtitles` filter it burns subtitles in; without that filter it delivers an external SRT, or you can install a libass-enabled build. Video recaps use `MIMO_API_KEY` (Fish Audio TTS additionally needs `FISH_API_KEY`). Set keys and `PATH` in the terminal that starts DSH; they take effect after DSH restarts.
 
 </details>
 
 <details>
 <summary>Configure media-generation APIs (needed for short-drama production)</summary>
 
-DeepSeek writes the screenplay, storyboard and prompts; image, video, speech and music generation is handed by short-drama Production to the `short-drama-produce` Skill, which calls the vendor APIs below. Set the keys as host environment variables before starting DSH:
+DeepSeek writes the screenplay, storyboard and prompts; image, video, speech and music generation is handed by short-drama Production to the `short-drama-produce` Skill, which calls the vendor APIs below. The production and check scripts need Python 3.9+ on the host. Set the keys as host environment variables before starting DSH:
 
 | Capability | Vendor | Required variables | Optional |
 | --- | --- | --- | --- |
@@ -130,7 +130,7 @@ DeepSeek writes the screenplay, storyboard and prompts; image, video, speech and
 ```bash
 export OPENAI_API_KEY=...            # images
 export ARK_API_KEY=... SEEDANCE_MODEL=...   # video; use the model / endpoint ID enabled on your account
-npx -y @deepseek-ai/dsh@0.2.0-rc.2 web
+npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 ```
 
 Configure only what you use: without a video key you can still write storyboards and generate keyframe images. The top of the Production view shows whether each vendor is configured and which variable is missing. At startup the plugin registers the five built-in adapters in a credential-free config file (by default under `oh-story-dsh-<uid>/` in the system temp directory, readable and writable only by the current user; the "generation environment" bar shows the full path), and the agent references it directly when running `production_tool.py run`. To use your own adapter or change timeouts, point `OH_STORY_DRAMA_ADAPTER_CONFIG` at your own file. Each vendor's parameters, resolutions and duration limits are documented in the bundled `short-drama-produce/references/providers/`. Novel covers use whichever image-generation tool is visible in the current Preset.
@@ -145,7 +145,7 @@ Voice references require an explicit capability declaration: generated generic p
 Whichever profile the plugin is installed into, every Session of that profile loads the creation Skills. To keep the stock `web` profile clean, install into a separate profile:
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.0-rc.2 dsh plugin --profile story add @oh-story/dsh@0.1.16
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile story add @oh-story/dsh@0.1.18
 ```
 
 A new profile has no UI by default. Edit `~/.dsh/profiles/story/package.json` and set `dsh.profile.bundles` to:
@@ -161,8 +161,8 @@ A new profile has no UI by default. Edit `~/.dsh/profiles/story/package.json` an
 `@deepseek-ai/dsh-web-app` is DSH's own Web UI package and must load before the creation plugin. The two profiles can then run at the same time on different ports; models, credentials, workspaces and session history are stored centrally by DSH:
 
 ```bash
-npx -y @deepseek-ai/dsh@0.2.0-rc.2 web                          # stock DSH
-npx -y @deepseek-ai/dsh@0.2.0-rc.2 --profile story --port 3081  # creation workbench
+npx -y @deepseek-ai/dsh@0.2.1-rc.2 web                          # stock DSH
+npx -y @deepseek-ai/dsh@0.2.1-rc.2 --profile story --port 3081  # creation workbench
 ```
 
 </details>
@@ -306,11 +306,11 @@ Update the plugin using Installation and restart DSH. If the current version sti
 
 ### The workbench is blank after installing — no panel and no "创作工作台" button?
 
-Check the plugin and DSH versions, then follow [Installation](#installation) using one supported host line: `0.2.0-rc.2` by default, or explicit `0.2.1-alpha.4`. Use that version for both installation and startup, and check that the plugin is loaded in the same profile. If the workbench is still blank, report the versions and terminal error. The historical Queue failure is recorded in [#50](https://github.com/zenstory-ai/oh-story-dsh/issues/50).
+Check the plugin and DSH versions, then follow [Installation](#installation) using one supported host line: `0.2.1-rc.2` by default, or the earlier `0.2.0-rc.2`. Use that version for both installation and startup, and check that the plugin is loaded in the same profile. If the workbench is still blank, report the versions and terminal error. The historical Queue failure is recorded in [#50](https://github.com/zenstory-ai/oh-story-dsh/issues/50).
 
 ### I also installed Oh Story for Codex or OpenCode — which copy does DSH use?
 
-DSH also reads `~/.agents/skills` and prefers a same-named copy there over the plugin's bundled, DSH-adapted version, so when the two differ, the `~/.agents` copy wins. To make DSH use only the plugin's Skills, point `DSH_AGENTS_HOME` at another directory before starting (for example `DSH_AGENTS_HOME=~/.dsh-agents npx -y @deepseek-ai/dsh@0.2.0-rc.2 web`), or move the same-named folders out of `~/.agents/skills`.
+DSH also reads `~/.agents/skills` and prefers a same-named copy there over the plugin's bundled, DSH-adapted version, so when the two differ, the `~/.agents` copy wins. To make DSH use only the plugin's Skills, point `DSH_AGENTS_HOME` at another directory before starting (for example `DSH_AGENTS_HOME=~/.dsh-agents npx -y @deepseek-ai/dsh@0.2.1-rc.2 web`), or move the same-named folders out of `~/.agents/skills`.
 
 ### Install reports `pnpm not found on PATH`?
 
@@ -326,13 +326,15 @@ Add a work directory and open a session first. In an empty directory, run a crea
 
 ### Does it work on Windows?
 
-Yes. The type, asset, unit-test and build gate runs on both macOS and Windows in CI on every change; the integration test that packages the plugin into the official DSH Web runs on Linux. The video pipeline needs Python 3.10+ and ffmpeg/ffprobe on every platform, burning subtitles with libass or delivering an external SRT without it; long-form analysis, import and long-form tracking also need Python 3 on the host, and short-drama assembly needs ffmpeg/ffprobe, with libass for the default burned-in subtitles and Node.js (Remotion) whenever the cut list has on-screen text; the long-form chapter check needs Node.js 18+.
+Yes. The type, asset, unit-test and build gate runs on both macOS and Windows in CI on every change; the integration test that packages the plugin into the official DSH Web runs on Linux. The video pipeline needs Python 3.10+ and ffmpeg/ffprobe on every platform, burning subtitles with libass or delivering an external SRT without it; long-form analysis, import and long-form tracking also need Python 3 on the host, the short-drama check and production scripts need Python 3.9+, and short-drama assembly needs ffmpeg/ffprobe, with libass for the default burned-in subtitles and Node.js (Remotion) whenever the cut list has on-screen text; the long-form chapter check needs Node.js 18+.
 
 ### What do I do after upgrading?
 
 Rerun the install command with the target version after `@oh-story/dsh@`, then restart DSH. Use the same host version for installation and startup; see [Installation](#installation) for the supported range. Skills and Roles ship with the plugin and need no redeployment into projects.
 
-Version 0.1.16 includes Oh Story 0.8.6: long- and short-form writing manage author memory in the existing stores; standalone review and deslop use only preferences supplied for that task. Detection or annotation leaves prose unchanged, while rewrites follow your authorized scope. Drama 0.9 continues with existing creative Markdown documents and no longer backfills retired templates.
+Version 0.1.18 finishes the interface findings from the 0.1.17 new-user audit (the bundled-example entry, the video runtime check, the game preview status, Python 3.9+ for short drama); it needs no migration, only a reinstall and restart.
+
+Version 0.1.17 includes Oh Story 0.9.0: each Skill's references are reorganized around the writing step they serve; manuscripts, settings, tracking and author memory need no migration, and in DSH the Skills and Roles update with the plugin, so `/story-setup` does not need to run again. For a long book imported earlier, have `/story-long-write` rewrite that volume's old plot units (剧情单元) as unit cards (单元卡) before continuing. The short-fiction platform is now called 知乎盐言; the old names 盐选 and 番茄短篇 are still recognized. NovelToGame 0.6.0 reviews scope against budget after the whitebox playtest and again halfway through production, and `director` mode pauses on visual-target candidates for your pick. The default host is now DSH `0.2.1-rc.2`.
 
 Check the actions relevant to your project:
 

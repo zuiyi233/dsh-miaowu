@@ -162,9 +162,10 @@ async function hasTrackingState(fs: StoryFileSystem, root: string, book: string,
 }
 
 /**
- * Upstream story-import Phase 3-L creates 大纲/ and 追踪/ (Step 1) and copies
- * the manuscript into 正文/ (Step 2) long before it writes 细纲 (Step 6) and
- * runs `tracking_commit.py init` (Step 7). Upstream recognises that window by
+ * Upstream story-import's long-form structure migration (structure-mapping-long.md)
+ * creates 大纲/ and 追踪/ (Step 1) and copies the manuscript into 正文/ (Step 2)
+ * long before it reverse-builds 细纲 (Step 10) and Phase 4 runs
+ * `tracking_commit.py init`. Upstream recognises that window by
  * `拆文库/{basename(书目录)}`; in DSH's single-book layout the book is the
  * workspace root, so that key must equal the workspace folder name and rarely
  * does. DSH therefore also accepts its own marker, {@link IMPORT_MARKER}.

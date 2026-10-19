@@ -15,7 +15,7 @@ import type { GameQaCheckId, GameQaCheckSummary, GameQaRunEvidence, GameQaSummar
 import { validateGameArtInventory, type GameArtDiagnostic } from "./game-art-validation.js";
 import { comfyuiWorkflowStatus, probeComfyui, parseWorkspaceComfyuiConfig, comfyuiConfigResponse, validateWorkspaceComfyuiConfigBody, writeWorkspaceComfyuiConfigFile, COMFYUI_CONFIG_RELATIVE_PATH, type ComfyuiPreflightSummary, type WorkspaceComfyuiConfig } from "./comfyui-status.js";
 import { dramaAdapterStatuses, ensureDramaAdapterConfig, type DramaAdapterStatus } from "./drama-adapters.js";
-import { commandOutput, hostPython } from "./host-python.js";
+import { commandOutput, DRAMA_PYTHON, hostPython, VIDEO_PYTHON, type PythonProbe } from "./host-python.js";
 import { defaultDramaSkillRoot, defaultNovelToGameSkillRoot } from "./skill-provider.js";
 import { skipVideoDirectory, summarizeVideoProject, VIDEO_DIRECTORY, videoProjectRoot, visibleVideoPath, type VideoProjectSummary } from "./video-project.js";
 import { isTrustedPreviewNavigation, isTrustedWorkspaceRequest } from "./workspace-request-trust.js";
@@ -27,7 +27,9 @@ const GAME_DIRECTORY = "game-adaptations";
 // Preview studios need only a small manifest-driven subset, so discover them before a very large
 // prose workspace can consume the shared listing budget.
 const CREATIVE_DIRECTORIES = [VIDEO_DIRECTORY, GAME_DIRECTORY, ...STORY_DIRECTORIES, ...DRAMA_DIRECTORIES] as const;
-const ROOT_FILES = new Set(["short-drama.json"]);
+// Oh Story short fiction keeps one book as three files at the book root (DSH: the workspace root).
+const SHORT_STORY_FILES = ["正文.md", "设定.md", "小节大纲.md"] as const;
+const ROOT_FILES = new Set<string>(["short-drama.json", ...SHORT_STORY_FILES]);
 /**
  * 书名目录标记:强 marker 为一级子目录直接包含 正文/ 或 追踪/ 子目录
  * (对齐上游 oh-story 定义)。弱启发式见 isBookDirectory:无强 marker 时,
@@ -62,7 +64,7 @@ export interface WorkspaceRouteOptions {
 
 /** Host-process capability probe. The Agent's execution world may differ; `video-recap --doctor` is authoritative there. */
 interface VideoPreflightSummary {
-  readonly python: { readonly ok: boolean; readonly version?: string | undefined };
+  readonly python: PythonProbe;
   readonly ffmpeg: { readonly ok: boolean; readonly subtitles: boolean };
   readonly ffprobe: { readonly ok: boolean };
   readonly credentials: { readonly mimo: boolean; readonly fish: boolean; readonly indexTts: boolean; readonly ttsProvider: string };
@@ -127,7 +129,7 @@ function configured(...names: readonly string[]): boolean {
  * `production_tool.py run` lives. Values never leave the process.
  */
 interface DramaPreflightSummary {
-  readonly python: { readonly ok: boolean; readonly version?: string | undefined };
+  readonly python: PythonProbe;
   readonly adapterConfig: { readonly path: string; readonly generated: boolean; readonly ok: boolean };
   readonly adapters: readonly DramaAdapterStatus[];
   /**
@@ -224,7 +226,7 @@ export async function dramaPreflight(file: WorkspaceComfyuiConfig = {}): Promise
 }
 
 async function buildDramaPreflight(file: WorkspaceComfyuiConfig = {}): Promise<DramaPreflightSummary> {
-  const python = await hostPython();
+  const python = await hostPython(DRAMA_PYTHON);
   const adapterConfig = await ensureDramaAdapterConfig(defaultDramaSkillRoot(), { python: python.command });
   // 探测失败只写 online:false,不影响路由其余部分:这是探测语义本身,不算吞错。
   const probe = await probeComfyui(process.env, undefined, file).catch((error: unknown) => ({
@@ -242,7 +244,7 @@ async function buildDramaPreflight(file: WorkspaceComfyuiConfig = {}): Promise<D
 
 async function videoPreflight(): Promise<VideoPreflightSummary> {
   if (videoPreflightCache !== undefined && videoPreflightCache.expires > Date.now()) return videoPreflightCache.value;
-  const python = (await hostPython()).probe;
+  const python = (await hostPython(VIDEO_PYTHON)).probe;
   const [ffmpegOutput, ffmpegFilters, ffprobeOutput] = await Promise.all([
     commandOutput("ffmpeg", ["-version"]),
     commandOutput("ffmpeg", ["-hide_banner", "-filters"]),
@@ -741,9 +743,20 @@ async function previewDigest(realm: WorkspaceRealm, projectRoot: string): Promis
   return { ready, version: createHash("sha256").update(entries.sort().join("\n")).digest("hex").slice(0, 16) };
 }
 
-function headingTitle(content: string | undefined, fallback: string): string {
+/**
+ * The game's name from its brief's first heading, e.g. `# PRODUCT_BRIEF — 《雪夜渡》` → `雪夜渡`.
+ * The Studio adds its own 书名号 and separators, so neither the file label nor the work's
+ * 书名号 belong in the name.
+ */
+export function gameProjectTitle(content: string | undefined, fallback: string): string {
   const heading = content?.split(/\r?\n/u).find((line) => /^#\s+/u.test(line));
-  return heading?.replace(/^#\s+/u, "").replace(/^PRODUCT_BRIEF\s*[·・:]?\s*/iu, "").trim() || fallback;
+  const title = heading?.replace(/^#\s+/u, "")
+    .replace(/^(?:PRODUCT[_ ]BRIEF|产品简报)/iu, "")
+    .replace(/^[\s·・:：|—–-]+/u, "")
+    .trim()
+    .replace(/^《([^《》]+)》$/u, "$1")
+    .trim();
+  return title || fallback;
 }
 
 const GAME_ART_SOURCE_EXTENSIONS = new Set([".js", ".html", ".css", ".json"]);
@@ -934,7 +947,7 @@ export async function workspaceGameProjects(
     return {
       id: `workspace:${id}`,
       root,
-      title: headingTitle(brief, id),
+      title: gameProjectTitle(brief, id),
       source: "workspace" as const,
       previewReady: preview.ready,
       previewUrl: preview.ready

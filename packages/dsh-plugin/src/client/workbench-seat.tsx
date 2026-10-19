@@ -46,13 +46,12 @@ function WorkbenchWelcome() {
     <span ref={marker} className="oh-story-bridge-marker" aria-hidden />
     {target === undefined ? null : createPortal(<section className="oh-story-welcome" aria-label="Oh Story 使用引导">
       <h2>Oh Story 已加载</h2>
-      <p>作品目录中有创作文件时，小说、短剧、游戏、视频工作台会自动显示。</p>
+      <p>直接在下方输入框说你想写什么，比如「写一篇 8000 字的重生复仇短篇」，或输入 <code>/story</code>、<code>/short-drama</code>、<code>/novel-to-game quick</code>、<code>/video-recap</code>。写出第一个创作文件后，小说、短剧、游戏、视频工作台会自动出现。</p>
       <ol>
-        <li>点击左侧「添加工作区 / Add workspace」的 ＋，选择存放作品的文件夹。</li>
-        <li>在下方「选择工作区 / Choose workspace」中选中该目录，或打开已有会话。</li>
-        <li>空目录先在 Chat 中开始创作，生成第一个创作文件后，工作台会自动出现。</li>
+        <li>不选文件夹也能开始：作品会写进 DSH 自动建立的「默认工作区 / Default workspace」。</li>
+        <li>想放进自己的作品文件夹：点击左侧「工作区 / Workspaces」旁的「添加工作区 / Add workspace」，在系统弹出的文件夹窗口里选择，再在下方「选择工作区 / Choose workspace」中选中它。</li>
+        <li>输入框右下角显示模型名就说明已配置好；没有模型时，在「设置 → 模型」填入 API Key。只查看已有作品无需 API Key。</li>
       </ol>
-      <p>查看已有作品无需 API Key。开始 AI 创作前，在「设置 → 模型」配置模型，再输入 <code>/story</code>、<code>/short-drama</code>、<code>/novel-to-game quick</code> 或 <code>/video-recap</code>。</p>
     </section>, target)}
   </>;
 }
