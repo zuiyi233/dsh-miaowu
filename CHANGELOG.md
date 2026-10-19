@@ -22,6 +22,8 @@
 - 真实 provider 冒烟改用共享的 fork 包路径判定（`release-identity`），不再把已安装的上游 npm 包路径当作判定依据，付费 provider 门禁不再恒失败。
 - 发布 CLI 在 Windows 上不再静默无输出：入口判定改用 `pathToFileURL(process.argv[1]).href`，`node scripts/release.mjs ...` 会真正执行并在失败时返回非零退出码。
 - 补工作区安全负向契约测试：覆盖越界路径、绝对路径、符号链接与跨会话读取/写入拒绝；补实时刷新决策单测，覆盖页面隐藏、请求进行中与会话未运行时不刷新。
+- 发布源预检的方向修正为「源提交必须是 `main` 的祖先」：此前反写会接受未合入的功能分支顶端、却拒绝 `main` 上较早的提交；同时把 fork 源预检测试改为临时 Git 仓库夹具，GitHub Actions 的浅克隆 PR 检出不再因缺少 `main` 引用而失败。
+- 打包冒烟在 Windows 上不再因临时目录的 8.3 短路径失败：宿主装在 `ADMINI~1` 下时模块会以短、长两种路径重复加载，首个设置写入被拒为 `profile reload requires the root Include entry`，首启预览说明无法确认。冒烟改为先解析长路径，保留既有 profile patch 行，并在打开浏览器前通过 settings Remote 确认预览说明。
 
 ## [0.1.18] - 2026-10-19
 

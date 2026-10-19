@@ -25,9 +25,10 @@ The release pipeline now matches this fork's identity:
 - Stable tags are parsed as `miaowu-vX.Y.Z`. `.github/workflows/release.yml` triggers on
   `miaowu-v*`, and its guards reject any other tag ref.
 - The source preflight rejects a tag or commit that lacks
-  `packages/dsh-plugin/src/services/index.ts` and `createDshMiaowuSkillProvider`, or that
-  is not descended from `main` (`origin/main` in a tag checkout). Upstream release
-  commits and upstream `v*` tags fail before any build starts.
+  `packages/dsh-plugin/src/services/index.ts` and `createDshMiaowuSkillProvider`, or whose
+  commit is not on `main` (it must be an ancestor of `main`, or of `origin/main` in a tag
+  checkout; the `main` tip is the normal case). Upstream release commits and upstream `v*`
+  tags fail before any build starts.
 - The upstream-only `recover-v0.1.13.yml` workflow is deleted in this branch. Until that
   deletion is pushed and merged, GitHub still lists it on the default branch; confirm it is
   gone there before assuming the remote has no such workflow.
@@ -42,6 +43,12 @@ enable the Release entry by its own ID. In this fork that ID is `350173456`, but
 ID can change when a workflow is deleted and re-created, so confirm the current ID from the
 Actions UI or `gh api repos/zuiyi233/dsh-miaowu/actions/workflows` before enabling instead
 of trusting a saved number.
+
+Enabling the workflow is not sufficient by itself. `scripts/release.mjs ci-proof` requires
+the default branch `main` to be protected (`branches/main.protected === true`) and fails
+with `publisher requires protected default branch main` otherwise. As of 2026-10-20 the
+fork's GitHub API reports `main` as unprotected, so enable branch protection for `main`
+(require pull requests and the CI checks) before pushing the first `miaowu-v*` tag.
 
 ## One-time npm setup
 

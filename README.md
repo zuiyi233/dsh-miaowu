@@ -97,7 +97,7 @@
 - **版本历史 / 回滚 / 审计 / 行级批注**：每个文件保留最近 50 个快照，回滚用版本校验拒绝覆盖并发修改；`audit.jsonl` 留痕，批注按原文引用重锚，行号移动记 `moved`、找不到记 `stale` 而不丢批注。
 - **候选暂存**：Agent 用 `oh_story_task stage_candidate` 登记建议但不写文件，由你在「任务与候选」面板确认、修订或应用。
 - **run / checkpoint / resume**：长任务按 step 记录进度与检查点，中断后从最近暂停或失败的 run 恢复（内置 novel-chapter、drama-batch、game-content 三个 recipe）。
-- **备份三件套**：作品包、快照、整体备份；恢复一律写入新目录、不覆盖原项目，离线 JSON 导入走同一套校验。媒体文件只跳过字节，整体备份不含 DSH 会话与 Provider 凭据；启用保险库时 `.oh-story/vault/` 也会随 full 备份打包，请按敏感文件保管。
+- **备份三件套**：作品包、快照、整体备份；恢复一律写入新目录、不覆盖原项目，离线 JSON 导入走同一套校验。媒体文件只跳过字节，整体备份不含 DSH 会话与 Provider 凭据；启用保险库时 full 备份只收 `vault/secrets.json` 这类文本/JSON 条目，**不含 `vault/master.key`**，没有单独备份的密钥就无法解密，请把主密钥按敏感文件另行保管。
 - **伏笔闭环**：埋设、按章提醒、回收状态机与 snooze；可从拆书 sidecar 只读导入。
 - **书架**：发现并管理多作品；归档只隐藏记录，30 天回收站与永久移除都不删除工作区文件。
 - **可选凭据保险库**：AES-256-GCM，默认关闭；只有设置 `DSH_MIAOWU_VAULT_ENABLED=1` 才启用，不接管 DSH 环境凭据。

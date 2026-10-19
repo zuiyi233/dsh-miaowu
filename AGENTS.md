@@ -25,7 +25,7 @@
 ### 发布与 tag
 
 - 版本号看 `packages/dsh-plugin/package.json`（根 `package.json` 要一致），当前源码 0.1.18。npm 包 `@dsh-miaowu/dsh` **尚未发布**（registry 返回 404），GitHub Release 目前只有 `v0.1.16` 预构建包，0.1.17 / 0.1.18 只能源码构建。
-- fork 的发布 Tag 一律 `miaowu-vX.Y.Z`，**不要复用上游 `v*` Tag**。`scripts/release.mjs` 只接受这个前缀，并会拒绝缺少 fork 入口（`packages/dsh-plugin/src/services/index.ts` 与 `createDshMiaowuSkillProvider`）或不在 `main` 祖先链上的源提交。
+- fork 的发布 Tag 一律 `miaowu-vX.Y.Z`，**不要复用上游 `v*` Tag**。`scripts/release.mjs` 只接受这个前缀，并会拒绝缺少 fork 入口（`packages/dsh-plugin/src/services/index.ts` 与 `createDshMiaowuSkillProvider`）或源提交不在 `main` 上（源提交必须是 `main` 的祖先，通常就是 `main` 顶端）的发布。
 - 打 Tag 前先跑 `node scripts/release.mjs check --tag miaowu-vX.Y.Z`（同时核对根/包版本一致、`CHANGELOG.md` 有该版本的带日期标题），再按 `docs/RELEASING.md` 执行；未经用户明确授权不要 push Tag 或发布。
 
 ## 2. 插件边界（红线）
