@@ -136,17 +136,9 @@ Keep the terminal running; the browser opens automatically by default. If it doe
 Before creating with AI, add a Provider and API key under DSH's Settings → Models, or set the `DEEPSEEK_API_KEY` environment variable before starting. To only browse existing work, choose "Configure later" in the first-run guide.
 
 <details>
-<summary>Available after publication: v0.1.18 prebuilt package and npm install</summary>
+<summary>Available after publication: GitHub Release prebuilt package and npm install</summary>
 
-The 0.1.18 GitHub Release asset and npm package are not published yet (checked 2026-10-20: asset 404, registry 404), so the commands below will not work until then. The actual tag and asset names are authoritative on the [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) page; the next release uses the `miaowu-v` tag prefix, so the v0.1.18 asset path will carry `miaowu-v0.1.18`. Once published, either install command is equivalent to the source build:
-
-```bash
-# GitHub Release prebuilt package after publication
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/miaowu-v0.1.18/dsh-miaowu-dsh-0.1.18.tgz
-# npm package after publication
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add @dsh-miaowu/dsh@0.1.18
-npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
-```
+**There is no 0.1.18 prebuilt package and no npm package today** (checked 2026-10-20: Release asset 404, registry 404), so do not slot the version number into an old link — a non-existent asset returns 404. After publication, copy the tarball's full download URL from the [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) page; the next release's tag starts with `miaowu-v`, and the asset path looks like `.../download/miaowu-v<version>/<asset>.tgz`, with `<version>` and `<asset>` exactly as shown there. Install by replacing `./release/dsh-miaowu-dsh-0.1.18.tgz` in the source-build command above with that URL; for npm, confirm `@dsh-miaowu/dsh@<version>` is published and substitute the package name. Until then, use the source build or the v0.1.16 prebuilt package.
 
 </details>
 
@@ -373,7 +365,7 @@ Yes. The type, asset, unit-test and build gate runs on both macOS and Windows in
 
 ### What do I do after upgrading?
 
-Run the target-version command from [Installation](#installation): on the source path, `git pull`, rebuild, `pack`, then `dsh plugin add` the new tarball; with the v0.1.16 prebuilt package, change the version in the URL; once npm is published, install `@dsh-miaowu/dsh@<version>` directly. Then restart DSH. Use the same host version for installation and startup; see [Installation](#installation) for the supported range. Skills and Roles ship with the plugin and need no redeployment into projects.
+Run the target-version command from [Installation](#installation): on the source path, `git pull`, rebuild, `pack`, then `dsh plugin add` the new tarball; v0.1.16 is the only published prebuilt package, so 0.1.17 / 0.1.18 require the source build, and future releases use the `miaowu-v*` assets on the Releases page — copy the full URL shown there instead of editing a version number; install `@dsh-miaowu/dsh@<version>` only once npm is published. Then restart DSH. Use the same host version for installation and startup; see [Installation](#installation) for the supported range. Skills and Roles ship with the plugin and need no redeployment into projects.
 
 This repository's 0.1.17 / 0.1.18 versions follow upstream Oh Story 0.9.0 and NovelToGame 0.6.0 and include the plugin-side P2/P3 interface fixes; see [CHANGELOG.md](CHANGELOG.md) for each change.
 

@@ -90,7 +90,7 @@
 
 - 两个入口：短剧生产的 `comfyui` 适配器（第一版只做图片，视频/音乐/TTS 为后续预留），以及通用工具 `oh_story_comfyui`（小说封面、游戏美术等）。
 - 工作流必须是 ComfyUI 的 **API-format** JSON，用 `__PROMPT__`、`__WIDTH__`、`__INPUT_IMAGE__` 等占位符替换参数；未提供必需占位符、未配置工作流、连不上服务都会显式报错，不会静默切换到其他生图通道。
-- 地址、工作流与工作流目录优先读环境变量，其次读工作区 `.comfyui/config.json`；超时只读环境变量。凭据只读环境变量，永不写入配置或响应。短剧适配器只认环境变量，工作区配置文件只对 `oh_story_comfyui` 与工作台状态生效。
+- 地址、工作流与工作流目录优先读环境变量，其次读工作区 `.comfyui/config.json`；超时方面，`oh_story_comfyui` 用工具参数 `timeout_seconds`（默认 600，上限 3600），只有短剧适配器读 `COMFYUI_TIMEOUT_SECONDS`。凭据只读环境变量，永不写入配置或响应。短剧适配器只认环境变量，工作区配置文件只对 `oh_story_comfyui` 与工作台状态生效。
 
 ### 喵呜小说工坊预设
 
@@ -116,4 +116,4 @@
 - 不模拟平台登录、不自动投稿或发布，不提供收益承诺。
 - 备份、书架、保险库、检索都不改动 DSH 的会话、模型、Preset 或权限；这些仍由 DSH 管理。
 - 可选项只有凭据保险库默认关闭；ComfyUI、预设、媒体供应商与三个自有 Skills 都需要显式配置或安装后才生效。
-- 当前 npm 渠道尚未发布（`@dsh-miaowu/dsh` 在 registry 返回 404），安装请用 README 中的 GitHub Release 预构建包。
+- 当前 npm 渠道尚未发布（`@dsh-miaowu/dsh` 在 registry 返回 404）；源码版本 0.1.18 需按 README 从源码构建，最近发布的 GitHub Release 预构建包是 v0.1.16，不含本文档记录的 0.1.17 / 0.1.18 新能力。

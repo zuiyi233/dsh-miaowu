@@ -141,17 +141,9 @@ npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 开始 AI 创作前，在 DSH 的「设置 → 模型」中添加 Provider 并填入 API Key，或在启动前设置环境变量 `DEEPSEEK_API_KEY`。只查看已有作品可在首次引导中选择「稍后配置 / Configure later」。
 
 <details>
-<summary>发布后可用：v0.1.18 预构建包与 npm 安装</summary>
+<summary>发布后可用：GitHub Release 预构建包与 npm 安装</summary>
 
-0.1.18 的 GitHub Release 资产与 npm 包都还没发布（2026-10-20 检查：资产 404，registry 404），下面的命令发布后才能用。实际标签与资产名以 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) 页为准；下一次发布的标签前缀是 `miaowu-v`，例如 v0.1.18 的资产路径会带 `miaowu-v0.1.18`。发布后这两条安装命令与源码构建安装等价：
-
-```bash
-# 发布后的 GitHub Release 预构建包
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/miaowu-v0.1.18/dsh-miaowu-dsh-0.1.18.tgz
-# 发布后的 npm 包
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add @dsh-miaowu/dsh@0.1.18
-npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
-```
+**现在没有 0.1.18 的预构建包，也没有 npm 包**（2026-10-20 检查：Release 资产 404，registry 404），不要把版本号套进旧链接，不存在的资产会 404。发布后到 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) 页复制 tarball 的完整下载地址；下一次发布的标签以 `miaowu-v` 开头，资产路径形如 `.../download/miaowu-v<version>/<asset>.tgz`，`<version>` 与 `<asset>` 都以页面显示为准。安装时把上面源码构建命令里的 `./release/dsh-miaowu-dsh-0.1.18.tgz` 换成该地址即可；npm 同理，确认 `@dsh-miaowu/dsh@<version>` 已发布后再替换包名。发布前请使用源码构建路径或 v0.1.16 预构建包。
 
 </details>
 
@@ -370,7 +362,7 @@ DSH 的 `plugin add` 内部需要 pnpm，单独运行 `npx @deepseek-ai/dsh ... 
 
 ### 升级到新版本后要做什么？
 
-按[安装](#安装)一节执行目标版本的命令：源码路径是 `git pull` 后重新 `build` + `pack`，再对新的 tarball 执行 `dsh plugin add`；用 v0.1.16 预构建包时把 URL 里的版本号换成目标版本；npm 发布后可直接安装 `@dsh-miaowu/dsh@<版本>`。装好后重启 DSH。安装与启动使用同一个宿主版本；当前支持范围见[安装](#安装)。Skills 与 Roles 随插件打包，无需在项目里重新部署。
+按[安装](#安装)一节执行目标版本的命令：源码路径是 `git pull` 后重新 `build` + `pack`，再对新的 tarball 执行 `dsh plugin add`；预构建包目前只发布了 v0.1.16，0.1.17 / 0.1.18 只能走源码构建，后续版本改为使用 Releases 页上的 `miaowu-v*` 资产并复制页面给出的完整地址，不要手写版本号；npm 发布后才能直接安装 `@dsh-miaowu/dsh@<版本>`。装好后重启 DSH。安装与启动使用同一个宿主版本；当前支持范围见[安装](#安装)。Skills 与 Roles 随插件打包，无需在项目里重新部署。
 
 本仓库 0.1.17 / 0.1.18 跟随上游 Oh Story 0.9.0 与 NovelToGame 0.6.0，并包含插件侧 P2/P3 界面修复；逐项变更见 [CHANGELOG.md](CHANGELOG.md)。
 
