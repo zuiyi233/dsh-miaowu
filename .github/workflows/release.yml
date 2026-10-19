@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["miaowu-v*"]
   workflow_dispatch:
 
 concurrency:
@@ -45,14 +45,14 @@ jobs:
               echo "Manual release checks are nonpublishing dry-runs and must select main." >&2
               exit 1
             }
-          elif [[ "$SOURCE_REF" != refs/tags/v* ]]; then
-            echo "Release publication requires a vX.Y.Z tag." >&2
+          elif [[ "$SOURCE_REF" != refs/tags/miaowu-v* ]]; then
+            echo "Release publication requires a miaowu-vX.Y.Z tag." >&2
             exit 1
           fi
       - name: Validate version and changelog before build
         env:
           RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
-        run: node scripts/release.mjs check --tag "${RELEASE_TAG:-v$(node -p "require('./packages/dsh-plugin/package.json').version")}"
+        run: node scripts/release.mjs check --tag "${RELEASE_TAG:-miaowu-v$(node -p "require('./packages/dsh-plugin/package.json').version")}"
       - name: Prove exact source passed the newest main CI attempt
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -105,7 +105,7 @@ jobs:
   github-release:
     name: Publish GitHub Release
     needs: verify
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/miaowu-v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -131,7 +131,7 @@ jobs:
   npm:
     name: Publish npm package
     needs: verify
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/miaowu-v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -183,7 +183,7 @@ jobs:
   verify-public:
     name: Verify public channels
     needs: [verify, github-release, npm]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/miaowu-v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

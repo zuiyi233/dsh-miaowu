@@ -7,13 +7,23 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
+
+import { RELEASE_IDENTITY } from "./release-identity.mjs";
 
 const execFileAsync = promisify(execFile);
-const stableTag = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const shaPattern = /^[a-f0-9]{40}$/;
 const sha256Pattern = /^[a-f0-9]{64}$/;
 const githubActionsAppId = 15368;
-const canonicalRepository = "zenstory-ai/oh-story-dsh";
+const canonicalRepository = RELEASE_IDENTITY.repository;
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const stableTag = new RegExp(
+  `^${escapeRegExp(RELEASE_IDENTITY.tagPrefix)}(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$`,
+);
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
@@ -21,8 +31,8 @@ function invariant(condition, message) {
 
 export function validateReleaseMetadata({ tag, rootVersion, packageVersion, changelog }) {
   const match = stableTag.exec(tag);
-  invariant(match, `expected stable release tag vX.Y.Z, received ${tag}`);
-  const version = tag.slice(1);
+  invariant(match, `expected stable release tag ${RELEASE_IDENTITY.tagPrefix}X.Y.Z, received ${tag}`);
+  const version = tag.slice(RELEASE_IDENTITY.tagPrefix.length);
   invariant(rootVersion === packageVersion, `root/package version mismatch: ${rootVersion} != ${packageVersion}`);
   invariant(version === packageVersion, `tag/package version mismatch: ${version} != ${packageVersion}`);
   const hasDatedHeading = changelog.split(/\r?\n/).some((line) => {
@@ -186,9 +196,9 @@ export async function createReleaseManifest({ tarball, sourceSha, version }) {
   const file = await digestFile(tarball);
   return {
     schemaVersion: 1,
-    package: "@oh-story/dsh",
+    package: RELEASE_IDENTITY.packageName,
     version,
-    tag: `v${version}`,
+    tag: `${RELEASE_IDENTITY.tagPrefix}${version}`,
     sourceSha,
     tools: {
       node: "24",
@@ -201,11 +211,11 @@ export async function createReleaseManifest({ tarball, sourceSha, version }) {
 export async function verifyReleaseManifest({ manifest, directory, expectedSourceSha }) {
   invariant(manifest?.schemaVersion === 1, "unsupported release manifest schema");
   invariant(manifest.sourceSha === expectedSourceSha, "release manifest source SHA mismatch");
-  invariant(manifest.tag === `v${manifest.version}`, "release manifest tag/version mismatch");
-  invariant(manifest.package === "@oh-story/dsh", "release manifest package mismatch");
+  invariant(manifest.tag === `${RELEASE_IDENTITY.tagPrefix}${manifest.version}`, "release manifest tag/version mismatch");
+  invariant(manifest.package === RELEASE_IDENTITY.packageName, "release manifest package mismatch");
   invariant(Array.isArray(manifest.files) && manifest.files.length === 1, "release manifest must contain one tarball");
   const entry = manifest.files[0];
-  invariant(entry.name === `oh-story-dsh-${manifest.version}.tgz`, `unexpected tarball name: ${entry.name}`);
+  invariant(entry.name === `${RELEASE_IDENTITY.tarballPrefix}-${manifest.version}.tgz`, `unexpected tarball name: ${entry.name}`);
   invariant(path.basename(entry.name) === entry.name, "manifest file name must not contain a path");
   const actual = await digestFile(path.join(directory, entry.name));
   invariant(actual.sha256 === entry.sha256, `SHA-256 mismatch for ${entry.name}`);
@@ -246,7 +256,7 @@ async function githubRequest(url, { token, method = "GET", body, accept = "appli
   const headers = {
     Accept: accept,
     "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "oh-story-dsh-release",
+    "User-Agent": RELEASE_IDENTITY.userAgent,
   };
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -295,14 +305,71 @@ async function commandCheck(args) {
   const root = JSON.parse(await readFile("package.json", "utf8"));
   const plugin = JSON.parse(await readFile("packages/dsh-plugin/package.json", "utf8"));
   const changelog = await readFile("CHANGELOG.md", "utf8");
-  const tag = args.tag ?? `v${plugin.version}`;
+  const tag = args.tag ?? `${RELEASE_IDENTITY.tagPrefix}${plugin.version}`;
   const result = validateReleaseMetadata({
     tag,
     rootVersion: root.version,
     packageVersion: plugin.version,
     changelog,
   });
-  process.stdout.write(`${JSON.stringify(result)}\n`);
+  const sourceRef = await resolveReleaseSourceRef(tag);
+  await assertForkReleaseSource(sourceRef);
+  process.stdout.write(`${JSON.stringify({ ...result, sourceRef })}\n`);
+}
+
+async function gitRefExists(ref, gitCommand = git) {
+  try {
+    await gitCommand(["rev-parse", "--verify", `${ref}^{commit}`]);
+    return true;
+  } catch (error) {
+    if (typeof error?.code !== "number") {
+      throw new Error(`cannot resolve git ref ${ref}: ${error.message}`, { cause: error });
+    }
+    return false;
+  }
+}
+
+async function resolveReleaseSourceRef(tag) {
+  if (await gitRefExists(tag)) return tag;
+  process.stderr.write(`release: tag ${tag} does not exist locally; checking HEAD as the release source\n`);
+  return "HEAD";
+}
+
+async function resolveMainRef(gitCommand) {
+  for (const candidate of ["main", "origin/main"]) {
+    if (await gitRefExists(candidate, gitCommand)) return candidate;
+  }
+  throw new Error("release source preflight requires a local main or origin/main branch");
+}
+
+export async function assertForkReleaseSource(ref, dependencies = {}) {
+  const gitCommand = dependencies.git ?? git;
+  const source = String(ref ?? "").trim();
+  invariant(source, "release source ref is required");
+  try {
+    await gitCommand(["cat-file", "-e", `${source}:packages/dsh-plugin/src/services/index.ts`]);
+  } catch {
+    throw new Error(
+      `release source ${source} is not a fork main commit (missing packages/dsh-plugin/src/services/index.ts)`,
+    );
+  }
+  let entrySource;
+  try {
+    entrySource = await gitCommand(["show", `${source}:packages/dsh-plugin/src/index.ts`]);
+  } catch {
+    throw new Error(`release source ${source} is not a fork main commit (missing packages/dsh-plugin/src/index.ts)`);
+  }
+  invariant(
+    entrySource.includes("createDshMiaowuSkillProvider"),
+    `release source ${source} is not a fork main commit (missing createDshMiaowuSkillProvider)`,
+  );
+  const mainRef = await resolveMainRef(gitCommand);
+  try {
+    await gitCommand(["merge-base", "--is-ancestor", mainRef, source]);
+  } catch {
+    throw new Error(`release source ${source} is not a fork main commit (${mainRef} is not an ancestor)`);
+  }
+  return source;
 }
 
 async function git(args) {
@@ -516,7 +583,7 @@ async function uploadReleaseAsset(repository, release, token, file, name) {
       Accept: "application/vnd.github+json",
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/octet-stream",
-      "User-Agent": "oh-story-dsh-release",
+      "User-Agent": RELEASE_IDENTITY.userAgent,
       "X-GitHub-Api-Version": "2022-11-28",
     },
     body: bytes,
@@ -554,7 +621,7 @@ async function commandGithubPublish(args) {
       body: {
         tag_name: args.tag,
         target_commitish: manifest.sourceSha,
-        name: `oh-story-dsh ${args.tag}`,
+        name: `${RELEASE_IDENTITY.tarballPrefix} ${args.tag}`,
         generate_release_notes: true,
         draft: false,
         prerelease: false,
@@ -595,7 +662,7 @@ async function registryMetadata(packageName, version) {
   const url = `https://registry.npmjs.org/${encodeURIComponent(packageName)}/${encodeURIComponent(version)}`;
   let response;
   try {
-    response = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "oh-story-dsh-release" } });
+    response = await fetch(url, { headers: { Accept: "application/json", "User-Agent": RELEASE_IDENTITY.userAgent } });
   } catch (error) {
     throw new Error(`npm registry lookup failed before an HTTP response: ${error.message}`, { cause: error });
   }
@@ -670,7 +737,7 @@ async function commandVerifyPublic(args) {
   });
   invariant(metadata.dist.integrity === tarball.integrity, "npm integrity differs from the manifest");
 
-  const temp = await mkdtemp(path.join(os.tmpdir(), "oh-story-dsh-public-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), RELEASE_IDENTITY.tempPrefix));
   const npmConfig = path.join(temp, "anonymous.npmrc");
   await writeFile(npmConfig, "registry=https://registry.npmjs.org/\nalways-auth=false\n");
   await writeFile(path.join(temp, "package.json"), '{"private":true}\n');
@@ -679,7 +746,12 @@ async function commandVerifyPublic(args) {
     ["install", "--ignore-scripts", "--legacy-peer-deps", "--no-audit", "--no-fund", "--package-lock=false", `${manifest.package}@${manifest.version}`],
     { cwd: temp, env: { ...process.env, NODE_AUTH_TOKEN: "", NPM_CONFIG_USERCONFIG: npmConfig } },
   );
-  const installed = JSON.parse(await readFile(path.join(temp, "node_modules", "@oh-story", "dsh", "package.json"), "utf8"));
+  const installed = JSON.parse(
+    await readFile(
+      path.join(temp, "node_modules", RELEASE_IDENTITY.packageScope, RELEASE_IDENTITY.packageLeaf, "package.json"),
+      "utf8",
+    ),
+  );
   invariant(installed.version === manifest.version, `anonymous install resolved ${installed.version}`);
   process.stdout.write(`${JSON.stringify({ github: "SUCCESS", npm: "SUCCESS", version: manifest.version })}\n`);
 }
@@ -700,7 +772,7 @@ async function main() {
   await commands[command](args);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
     process.stderr.write(`release: ${error.message}\n`);
     process.exitCode = 1;

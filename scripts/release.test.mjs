@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
+import { isPackedPluginSkillPath, RELEASE_IDENTITY } from "./release-identity.mjs";
 import {
+  assertForkReleaseSource,
   classifyHttpStatus,
   createCiProof,
   createReleaseManifest,
@@ -21,6 +25,8 @@ import {
   verifyReleaseManifest,
 } from "./release.mjs";
 
+const execFileAsync = promisify(execFile);
+
 const requiredJobs = [
   "Quality gate",
   "Portability (macos-latest)",
@@ -32,18 +38,67 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-test("release metadata requires a stable tag, matching versions, and a dated changelog heading", () => {
+async function gitRefExists(ref) {
+  try {
+    await execFileAsync("git", ["rev-parse", "--verify", `${ref}^{commit}`], { encoding: "utf8" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("release identity is derived from the packed fork package", () => {
+  assert.deepEqual(RELEASE_IDENTITY, {
+    repository: "zuiyi233/dsh-miaowu",
+    packageName: "@dsh-miaowu/dsh",
+    packageScope: "@dsh-miaowu",
+    packageLeaf: "dsh",
+    tarballPrefix: "dsh-miaowu-dsh",
+    tagPrefix: "miaowu-v",
+    userAgent: "dsh-miaowu-release",
+    tempPrefix: "dsh-miaowu-public-",
+  });
+});
+
+test("packed plugin skill paths must point inside the fork package lib directory", () => {
+  assert.equal(
+    isPackedPluginSkillPath("C:\\Users\\miaowu\\node_modules\\@dsh-miaowu\\dsh\\lib\\skills\\story-review"),
+    true,
+  );
+  assert.equal(
+    isPackedPluginSkillPath("/home/miaowu/node_modules/@dsh-miaowu/dsh/lib/skills/story-review/SKILL.md"),
+    true,
+  );
+  assert.equal(isPackedPluginSkillPath("/home/miaowu/node_modules/@oh-story/dsh/lib/skills/story-review"), false);
+  assert.equal(isPackedPluginSkillPath("/home/miaowu/.agents/skills/story-review"), false);
+  assert.equal(isPackedPluginSkillPath(undefined), false);
+});
+
+test("release tooling carries no upstream repository or package identity", async () => {
+  const source = await readFile(path.join("scripts", "release.mjs"), "utf8");
+  assert.doesNotMatch(source, /zenstory-ai|@oh-story\/dsh|oh-story-dsh/);
+});
+
+test("release metadata requires a fork stable tag, matching versions, and a dated changelog heading", () => {
   assert.deepEqual(
     validateReleaseMetadata({
-      tag: "v1.2.3",
+      tag: "miaowu-v1.2.3",
       rootVersion: "1.2.3",
       packageVersion: "1.2.3",
       changelog: "## [Unreleased]\n\n## [1.2.3] - 2026-10-03\n",
     }),
-    { version: "1.2.3", tag: "v1.2.3" },
+    { version: "1.2.3", tag: "miaowu-v1.2.3" },
   );
 
-  for (const tag of ["1.2.3", "v1.2", "v1.2.3-rc.1", "v01.2.3", "v1.2.3+build"]) {
+  for (const tag of [
+    "1.2.3",
+    "v1.2.3",
+    "miaowu-v1.2",
+    "miaowu-v1.2.3-rc.1",
+    "miaowu-v01.2.3",
+    "miaowu-v1.2.3+build",
+    "miaowu-v1.2.3\n",
+  ]) {
     assert.throws(
       () =>
         validateReleaseMetadata({
@@ -53,13 +108,14 @@ test("release metadata requires a stable tag, matching versions, and a dated cha
           changelog: "## [1.2.3] - 2026-10-03\n",
         }),
       /stable release tag/,
+      `expected ${JSON.stringify(tag)} to be rejected`,
     );
   }
 
   assert.throws(
     () =>
       validateReleaseMetadata({
-        tag: "v1.2.3",
+        tag: "miaowu-v1.2.3",
         rootVersion: "1.2.3",
         packageVersion: "1.2.4",
         changelog: "## [1.2.3] - 2026-10-03\n",
@@ -69,7 +125,7 @@ test("release metadata requires a stable tag, matching versions, and a dated cha
   assert.throws(
     () =>
       validateReleaseMetadata({
-        tag: "v1.2.3",
+        tag: "miaowu-v1.2.3",
         rootVersion: "1.2.3",
         packageVersion: "1.2.3",
         changelog: "## [Unreleased]\n",
@@ -81,20 +137,90 @@ test("release metadata requires a stable tag, matching versions, and a dated cha
 test("changelog headings use literal versions, not a generated regex", () => {
   for (const heading of ["## [1x2x3] - 2026-10-03", "## [11.2.3] - 2026-10-03", "### [1.2.3] - 2026-10-03"]) {
     assert.throws(
-      () => validateReleaseMetadata({ tag: "v1.2.3", rootVersion: "1.2.3", packageVersion: "1.2.3", changelog: heading }),
+      () =>
+        validateReleaseMetadata({
+          tag: "miaowu-v1.2.3",
+          rootVersion: "1.2.3",
+          packageVersion: "1.2.3",
+          changelog: heading,
+        }),
       /dated changelog/,
     );
   }
   assert.throws(
     () =>
       validateReleaseMetadata({
-        tag: "v1.2.3\n",
+        tag: "miaowu-v1.2.3\n",
         rootVersion: "1.2.3\n",
         packageVersion: "1.2.3\n",
         changelog: "## [1.2.3\n] - 2026-10-03",
       }),
     /stable release tag/,
   );
+});
+
+test("fork-source preflight accepts HEAD and rejects the upstream v0.1.18 tag", async (t) => {
+  assert.equal(await assertForkReleaseSource("HEAD"), "HEAD");
+  if (!(await gitRefExists("v0.1.18"))) {
+    t.skip("the upstream v0.1.18 tag is not present in this clone");
+    return;
+  }
+  await assert.rejects(
+    assertForkReleaseSource("v0.1.18"),
+    /release source v0\.1\.18 is not a fork main commit \(missing packages\/dsh-plugin\/src\/services\/index\.ts\)/,
+  );
+});
+
+test("fork-source preflight rejects a ref missing the fork skill provider marker", async () => {
+  await assert.rejects(
+    assertForkReleaseSource("upstream-release", {
+      git: async (args) => {
+        if (args[0] === "cat-file") return "";
+        if (args[0] === "show") return "export const createOhStorySkillProvider = () => undefined;\n";
+        throw new Error(`unexpected git ${args.join(" ")}`);
+      },
+    }),
+    /missing createDshMiaowuSkillProvider/,
+  );
+});
+
+test("fork-source preflight rejects a ref that main has not reached", async () => {
+  await assert.rejects(
+    assertForkReleaseSource("unmerged-fork-commit", {
+      git: async (args) => {
+        if (args[0] === "cat-file") return "";
+        if (args[0] === "show") return "export const marker = createDshMiaowuSkillProvider;\n";
+        if (args[0] === "rev-parse") return "main\n";
+        if (args[0] === "merge-base") throw new Error("git exited with 1");
+        throw new Error(`unexpected git ${args.join(" ")}`);
+      },
+    }),
+    /main is not an ancestor/,
+  );
+});
+
+test("fork-source preflight falls back to origin/main when main is absent", async () => {
+  const ancestry = [];
+  await assertForkReleaseSource("tagref", {
+    git: async (args) => {
+      if (args[0] === "cat-file") return "";
+      if (args[0] === "show") return "export const marker = createDshMiaowuSkillProvider;\n";
+      if (args[0] === "rev-parse") {
+        if (args[2] === "main^{commit}") {
+          const missing = new Error("git exited with 1");
+          missing.code = 1;
+          throw missing;
+        }
+        return "origin/main\n";
+      }
+      if (args[0] === "merge-base") {
+        ancestry.push(args[2], args[3]);
+        return "";
+      }
+      throw new Error(`unexpected git ${args.join(" ")}`);
+    },
+  });
+  assert.deepEqual(ancestry, ["origin/main", "tagref"]);
 });
 
 test("CI proof selects the newest exact-SHA main push attempt and rejects stale success", () => {
@@ -241,8 +367,8 @@ test("CI proof fetches attempt jobs and suite before the final run race guard", 
       return [run];
     },
     githubJson: async (url) => {
-      if (url.endsWith("/zenstory-ai/oh-story-dsh")) {
-        return { full_name: "zenstory-ai/oh-story-dsh", private: false, default_branch: "main" };
+      if (url.endsWith("/zuiyi233/dsh-miaowu")) {
+        return { full_name: "zuiyi233/dsh-miaowu", private: false, default_branch: "main" };
       }
       if (url.endsWith("/branches/main")) return { name: "main", protected: true };
       if (url.endsWith("/actions/workflows/ci.yml")) return { id: 123, path: ".github/workflows/ci.yml" };
@@ -259,7 +385,7 @@ test("CI proof fetches attempt jobs and suite before the final run race guard", 
   };
   await assert.rejects(
     createCiProof(
-      { repository: "zenstory-ai/oh-story-dsh", sha: sourceSha, tag: "v1.2.3" },
+      { repository: "zuiyi233/dsh-miaowu", sha: sourceSha, tag: "miaowu-v1.2.3" },
       dependencies,
     ),
     /run attempt changed/,
@@ -267,11 +393,11 @@ test("CI proof fetches attempt jobs and suite before the final run race guard", 
   assert.deepEqual(order, ["runs", "jobs", "suite", "final-run"]);
 });
 
-test("npm writer source gate rejects a moved tag and noncanonical repository", () => {
+test("npm writer source gate rejects a moved tag, an upstream repository, and an unprotected main", () => {
   const sourceSha = "7".repeat(40);
   const valid = {
-    repository: "zenstory-ai/oh-story-dsh",
-    repositoryMetadata: { full_name: "zenstory-ai/oh-story-dsh", private: false, default_branch: "main" },
+    repository: "zuiyi233/dsh-miaowu",
+    repositoryMetadata: { full_name: "zuiyi233/dsh-miaowu", private: false, default_branch: "main" },
     mainBranch: { name: "main", protected: true },
     sourceSha,
     remoteTagSha: sourceSha,
@@ -284,6 +410,10 @@ test("npm writer source gate rejects a moved tag and noncanonical repository", (
   assert.throws(
     () => verifyPublisherSourceIdentity({ ...valid, repositoryMetadata: { ...valid.repositoryMetadata, private: true } }),
     /public repository/,
+  );
+  assert.throws(
+    () => verifyPublisherSourceIdentity({ ...valid, repository: "zenstory-ai/oh-story-dsh" }),
+    /publisher repository must be zuiyi233\/dsh-miaowu/,
   );
 });
 
@@ -308,18 +438,37 @@ test("consumer rejects coordinated manifest and proof substitution using produce
   await assert.rejects(verifyIndependentFileDigests({ files, expected }), /producer digest mismatch/);
 });
 
-test("manifest binds bytes, source, run attempt, and expected package entries", async () => {
+test("manifest binds fork package identity, bytes, source, and the expected tarball", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "dsh-release-test-"));
-  const tarball = path.join(directory, "oh-story-dsh-1.2.3.tgz");
+  const tarball = path.join(directory, "dsh-miaowu-dsh-1.2.3.tgz");
   await writeFile(tarball, "immutable tarball bytes");
   const manifest = await createReleaseManifest({
     tarball,
     sourceSha: "c".repeat(40),
     version: "1.2.3",
   });
+  assert.equal(manifest.package, "@dsh-miaowu/dsh");
+  assert.equal(manifest.tag, "miaowu-v1.2.3");
+  assert.equal(manifest.files[0].name, "dsh-miaowu-dsh-1.2.3.tgz");
   assert.match(manifest.files[0].sha256, /^[a-f0-9]{64}$/);
   assert.match(manifest.files[0].integrity, /^sha512-/);
   await verifyReleaseManifest({ manifest, directory, expectedSourceSha: "c".repeat(40) });
+  await assert.rejects(
+    verifyReleaseManifest({
+      manifest: { ...manifest, package: "@oh-story/dsh" },
+      directory,
+      expectedSourceSha: "c".repeat(40),
+    }),
+    /package mismatch/,
+  );
+  await assert.rejects(
+    verifyReleaseManifest({
+      manifest: { ...manifest, tag: `v${manifest.version}` },
+      directory,
+      expectedSourceSha: "c".repeat(40),
+    }),
+    /tag\/version mismatch/,
+  );
   await writeFile(tarball, "different bytes");
   await assert.rejects(
     verifyReleaseManifest({ manifest, directory, expectedSourceSha: "c".repeat(40) }),
@@ -338,7 +487,7 @@ test("promotion proof carries run identity outside deterministic public bytes", 
     manifestSha256: "f".repeat(64),
     runId: 42,
     runAttempt: 2,
-    artifactName: "oh-story-dsh-v1.2.3-42-2",
+    artifactName: "dsh-miaowu-miaowu-v1.2.3-42-2",
   };
   assert.doesNotThrow(() =>
     verifyPromotionProof({
@@ -347,7 +496,7 @@ test("promotion proof carries run identity outside deterministic public bytes", 
       sourceSha: "e".repeat(40),
       runId: "42",
       runAttempt: "2",
-      artifactName: "oh-story-dsh-v1.2.3-42-2",
+      artifactName: "dsh-miaowu-miaowu-v1.2.3-42-2",
     }),
   );
   assert.throws(
@@ -358,7 +507,7 @@ test("promotion proof carries run identity outside deterministic public bytes", 
         sourceSha: "e".repeat(40),
         runId: "42",
         runAttempt: "2",
-        artifactName: "oh-story-dsh-v1.2.3-42-2",
+        artifactName: "dsh-miaowu-miaowu-v1.2.3-42-2",
       }),
     /manifest digest mismatch/,
   );
@@ -390,9 +539,9 @@ test("npm idempotency only accepts the exact local integrity", () => {
 
 test("npm publish receives a local absolute tarball, never a GitHub shorthand", () => {
   for (const directory of ["release", "./release", path.resolve("release with spaces")]) {
-    const args = npmPublishArguments(directory, "oh-story-dsh-0.1.13.tgz");
+    const args = npmPublishArguments(directory, "dsh-miaowu-dsh-0.1.18.tgz");
     assert.equal(args[0], "publish");
-    assert.equal(args[1], path.resolve(directory, "oh-story-dsh-0.1.13.tgz"));
+    assert.equal(args[1], path.resolve(directory, "dsh-miaowu-dsh-0.1.18.tgz"));
     assert.ok(path.isAbsolute(args[1]));
     assert.deepEqual(args.slice(2), ["--access", "public", "--provenance", "--ignore-scripts"]);
   }
@@ -415,14 +564,19 @@ test("public npm verification retries missing metadata instead of accepting a nu
   );
 });
 
-test("all local actions are immutable and the release workflow has isolated publishers", async () => {
-  for (const workflow of ["ci.yml", "real-provider.yml", "release.yml", "recover-v0.1.13.yml"]) {
+test("release workflow publishes only fork tags and keeps immutable isolated publishers", async () => {
+  for (const workflow of ["ci.yml", "real-provider.yml", "release.yml"]) {
     const source = await readFile(path.join(".github", "workflows", workflow), "utf8");
     for (const match of source.matchAll(/^\s*- uses:\s*([^\s#]+)/gm)) {
       assert.match(match[1], /@[a-f0-9]{40}$/i, `${workflow}: ${match[1]} is not full-SHA pinned`);
     }
   }
   const release = await readFile(path.join(".github", "workflows", "release.yml"), "utf8");
+  assert.match(release, /tags: \["miaowu-v\*"\]/);
+  assert.match(release, /refs\/tags\/miaowu-v\*/);
+  assert.match(release, /RELEASE_TAG:-miaowu-v\$\(node -p/);
+  assert.match(release, /startsWith\(github\.ref, 'refs\/tags\/miaowu-v'\)/);
+  assert.doesNotMatch(release, /refs\/tags\/v\*/);
   assert.doesNotMatch(release, /--clobber/);
   assert.match(release, /github-release:[\s\S]*contents: write/);
   assert.match(release, /npm:[\s\S]*id-token: write/);
@@ -433,23 +587,9 @@ test("all local actions are immutable and the release workflow has isolated publ
   assert.match(release, /EVENT_NAME.*workflow_dispatch[\s\S]*refs\/heads\/main/);
 });
 
-test("one-time npm recovery binds both source commits and the original immutable artifact", async () => {
-  const recovery = await readFile(path.join(".github", "workflows", "recover-v0.1.13.yml"), "utf8");
-  assert.match(recovery, /test "\$GITHUB_REF" = refs\/heads\/main/);
-  assert.match(recovery, /SOURCE_SHA: f207fa92863bd3626b8ee6bd7b5ad30762ef205c/);
-  assert.match(recovery, /ref: f207fa92863bd3626b8ee6bd7b5ad30762ef205c/);
-  assert.match(recovery, /group: release-refs\/tags\/v0\.1\.13/);
-  assert.match(recovery, /ci-proof[^\n]+--sha "\$GITHUB_SHA"/);
-  assert.match(recovery, /artifact-ids: 11279574541/);
-  assert.match(recovery, /run-id: 37139595180/);
-  assert.match(recovery, /--run-id 37139595180 --run-attempt 1/);
-  assert.match(recovery, /--manifest-sha256 393f36282b67e8037d9b89b1eb46d0efc3aad42d8e8f39ff9ede73a6516df150/);
-  assert.match(recovery, /--promotion-proof-sha256 b261ec652a80a85475aa9386326bebecb57318fc27828f28f9fc95c4d957d548/);
-  assert.match(recovery, /--ci-proof-sha256 7f9dbd1c3fd4765afe4469c2912dc3c5824cb19f23a199af6b03fd2c54538d8d/);
-  assert.match(recovery, /cmp "release\/\$file" "\$RUNNER_TEMP\/public-v0\.1\.13\/\$file"/);
-  assert.match(recovery, /ci-proof[^\n]+--sha "\$SOURCE_SHA" --tag "\$RELEASE_TAG"/);
-  assert.match(recovery, /npm-publish[^\n]+--directory "\$GITHUB_WORKSPACE\/release"/);
-  assert.match(recovery, /verify-public[^\n]+--sha "\$SOURCE_SHA"/);
-  assert.doesNotMatch(recovery, /contents: write|github-publish|pack:release|verify:release|--clobber|inputs:/);
-  assert.ok(recovery.indexOf("cmp ") < recovery.indexOf("${{ secrets.NPM_TOKEN }}"));
+test("the upstream-only recovery workflow is gone", async () => {
+  await assert.rejects(
+    readFile(path.join(".github", "workflows", "recover-v0.1.13.yml"), "utf8"),
+    /ENOENT/,
+  );
 });
