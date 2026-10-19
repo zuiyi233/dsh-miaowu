@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -45,6 +45,29 @@ async function gitRefExists(ref) {
   } catch {
     return false;
   }
+}
+
+/** A self-contained fork-shaped repository, so preflight tests never depend on the
+ *  caller's checkout shape (Actions PR runs fetch neither main nor a full history). */
+async function createForkRepository(t) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "dsh-release-source-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const git = async (args) => (await execFileAsync("git", ["-C", root, ...args], { encoding: "utf8" })).stdout.trim();
+  await git(["init", "-q", "-b", "main"]);
+  await git(["config", "user.email", "release-test@example.invalid"]);
+  await git(["config", "user.name", "Release Test"]);
+  await mkdir(path.join(root, "packages/dsh-plugin/src/services"), { recursive: true });
+  await writeFile(path.join(root, "packages/dsh-plugin/src/services/index.ts"), "export {};\n");
+  await writeFile(
+    path.join(root, "packages/dsh-plugin/src/index.ts"),
+    "export const createDshMiaowuSkillProvider = () => undefined;\n",
+  );
+  await git(["add", "."]);
+  await git(["commit", "-q", "-m", "fork files"]);
+  await writeFile(path.join(root, "README.md"), "# fixture\n");
+  await git(["add", "."]);
+  await git(["commit", "-q", "-m", "main advanced"]);
+  return { root, git };
 }
 
 test("release identity is derived from the packed fork package", () => {
@@ -170,8 +193,18 @@ test("changelog headings use literal versions, not a generated regex", () => {
   );
 });
 
-test("fork-source preflight accepts HEAD and rejects the upstream v0.1.18 tag", async (t) => {
-  assert.equal(await assertForkReleaseSource("HEAD"), "HEAD");
+test("fork-source preflight requires the source to be on main, not just ahead of it", async (t) => {
+  const { root, git } = await createForkRepository(t);
+  assert.equal(await assertForkReleaseSource("main", { git }), "main");
+  assert.equal(await assertForkReleaseSource("main~1", { git }), "main~1");
+  await git(["checkout", "-q", "-b", "feature"]);
+  await writeFile(path.join(root, "feature.txt"), "unmerged\n");
+  await git(["add", "."]);
+  await git(["commit", "-q", "-m", "unmerged feature"]);
+  await assert.rejects(assertForkReleaseSource("feature", { git }), /is not on main/);
+});
+
+test("fork-source preflight rejects the upstream v0.1.18 tag", async (t) => {
   if (!(await gitRefExists("v0.1.18"))) {
     t.skip("the upstream v0.1.18 tag is not present in this clone");
     return;
@@ -195,7 +228,7 @@ test("fork-source preflight rejects a ref missing the fork skill provider marker
   );
 });
 
-test("fork-source preflight rejects a ref that main has not reached", async () => {
+test("fork-source preflight rejects a ref that is not on main", async () => {
   await assert.rejects(
     assertForkReleaseSource("unmerged-fork-commit", {
       git: async (args) => {
@@ -206,11 +239,11 @@ test("fork-source preflight rejects a ref that main has not reached", async () =
         throw new Error(`unexpected git ${args.join(" ")}`);
       },
     }),
-    /main is not an ancestor/,
+    /is not on main/,
   );
 });
 
-test("fork-source preflight falls back to origin/main when main is absent", async () => {
+test("fork-source preflight checks the source against origin/main when main is absent", async () => {
   const ancestry = [];
   await assertForkReleaseSource("tagref", {
     git: async (args) => {
@@ -231,7 +264,7 @@ test("fork-source preflight falls back to origin/main when main is absent", asyn
       throw new Error(`unexpected git ${args.join(" ")}`);
     },
   });
-  assert.deepEqual(ancestry, ["origin/main", "tagref"]);
+  assert.deepEqual(ancestry, ["tagref", "origin/main"]);
 });
 
 test("CI proof selects the newest exact-SHA main push attempt and rejects stale success", () => {

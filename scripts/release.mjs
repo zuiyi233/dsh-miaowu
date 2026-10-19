@@ -365,9 +365,9 @@ export async function assertForkReleaseSource(ref, dependencies = {}) {
   );
   const mainRef = await resolveMainRef(gitCommand);
   try {
-    await gitCommand(["merge-base", "--is-ancestor", mainRef, source]);
+    await gitCommand(["merge-base", "--is-ancestor", source, mainRef]);
   } catch {
-    throw new Error(`release source ${source} is not a fork main commit (${mainRef} is not an ancestor)`);
+    throw new Error(`release source ${source} is not on ${mainRef} (not an ancestor of the default branch)`);
   }
   return source;
 }
