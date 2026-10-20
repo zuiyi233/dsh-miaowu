@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { FsTarget } from "@deepseek-ai/dsh-fs";
 import { WorkspaceHttpError, type WorkspaceRealm } from "../workspace-route.js";
 import type { BinaryFileStore } from "./audiobook-binary.js";
@@ -113,8 +113,10 @@ export async function readCachedSegment(
 }
 
 /**
- * 写入缓存音频与 meta：先落音频再写 meta，meta 写入沿用工作台其他写路径的
- * 沙箱策略；meta 里的字节数取实测长度，文本只留 sha256 与字符数。
+ * 写入缓存音频与 meta：音频先写同目录下的唯一临时文件（`audio.<ext>.tmp-<uuid>`）
+ * 再改名到最终路径，避免半截文件被当成永久缓存命中；失败时删除临时文件并抛出。
+ * 随后写 meta，meta 写入沿用工作台其他写路径的沙箱策略；meta 里的字节数取实测
+ * 长度，文本只留 sha256 与字符数。
  */
 export async function writeCachedSegment(
   realm: WorkspaceRealm,
@@ -129,7 +131,9 @@ export async function writeCachedSegment(
   if (meta.bytes !== undefined && meta.bytes !== bytes.byteLength) {
     throw new WorkspaceHttpError(422, "缓存元数据字节数与音频不一致。");
   }
-  const audioTarget = await cacheTarget(realm, segmentAudioPath(cacheKey, extension));
+  const audioPath = segmentAudioPath(cacheKey, extension);
+  const audioTarget = await cacheTarget(realm, audioPath);
+  const tempTarget = await cacheTarget(realm, `${audioPath}.tmp-${randomUUID()}`);
   const metaTarget = await cacheTarget(realm, segmentMetaPath(cacheKey));
   const text = meta.text ?? "";
   const document: CachedSegmentMeta = {
@@ -143,8 +147,14 @@ export async function writeCachedSegment(
     textSha256: createHash("sha256").update(text, "utf8").digest("hex"),
     createdAt: meta.createdAt ?? Date.now(),
   };
-  await binary.prepare(audioTarget);
-  await binary.write(audioTarget, bytes);
+  try {
+    await binary.prepare(tempTarget);
+    await binary.write(tempTarget, bytes);
+    await binary.rename(tempTarget, audioTarget);
+  } catch (error) {
+    await binary.remove(tempTarget).catch(() => undefined);
+    throw error;
+  }
   await realm.fs.writeText(
     metaTarget,
     `${JSON.stringify(document, undefined, 2)}\n`,
