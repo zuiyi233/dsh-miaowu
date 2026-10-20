@@ -10,6 +10,7 @@ import "./foreshadows.js";
 import "./bookshelf.js";
 import "./vault.js";
 import "./diagnostics-route.js";
+import "./continuity-route.js";
 
 export function registerWorkspaceServices(): void {
   // Feature modules above register themselves on import; nothing else to mount here.

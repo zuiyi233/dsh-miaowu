@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "description": "确定性结构评分规则。每条规则有 id、P0/P1/P2 严重度、适用 kind 和 check；check 只读取语料清单与产物文件，不调用模型。",
+  "rubrics": [
+    {
+      "id": "required-files",
+      "name": "必备文件齐全",
+      "severity": "P0",
+      "appliesTo": ["novel", "drama", "game", "video-recap"],
+      "check": {
+        "type": "files-present",
+        "source": "sample.requiredFiles",
+        "nonEmpty": true
+      }
+    },
+    {
+      "id": "min-chars",
+      "name": "文件最小字符数",
+      "severity": "P1",
+      "appliesTo": ["novel", "drama", "game", "video-recap"],
+      "check": {
+        "type": "min-chars",
+        "source": "sample.minChars"
+      }
+    },
+    {
+      "id": "required-headings",
+      "name": "必备标题存在",
+      "severity": "P1",
+      "appliesTo": ["novel", "drama", "game", "video-recap"],
+      "check": {
+        "type": "required-headings",
+        "source": "sample.requiredHeadings"
+      }
+    },
+    {
+      "id": "forbidden-placeholders",
+      "name": "禁用占位符",
+      "severity": "P1",
+      "appliesTo": ["novel", "drama", "game", "video-recap"],
+      "check": {
+        "type": "forbidden-patterns",
+        "patterns": ["TODO", "TBD", "待补", "待定", "FIXME"],
+        "includeSamplePatterns": true
+      }
+    },
+    {
+      "id": "duplicate-headings",
+      "name": "重复标题上限",
+      "severity": "P2",
+      "appliesTo": ["novel", "drama", "game"],
+      "check": {
+        "type": "duplicate-headings",
+        "maxDuplicates": 1
+      }
+    },
+    {
+      "id": "novel-foreshadow-markers",
+      "name": "长篇伏笔标记数量",
+      "severity": "P2",
+      "appliesTo": ["novel"],
+      "check": {
+        "type": "marker-count",
+        "pattern": "伏笔",
+        "minCount": 3
+      }
+    },
+    {
+      "id": "drama-five-doc-completeness",
+      "name": "短剧五文档完整",
+      "severity": "P0",
+      "appliesTo": ["drama"],
+      "check": {
+        "type": "files-present",
+        "files": ["剧本.md", "视觉设定.md", "分镜.md", "图片提示词.md", "视频提示词.md"],
+        "nonEmpty": true
+      }
+    }
+  ]
+}

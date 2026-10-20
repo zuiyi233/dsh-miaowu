@@ -20,6 +20,15 @@
 - **验证**：`pnpm verify` 退出 0（61 个测试文件 / 650 项；sync-factory 16/16）；`pnpm test:dsh` 与 `pnpm test:dsh:rc` 在 DSH 0.2.1-rc.2 / 0.2.0-rc.2 上均 `"ok": true`，并新增诊断路由、支持包确认/脱敏、状态盘点与面板六组断言；浏览器包 392,311 字节。
 - **已知限制**：DSH fs 缝没有删除 API，过期锁只报告不代删；`sessionQuery.readSession` 没有 abort 信号，5 秒超时只能分类不能取消底层读取；顶层任务数组与 JSONL 的 v2 迁移未做。P1-B 连续性驾驶舱、P2-A 质量评测、P2-B 性能规模尚未开工；P3 仍按条件触发。
 
+## 2026-10-21 P1-B 驾驶舱 / P2-A 评测 / P2-B 基准
+
+- **P1-B 已交付（只读纵向切片）**：`continuity.ts` 聚合书架、伏笔/snooze、run/候选、审计保存、备份、历史、状态盘点异常、章节与 `追踪/_tracking-state.json`，输出「今天」视图和确定性 P0/P1/P2 风险；`/oh-story/continuity` 只读，`/oh-story/continuity/snapshot` 需 `confirm: true` 且只经备份服务写 `.oh-story/backup/`（按当前书根收录创作树 + `.oh-story` 状态、不含 vault 主密钥；超过单文件上限或 2000 文件截断时拒绝写入），`/oh-story/continuity/handoff` 生成带排序 SHA-256 校验和的交接清单，不可读状态/创作文件列入 `skipped`，达到 2000 文件上限时拒绝而非静默截断；多书歧义时快照与交接都拒绝，要求先写 `.active-book`。章节发现支持 `正文/书名/第N章.md`、`书名/正文/` 与 `.active-book`，多书歧义、无效 `.active-book` 和非法追踪给出 P1；用户可编辑状态里的绝对路径 / `..` 会被过滤。工作台「驾驶舱」面板支持刷新、显式快照、复制交接清单、点击路径跳转与显示当前书目录。
+- **P1-B 未完成（按路线图）**：高风险写前自动快照钩子（当前只有编辑器保存的历史快照与手动整体快照）、100 项目日用的 2 周实盘（G2）、项目交接的导入/校验动作（当前只生成 manifest）。跨项目（书架）扫描未纳入本切片，避免把 100 项目扫描成本塞进单工作区请求；单工作区概览仍会调用状态盘点与备份列表，备份数量很大时成本随文件数增长，尚未做缓存/增量。
+- **P2-A 骨架**：`scripts/eval-quality.mjs` + 7 个固定结构样本 + 7 条确定性 rubric + badcase 清单，双版本对比输出 JSON/Markdown；`pnpm test:eval` 已入门禁，**工具本身不是发布门禁，且未运行任何真实 provider 评测**。详见 `docs/EVALUATION.md`。
+- **P2-B 骨架**：`scripts/perf-scale.mjs` 合成 1000 章 / 1M 汉字 / 10k 文件 / 200 run，测遍历、章节枚举、读取+hash、状态 JSON、备份式收集；`pnpm test:perf` 已入门禁，完整基准不入门禁。本机最终复核 `read-hash-1m` 以 537.32 ms 超出 500 ms 原始预算，已如实记录；它不是插件级 UI SLO。详见 `docs/PERFORMANCE.md`。
+- **构建优化**：客户端 esbuild 直接输出 UTF-8，避免默认 ASCII 将中文转成 `\uXXXX`；包体从 392,311 降到 372,317 字节，400,000 预算不变。
+- **P3**：仍按路线图条件触发，默认不做多端/云/实时协作。
+
 ## 第一优先（高价值，直接对应现有差距）
 
 | # | 功能 | 借鉴来源 | 落点 | 状态 | 落点（实施后） |
@@ -57,5 +66,5 @@
 ## 工程注记（实施后，2026-09-05，历史）
 
 - 扩展缝：`src/services/registry.ts`（registerWorkspaceExtension + onWorkspaceWrite）+ `src/client/features/registry.ts`（registerWorkbenchFeature + registerFileViewer），并行代理据此无冲突交付
-- 客户端构建已开 esbuild 完整 minify，并自 2026-10-20 起对 `?inline` CSS 做构建期 minify；当前 `client.js` 392,311 字节（预算 400,000）
+- 客户端构建已开 esbuild 完整 minify，并自 2026-10-20 起对 `?inline` CSS 做构建期 minify；2026-10-21 起直接输出 UTF-8；当前 `client.js` 372,317 字节（预算 400,000）
 - 历史债务（2026-09-05）：`client/index.tsx` 约 2060 行超 900 行软上限；该债务已于 Phase A-D 拆为 16 行入口壳（见 2026-10-20 复核）。仍延后：短剧生产素材板独立浮动、esbuild 多入口拆包、availableActions 服务端下发（现为前端状态表）

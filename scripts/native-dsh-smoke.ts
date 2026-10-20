@@ -1333,6 +1333,49 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
       || inventoryEntries.some((entry) => entry.status === "corrupt" || entry.status === "newer")) {
       throw new Error(`Packaged state inventory route failed: ${JSON.stringify(inventoryPayload)}`);
     }
+    const continuityResponse = await dshFetch(`${origin}/oh-story/continuity?sessionId=${encodeURIComponent(storySession.sessionId)}`);
+    const continuityPayload = await continuityResponse.json() as {
+      readonly readOnly?: boolean;
+      readonly generatedAt?: string;
+      readonly project?: { readonly kind?: string; readonly title?: string };
+      readonly today?: { readonly nextChapter?: { readonly ordinal?: number } };
+      readonly stats?: { readonly chapters?: number };
+      readonly risks?: readonly { readonly id: string; readonly level: string }[];
+    };
+    if (!continuityResponse.ok || continuityPayload.readOnly !== true
+      || Number.isNaN(Date.parse(continuityPayload.generatedAt ?? ""))
+      || continuityPayload.project?.kind !== "novel"
+      || (continuityPayload.stats?.chapters ?? 0) < 20
+      || (continuityPayload.today?.nextChapter?.ordinal ?? 0) < 21
+      || !Array.isArray(continuityPayload.risks)
+      || continuityPayload.risks.some((risk) => risk.level === "P0")
+      || payloadContains(continuityPayload, [storyRoot, homedir()])) {
+      throw new Error(`Packaged continuity overview failed: ${JSON.stringify(continuityPayload)}`);
+    }
+    const handoffResponse = await dshFetch(`${origin}/oh-story/continuity/handoff?sessionId=${encodeURIComponent(storySession.sessionId)}`);
+    const handoffPayload = await handoffResponse.json() as {
+      readonly schemaVersion?: number;
+      readonly files?: readonly { readonly path: string }[];
+      readonly skipped?: readonly unknown[];
+      readonly excluded?: readonly string[];
+      readonly checksum?: string;
+    };
+    if (!handoffResponse.ok || handoffPayload.schemaVersion !== 1
+      || !/^[0-9a-f]{64}$/u.test(handoffPayload.checksum ?? "")
+      || !handoffPayload.files?.some((file) => file.path.startsWith("正文/"))
+      || !Array.isArray(handoffPayload.skipped) || !Array.isArray(handoffPayload.excluded)
+      || payloadContains(handoffPayload, [storyRoot, homedir()])) {
+      throw new Error(`Packaged continuity handoff failed: ${JSON.stringify(handoffPayload)}`);
+    }
+    const snapshotWithoutConfirm = await dshFetch(`${origin}/oh-story/continuity/snapshot?sessionId=${encodeURIComponent(storySession.sessionId)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    });
+    const snapshotError = await snapshotWithoutConfirm.json() as { readonly error?: string };
+    if (snapshotWithoutConfirm.status !== 400 || !(snapshotError.error ?? "").includes("confirm")) {
+      throw new Error(`Packaged continuity snapshot confirmation gate failed: ${JSON.stringify({ status: snapshotWithoutConfirm.status, snapshotError })}`);
+    }
     const bundleWithoutConfirm = await dshFetch(`${origin}/oh-story/diagnostics/bundle?sessionId=${encodeURIComponent(storySession.sessionId)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1987,6 +2030,31 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         );
         await diagnosticsButton.click();
         await diagnosticsPanel.waitFor({ state: "detached", timeout: 10_000 });
+        const continuityButton = page.getByRole("button", { name: "驾驶舱", exact: true });
+        await continuityButton.waitFor({ state: "visible", timeout: 10_000 });
+        await continuityButton.click();
+        const cockpitPanel = page.locator(".oh-diag-panel");
+        await cockpitPanel.waitFor({ state: "visible", timeout: 10_000 });
+        await cockpitPanel.getByRole("heading", { name: "今天", exact: true }).waitFor({ state: "visible", timeout: 10_000 });
+        await cockpitPanel.getByRole("heading", { name: "风险", exact: true }).waitFor({ state: "visible", timeout: 10_000 });
+        if (await cockpitPanel.locator(".oh-diag-error").count() > 0) {
+          throw new Error(`Continuity panel rendered an error: ${await cockpitPanel.locator(".oh-diag-error").innerText()}`);
+        }
+        const riskChips = cockpitPanel.getByRole("group", { name: "风险汇总" });
+        if (!(await riskChips.innerText()).includes("P0 0")) {
+          throw new Error(`Continuity panel reported a P0 in the packaged smoke: ${await riskChips.innerText()}`);
+        }
+        for (const action of ["刷新", "创建快照", "复制交接清单"]) {
+          if (await cockpitPanel.getByRole("button", { name: action, exact: true }).count() !== 1) {
+            throw new Error(`Continuity panel is missing the ${action} action.`);
+          }
+        }
+        const cockpitText = await cockpitPanel.innerText();
+        if (cockpitText.includes(storyRoot) || cockpitText.includes(homedir())) {
+          throw new Error("Continuity panel leaked an absolute workspace or home path.");
+        }
+        await continuityButton.click();
+        await cockpitPanel.waitFor({ state: "detached", timeout: 10_000 });
       }
       await prepareDemoSurface(page);
       const previewTab = page.getByRole("tab", { name: "预览" });

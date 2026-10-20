@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "description": "dsh-miaowu 结构评测语料清单。每个样本 id 对应 --base/--candidate 根目录下的同名子目录；所有文件路径均相对样本目录，只使用合成占位内容，不含真实用户数据。",
+  "samples": [
+    {
+      "id": "novel-rain-station",
+      "kind": "novel",
+      "requiredFiles": [
+        "正文/第001章_雨夜.md",
+        "正文/第002章_铜钥匙.md",
+        "正文/第003章_空站台.md",
+        "正文/第004章_回声.md",
+        "正文/第005章_末班车.md",
+        "大纲/细纲_第001-005章.md"
+      ],
+      "minChars": {
+        "正文/第001章_雨夜.md": 240,
+        "正文/第002章_铜钥匙.md": 240,
+        "正文/第003章_空站台.md": 240,
+        "正文/第004章_回声.md": 240,
+        "正文/第005章_末班车.md": 240,
+        "大纲/细纲_第001-005章.md": 120
+      },
+      "requiredHeadings": {
+        "正文/第001章_雨夜.md": ["# 第001章 雨夜"],
+        "正文/第002章_铜钥匙.md": ["# 第002章 铜钥匙"],
+        "正文/第003章_空站台.md": ["# 第003章 空站台"],
+        "正文/第004章_回声.md": ["# 第004章 回声"],
+        "正文/第005章_末班车.md": ["# 第005章 末班车"],
+        "大纲/细纲_第001-005章.md": ["# 细纲 第001-005章"]
+      },
+      "forbiddenPatterns": ["TODO", "TBD", "待补"]
+    },
+    {
+      "id": "novel-archive-city",
+      "kind": "novel",
+      "requiredFiles": [
+        "正文/第001章_档案.md",
+        "正文/第002章_停电.md",
+        "正文/第003章_第七层.md",
+        "设定/世界观.md"
+      ],
+      "minChars": {
+        "正文/第001章_档案.md": 220,
+        "正文/第002章_停电.md": 220,
+        "正文/第003章_第七层.md": 220,
+        "设定/世界观.md": 160
+      },
+      "requiredHeadings": {
+        "正文/第001章_档案.md": ["# 第001章 档案"],
+        "正文/第002章_停电.md": ["# 第002章 停电"],
+        "正文/第003章_第七层.md": ["# 第003章 第七层"],
+        "设定/世界观.md": ["# 世界观"]
+      },
+      "forbiddenPatterns": ["TODO", "TBD", "待补", "FIXME"]
+    },
+    {
+      "id": "drama-ep001",
+      "kind": "drama",
+      "requiredFiles": ["剧本.md", "视觉设定.md", "分镜.md", "图片提示词.md", "视频提示词.md"],
+      "minChars": {
+        "剧本.md": 320,
+        "视觉设定.md": 180,
+        "分镜.md": 260,
+        "图片提示词.md": 180,
+        "视频提示词.md": 180
+      },
+      "requiredHeadings": {
+        "剧本.md": ["# 剧本 EP001", "## 场景 1 · 旧渡站"],
+        "视觉设定.md": ["# 视觉设定 EP001", "## 人物 · 林舟"],
+        "分镜.md": ["# 分镜 EP001", "## SHOT-EP001-001"],
+        "图片提示词.md": ["# 图片提示词 EP001"],
+        "视频提示词.md": ["# 视频提示词 EP001"]
+      },
+      "forbiddenPatterns": ["TODO", "待补", "占位"]
+    },
+    {
+      "id": "drama-ep002",
+      "kind": "drama",
+      "requiredFiles": ["剧本.md", "视觉设定.md", "分镜.md", "图片提示词.md", "视频提示词.md"],
+      "minChars": {
+        "剧本.md": 300,
+        "视觉设定.md": 180,
+        "分镜.md": 260,
+        "图片提示词.md": 180,
+        "视频提示词.md": 180
+      },
+      "requiredHeadings": {
+        "剧本.md": ["# 剧本 EP002", "## 场景 1 · 深夜站台"],
+        "视觉设定.md": ["# 视觉设定 EP002", "## 地点 · 旧渡站"],
+        "分镜.md": ["# 分镜 EP002", "## SHOT-EP002-001"],
+        "图片提示词.md": ["# 图片提示词 EP002"],
+        "视频提示词.md": ["# 视频提示词 EP002"]
+      },
+      "forbiddenPatterns": ["TODO", "待补", "占位"]
+    },
+    {
+      "id": "game-jinping-prototype",
+      "kind": "game",
+      "requiredFiles": ["PRODUCT_BRIEF.md", "build/index.html", "build/app.js", "qa/verification.json"],
+      "minChars": {
+        "PRODUCT_BRIEF.md": 220,
+        "build/index.html": 160,
+        "build/app.js": 260,
+        "qa/verification.json": 80
+      },
+      "requiredHeadings": {
+        "PRODUCT_BRIEF.md": ["# PRODUCT_BRIEF", "## 核心循环"]
+      },
+      "forbiddenPatterns": ["TODO", "TBD", "lorem ipsum"]
+    },
+    {
+      "id": "video-recap-rain",
+      "kind": "video-recap",
+      "requiredFiles": ["narration.json", "recap_run_manifest.json", "成片/recap_demo.mp4"],
+      "minChars": {
+        "narration.json": 240,
+        "recap_run_manifest.json": 80
+      },
+      "forbiddenPatterns": ["TODO", "待补", "占位画面"]
+    },
+    {
+      "id": "video-recap-rain-cut",
+      "kind": "video-recap",
+      "requiredFiles": ["clip_plan.json", "narration.json", "成片/recap_cut_demo.mp4"],
+      "minChars": {
+        "clip_plan.json": 180,
+        "narration.json": 240
+      },
+      "forbiddenPatterns": ["TODO", "待补", "占位画面"]
+    }
+  ]
+}

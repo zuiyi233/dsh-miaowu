@@ -17,10 +17,13 @@
 - `.oh-story` 状态底座：书架、伏笔/抑制、拆书 sidecar 与批注写入 `schemaVersion: 1`；只读盘点列出每类状态的文件数、版本、条目、字节与文档内时间戳；显式迁移先写备份与清单，支持按清单回滚，派生索引、密钥、JSONL、顶层任务数组与不可变备份不参与自动迁移。
 - 新增启动预检：宿主版本未知或超出 `engines.dsh`、Node 低于 24 时发出明确告警，不阻断插件加载，也不静默降级。
 - 新增 `pnpm sync:upstream` 同步工厂骨架：默认 dry-run 对比四套知识资产 pin 与 DSH 声明范围；`--apply` 在干净工作树上调用既有资产脚本，可选 `--verify` 跑全量门禁与打包冒烟；不提交、不推送、不打 tag、不发布，报告带回滚命令。`pnpm test:sync-upstream` 已纳入 `pnpm verify`。
+- 小说 / 短剧工作台新增「驾驶舱」面板：只读聚合书架、伏笔、run / 候选、审计保存、备份、历史、状态异常、章节追踪与检索索引，给出「今天」视图和确定性 P0/P1/P2 风险；`POST /oh-story/continuity/snapshot` 必须显式确认，创建包含当前书与 `.oh-story` 状态的整体备份（不含会话与 vault 主密钥），只写 `.oh-story/backup/`；快照会按当前书根补收 `书名/正文/` 布局，遇到超过单文件上限或 2000 文件截断时拒绝写入，避免把不完整结果报成成功；多书歧义时快照与交接清单都拒绝执行。`GET /oh-story/continuity/handoff` 生成带 SHA-256 校验和的项目交接清单，不可读文件列入 `skipped`，达到 2000 文件上限时拒绝而不静默截断。章节发现支持 `正文/书名/第N章.md` 与 `书名/正文/` 布局并读取 `.active-book`；多本书缺少当前书、`.active-book` 指向无效目录或追踪字段无法解析时给出 P1，用户可编辑状态文件里的绝对路径 / `..` 不会进入风险与最近保存。
+- 新增 P2-A 结构评测骨架：固定语料 + 确定性 rubric + 双版本对比 + badcase 清单（`pnpm eval:quality`、`pnpm test:eval`）。它不调用模型、不产生质量结论、不是发布门禁。
+- 新增 P2-B 原始原语基准：合成 1000 章 / 1M 字符 / 10k 文件工作区，测量遍历、章节枚举、读取与 hash、状态 JSON、备份式收集（`pnpm perf:scale`、`pnpm test:perf`）。完整基准不进入门禁，且明确不是插件级 UI SLO；本机复核中 `read-hash-1m` 曾以 537 ms 超过 500 ms 预算，已如实记录。
 
 ### Changed
 
-- 客户端内联 CSS 改为构建期 esbuild minify：样式语义不变，浏览器包当前 392,311 字节，继续守住 400,000 字节预算。
+- 客户端内联 CSS 改为构建期 esbuild minify，并改为直接输出 UTF-8（默认 ASCII 会把每个中文字符串转成 `\uXXXX`）：样式与文案语义不变，浏览器包从 392,311 字节降到 372,317 字节，继续守住 400,000 字节预算。
 - 发行身份改为 fork 自己的线：发布标签前缀改为 `miaowu-vX.Y.Z`（下一个发布版本起），tarball 名与仓库地址统一为 `dsh-miaowu-dsh-<version>.tgz` 与 `zuiyi233/dsh-miaowu`；发布前先做 fork 源预检，拒绝把上游提交或上游标签当作发布源，并移除只服务上游的恢复工作流。
 - 双语 README 的安装路径按实际发布状态改写：0.1.18 的预构建包与 npm 包都还没发布，推荐从源码构建 0.1.18；最近可用的预构建包 v0.1.16 作为快速试用路径；v0.1.18 的 Release 资产与 npm 安装收进「发布后可用」折叠块。Badge、Releases、Issues、独立 profile 安装与项目表一并指向本 fork，上游只在出处与历史记录中保留。
 - 新增 [docs/FORK-FEATURES.md](docs/FORK-FEATURES.md)，双语 README 增加「Fork 专有能力」一节：全文检索（CJK + 拼音）、版本历史/回滚/审计/行级批注、候选暂存、run/checkpoint/resume、备份三件套、伏笔闭环、书架、可选凭据保险库、`worldbuilding`/`publishing`/`finalize` 三个自有 Skills、ComfyUI 本地接入、喵呜小说工坊预设、运行中文件树刷新与按会话/工作区布局持久化。

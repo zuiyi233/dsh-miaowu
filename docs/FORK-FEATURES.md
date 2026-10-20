@@ -24,6 +24,7 @@
 | 书架 | 小说 / 短剧工作台面板 | 随插件可用 | `.oh-story/shelf.json` |
 | 可选凭据保险库 | HTTP 路由，无独立面板 | **默认关闭** | `.oh-story/vault/`；需 `DSH_MIAOWU_VAULT_ENABLED=1` |
 | 自诊断 | 小说 / 短剧工作台「自诊断」面板 + `/oh-story/diagnostics` | 随插件可用 | 六组只读检查、支持包、显式修复；状态盘点见 `.oh-story/` |
+| 连续性驾驶舱 | 小说 / 短剧工作台「驾驶舱」面板 + `/oh-story/continuity` | 随插件可用 | 今天视图、P0/P1/P2 风险、显式快照、可复制交接清单（manifest + SHA-256） |
 | `worldbuilding` / `publishing` / `finalize` | 三个自有 Skills | 随插件可用 | 通过 Skills 目录发现，`/worldbuilding` 等入口 |
 | ComfyUI 本地接入 | 短剧生产适配器 + `oh_story_comfyui` 工具 | 需外部配置 | 本机或局域网 ComfyUI 服务 + API-format 工作流 |
 | 喵呜小说工坊 | DSH Agent 预设 | 需手动安装 | 源码 checkout 运行 `pnpm --filter @dsh-miaowu/dsh preset:install` |
@@ -37,6 +38,13 @@
 - 显式修复只有三类：重建检索索引、重新做全量备份、检查过期锁。锁清理在已安装的 DSH 文件系统接口没有删除能力时只报告、不代删；状态迁移另有独立的计划 / 应用 / 回滚接口，应用前先写备份。
 - 启动预检只读插件与宿主清单：宿主版本未知、超出 `engines.dsh` 或 Node 低于 24 时发出明确告警，不阻断加载，也不静默降级。
 - `.oh-story` 的可变 JSON 文档（书架、伏笔抑制、拆书 sidecar、批注等）写入 `schemaVersion: 1`；历史 / 审计 JSONL、任务顶层数组、检索索引、锁和备份快照保持原格式，按兼容规则读取，不参与 v1 自动迁移。迁移必须显式确认，先备份再写入，可按备份清单回滚。
+
+## 连续性驾驶舱
+
+- 「驾驶舱」面板调用 `GET /oh-story/continuity`，把书架、伏笔与 snooze、run / 候选、最近审计保存、备份新鲜度、历史文件、状态盘点异常、章节文件与 `追踪/_tracking-state.json` 聚合成「今天」视图：下一章、到期伏笔、暂停 / 失败 run、待确认候选、最近保存与最近备份。只读、无模型调用、不写 `~/.dsh` 或会话。
+- 确定性风险规则按 P0/P1/P2 分级：状态损坏或密钥库只有密文没有主密钥、schema 比插件新、多本书缺少或写坏 `.active-book`、追踪状态无法解析、失败 / 暂停的 run、待确认候选、到期伏笔、从未备份或超过 7 天未备份、追踪落后最新章节、最新章节没有历史快照、检索索引未建立、拆书 sidecar 缺失、回收站即将到期。每条风险在有文件可指向时给出可打开的相对路径，并附下一步；`正文/书名/` 与 `书名/正文/` 两种布局的候选会统一判定，多书一律不静默挑第一本。用户可编辑状态里出现的绝对路径 / `..` 会被过滤，不进入面板。
+- `POST /oh-story/continuity/snapshot` 是面板唯一写入动作，必须 `confirm: true`，只写 `.oh-story/backup/`：按当前书根补收 `书名/正文/` 布局，包含 `.oh-story` 状态、不含 vault 主密钥；超过单文件上限或达到 2000 文件截断时拒绝写入。`GET /oh-story/continuity/handoff` 生成项目交接清单（文本资产 + 选定 `.oh-story` 状态 + 排序后的 SHA-256 校验和），不可读 / 超限的状态文件列入 `skipped`，达到 2000 个文件上限时拒绝而不是静默截断。多书歧义时两者都返回 409，要求先写 `.active-book`。面板可复制该清单。
+- P2-A 结构评测骨架见 [EVALUATION.md](EVALUATION.md)：固定语料 + 确定性 rubric + 双版本对比 + badcase 清单，**不调用模型、不是发布门禁**。P2-B 原始原语基准见 [PERFORMANCE.md](PERFORMANCE.md)，明确不是插件级 UI SLO。
 
 ## 上游同步
 

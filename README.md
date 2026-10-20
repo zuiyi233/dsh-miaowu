@@ -95,6 +95,8 @@
 
 - **全文检索**：中文正文与拼音双通道，行级结果带文件、行号与偏移；索引落 `.oh-story/index/`，查询时按文件版本懒刷新，也可全量重建。
 - **自诊断**：小说 / 短剧工作台的「自诊断」面板按宿主、运行时、工作区、数据、凭据、集成六组给出 P0/P1/P2；报告只读，支持包需显式确认且默认脱敏；可显式重建索引、重跑备份、检查过期锁，状态格式迁移先备份、可回滚。
+- **连续性驾驶舱**：小说 / 短剧工作台把书架、伏笔、run / 候选、审计保存、备份、历史、状态异常与章节追踪聚合成「今天」视图和确定性 P0/P1/P2 风险；只读、不调模型，快照必须显式确认且只写 `.oh-story/backup/`，可复制带 SHA-256 校验和的项目交接清单。
+- **质量与性能骨架**：`pnpm eval:quality` 用固定语料与确定性 rubric 对比两版结构产物（不调用模型、不是质量结论）；`pnpm perf:scale` 合成 1M 字 / 10k 文件工作区测量原始文件与 JSON 原语（不是插件级 UI SLO）。详见 [EVALUATION.md](docs/EVALUATION.md) 与 [PERFORMANCE.md](docs/PERFORMANCE.md)。
 - **版本历史 / 回滚 / 审计 / 行级批注**：每个文件保留最近 50 个快照，回滚用版本校验拒绝覆盖并发修改；`audit.jsonl` 留痕，批注按原文引用重锚，行号移动记 `moved`、找不到记 `stale` 而不丢批注。
 - **候选暂存**：Agent 用 `oh_story_task stage_candidate` 登记建议但不写文件，由你在「任务与候选」面板确认、修订或应用。
 - **run / checkpoint / resume**：长任务按 step 记录进度与检查点，中断后从最近暂停或失败的 run 恢复（内置 novel-chapter、drama-batch、game-content 三个 recipe）。

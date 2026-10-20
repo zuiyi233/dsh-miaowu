@@ -246,19 +246,40 @@ export function restorePlan(bundle: BackupBundle, timestamp: string): RestorePla
   };
 }
 
+export type BackupSkipReporter = (path: string, reason: "too-large" | "non-utf8") => void;
+
+/** 收集器在达到 2000 文件上限时置位；调用方据此拒绝把截断当成完整备份。 */
+export interface BackupWalkState {
+  truncated: boolean;
+}
+
+export interface FullBackupOptions {
+  readonly extraRoot?: string;
+  readonly onSkip?: BackupSkipReporter;
+  readonly state?: BackupWalkState;
+}
+
+export interface CreateBackupOptions {
+  readonly requireComplete?: boolean;
+}
+
 async function readTextEntry(
   realm: BackupRealm,
   path: string,
   target: FsTarget,
   maxBytes: number,
-  out: BackupFileEntry[]
+  out: BackupFileEntry[],
+  onSkip?: BackupSkipReporter
 ): Promise<void> {
   try {
     const file = await readVersionedFile(realm.fs, target, maxBytes);
     out.push({ path, content: file.content, version: String(file.version) });
   } catch (error) {
     // 超限(413)/非文本(415)跳过该文件;其它错误向上传播,不静默吞错.
-    if (error instanceof WorkspaceHttpError && (error.status === 413 || error.status === 415)) return;
+    if (error instanceof WorkspaceHttpError && (error.status === 413 || error.status === 415)) {
+      onSkip?.(path, error.status === 413 ? "too-large" : "non-utf8");
+      return;
+    }
     throw error;
   }
 }
@@ -269,7 +290,8 @@ async function walkTextFiles(
   prefix: string,
   maxBytes: number,
   out: BackupFileEntry[],
-  skipDir: (path: string) => boolean
+  skipDir: (path: string) => boolean,
+  onSkip?: BackupSkipReporter
 ): Promise<void> {
   if (out.length >= MAX_BACKUP_FILES) return;
   const entries = await realm.fs.listDir(dir);
@@ -277,9 +299,9 @@ async function walkTextFiles(
     if (entry.name.startsWith(".") || !realm.fs.contains(realm.root, entry.target)) continue;
     const childPath = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
     if (entry.type === "directory") {
-      if (!skipDir(childPath)) await walkTextFiles(realm, entry.target, childPath, maxBytes, out, skipDir);
+      if (!skipDir(childPath)) await walkTextFiles(realm, entry.target, childPath, maxBytes, out, skipDir, onSkip);
     } else if (entry.type === "file" && textExtension(childPath)) {
-      await readTextEntry(realm, childPath, entry.target, maxBytes, out);
+      await readTextEntry(realm, childPath, entry.target, maxBytes, out, onSkip);
     }
     if (out.length >= MAX_BACKUP_FILES) return;
   }
@@ -289,19 +311,20 @@ async function collectUnder(
   realm: BackupRealm,
   root: string,
   maxBytes: number,
-  skipDir: (path: string) => boolean
+  skipDir: (path: string) => boolean,
+  onSkip?: BackupSkipReporter
 ): Promise<BackupFileEntry[]> {
   const target = await realm.fs.resolve(root, { cwd: realm.cwd });
   if (!realm.fs.contains(realm.root, target)) throw new WorkspaceHttpError(403, "备份范围离开了 DSH 工作目录。");
   const info = await realm.fs.stat(target);
   if (info?.type === "file") {
     const out: BackupFileEntry[] = [];
-    if (textExtension(root)) await readTextEntry(realm, root, target, maxBytes, out);
+    if (textExtension(root)) await readTextEntry(realm, root, target, maxBytes, out, onSkip);
     return out;
   }
   if (info?.type !== "directory") throw new WorkspaceHttpError(404, "备份范围不存在。");
   const out: BackupFileEntry[] = [];
-  await walkTextFiles(realm, target, root, maxBytes, out, skipDir);
+  await walkTextFiles(realm, target, root, maxBytes, out, skipDir, onSkip);
   return out.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
 }
 
@@ -309,36 +332,62 @@ async function collectUnder(
 export async function collectScopeFiles(
   realm: BackupRealm,
   root: string | undefined,
-  maxBytes: number
+  maxBytes: number,
+  onSkip?: BackupSkipReporter,
+  state?: BackupWalkState
 ): Promise<BackupFileEntry[]> {
   const skipNothing = (): boolean => false;
   if (root !== undefined && root !== "") {
     if (!safeBundlePath(root)) throw new WorkspaceHttpError(400, "备份范围路径不合法。");
-    return collectUnder(realm, root, maxBytes, skipNothing);
+    const scoped = await collectUnder(realm, root, maxBytes, skipNothing, onSkip);
+    if (state !== undefined) state.truncated = scoped.length >= MAX_BACKUP_FILES;
+    return scoped;
   }
   const out: BackupFileEntry[] = [];
   for (const dir of BACKUP_CREATIVE_ROOTS) {
     const target = await realm.fs.resolve(dir, { cwd: realm.cwd });
     if (!realm.fs.contains(realm.root, target)) continue;
     if ((await realm.fs.stat(target))?.type !== "directory") continue;
-    await walkTextFiles(realm, target, dir, maxBytes, out, skipNothing);
+    await walkTextFiles(realm, target, dir, maxBytes, out, skipNothing, onSkip);
     if (out.length >= MAX_BACKUP_FILES) break;
   }
   const rootFile = await realm.fs.resolve(BACKUP_ROOT_FILE, { cwd: realm.cwd });
   if (realm.fs.contains(realm.root, rootFile) && (await realm.fs.stat(rootFile))?.type === "file") {
-    await readTextEntry(realm, BACKUP_ROOT_FILE, rootFile, maxBytes, out);
+    await readTextEntry(realm, BACKUP_ROOT_FILE, rootFile, maxBytes, out, onSkip);
   }
+  if (state !== undefined) state.truncated = out.length >= MAX_BACKUP_FILES;
   return out.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
 }
 
-/** full 收录:创作树全部文本 + `.oh-story/` 服务状态(排除备份目录自身,防递归). */
-export async function collectFullFiles(realm: BackupRealm, maxBytes: number): Promise<BackupFileEntry[]> {
-  const out = await collectScopeFiles(realm, undefined, maxBytes);
+/** full 收录:创作树全部文本 + 当前项目根(如 `书名/正文/`) + `.oh-story/` 服务状态(排除备份目录自身). */
+export async function collectFullFiles(
+  realm: BackupRealm,
+  maxBytes: number,
+  options: FullBackupOptions = {}
+): Promise<BackupFileEntry[]> {
+  const out = await collectScopeFiles(realm, undefined, maxBytes, options.onSkip, options.state);
+  const extraRoot = options.extraRoot;
+  if (extraRoot !== undefined && extraRoot !== "") {
+    if (!safeBundlePath(extraRoot)) throw new WorkspaceHttpError(400, "备份范围路径不合法。");
+    const covered = new Set(out.map((file) => file.path));
+    for (const file of await collectUnder(realm, extraRoot, maxBytes, () => false, options.onSkip)) {
+      if (!covered.has(file.path)) {
+        out.push(file);
+        covered.add(file.path);
+      }
+    }
+  }
+  // .active-book 是根级隐藏文件，创作树遍历会跳过隐藏项；交接/恢复需要它定位当前书。
+  const activeBook = await realm.fs.resolve(".active-book", { cwd: realm.cwd });
+  if (realm.fs.contains(realm.root, activeBook) && (await realm.fs.stat(activeBook))?.type === "file") {
+    await readTextEntry(realm, ".active-book", activeBook, maxBytes, out, options.onSkip);
+  }
   const skipBackup = (path: string): boolean => path === BACKUP_DIR || path.startsWith(`${BACKUP_DIR}/`);
   const store = await realm.fs.resolve(".oh-story", { cwd: realm.cwd });
   if (realm.fs.contains(realm.root, store) && (await realm.fs.stat(store))?.type === "directory") {
-    await walkTextFiles(realm, store, ".oh-story", maxBytes, out, skipBackup);
+    await walkTextFiles(realm, store, ".oh-story", maxBytes, out, skipBackup, options.onSkip);
   }
+  if (options.state !== undefined) options.state.truncated = out.length >= MAX_BACKUP_FILES;
   return out.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
 }
 
@@ -368,12 +417,33 @@ export async function createBackup(
   kind: BackupKind,
   root: string | undefined,
   maxBytes: number,
-  now: number = Date.now()
+  now: number = Date.now(),
+  options: CreateBackupOptions = {}
 ): Promise<{ readonly path: string; readonly counts: BackupCounts }> {
-  const files = kind === "full" ? await collectFullFiles(realm, maxBytes) : await collectScopeFiles(realm, root, maxBytes);
+  const skipped: string[] = [];
+  const state: BackupWalkState = { truncated: false };
+  const onSkip: BackupSkipReporter = (path) => {
+    if (options.requireComplete === true) skipped.push(path);
+  };
+  const files = kind === "full"
+    ? await collectFullFiles(realm, maxBytes, {
+      ...(root === undefined || root === "" ? {} : { extraRoot: root }),
+      onSkip,
+      state,
+    })
+    : await collectScopeFiles(realm, root, maxBytes, onSkip, state);
+  if (options.requireComplete === true && (state.truncated || skipped.length > 0)) {
+    throw new WorkspaceHttpError(
+      413,
+      skipped.length > 0
+        ? `备份不完整：${String(skipped.length)} 个文件超过单文件上限或不是 UTF-8 文本，未写入任何备份。`
+        : "备份文件数达到 2000 上限，未写入任何备份。"
+    );
+  }
   const bundle = buildBackup(kind, files, now, kind === "full" ? undefined : root === "" ? undefined : root);
   const stamp = formatBackupTimestamp(new Date(now));
-  const { target, relPath } = await uniqueBackupTarget(realm, `${kind}-${stamp}-${slugifyBackupRoot(root, kind)}.json`);
+  const slug = slugifyBackupRoot(kind === "full" ? undefined : root, kind);
+  const { target, relPath } = await uniqueBackupTarget(realm, `${kind}-${stamp}-${slug}.json`);
   await realm.fs.writeText(target, JSON.stringify(bundle), undefined, undefined, undefined);
   return { path: relPath, counts: bundle.counts };
 }

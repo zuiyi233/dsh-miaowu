@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "description": "已知 badcase 清单。cases 只放确认过的回归案例；exampleCase 是字段说明，不计入统计。真实产物路径和用户内容不得写入本文件。",
+  "cases": [],
+  "exampleCase": {
+    "id": "EXAMPLE-2026-001",
+    "kind": "novel",
+    "sourceVersion": "0.1.18",
+    "symptom": "候选版本生成的第 2 章只有标题，正文为空。",
+    "evidence": [
+      "candidate/novel-rain-station/正文/第002章_铜钥匙.md 的字符数为 0",
+      "报告 sample summary 显示候选 passCount 比基线少 2"
+    ],
+    "repro": [
+      "准备包含 novel-rain-station 的 base 与 candidate 产物目录",
+      "运行 node scripts/eval-quality.mjs --base <base> --candidate <candidate> --out report.json",
+      "查看 report.json 中 novel-rain-station 的 min-chars 检查"
+    ],
+    "expected": "第 002 章存在且非空，字符数不低于语料清单要求。",
+    "status": "open"
+  }
+}

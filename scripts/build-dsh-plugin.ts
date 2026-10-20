@@ -92,7 +92,10 @@ await build({
   define: { "process.env.NODE_ENV": '"production"' },
   // Full minification (syntax + whitespace + identifiers) keeps the shipped
   // client bundle inside the 400 KB release budget as the workbench grows.
+  // Output UTF-8 directly: the default ASCII charset escapes every Chinese
+  // string to \uXXXX, which nearly doubles their byte cost.
   minify: true,
+  charset: "utf8",
   external: ["@deepseek-ai/*", "react", "react/jsx-runtime", "react-dom", "react-dom/client"],
   plugins: [inlineCss],
   banner: { js: "window.__ModuleLoader__.load({id:\"@dsh-miaowu/dsh\",factory:(require)=>{var module={exports:{}};var exports=module.exports;" },

@@ -32,7 +32,7 @@
 
 - DSH 拥有模型、provider、preset、权限、roots、runs、sessions。**本插件只做领域贡献**：skills、roles、tools（`oh_story_*` 具名注册）、hooks（`tools/pre-execute`、`tools/post-execute` 写法守卫）、`/oh-story/*` 工作台路由、客户端 workbench。
 - **绝不碰**：会话持久化（`sessionPersistence` / `borrowSession` / `session-query`）、`workspace.json` 注册表结构、`~/.dsh` 下任何宿主状态文件的写入（读可以，改必须用户明确点头且先备份）。
-- 扩展走注册表缝：Host 侧 `src/services/registry.ts` 的 `registerWorkspaceExtension`，客户端 `src/client/features/registry.ts` 的 `registerWorkbenchFeature` / `registerFileViewer`。诊断模块也走同一条缝（`/oh-story/diagnostics`、`/oh-story/state/inventory`、`/oh-story/state/migrate`），不要改 `workspace-route.ts` / `index.tsx` 主体。诊断默认只读；修复与状态迁移必须显式 `confirm: true`，迁移先备份、可回滚。
+- 扩展走注册表缝：Host 侧 `src/services/registry.ts` 的 `registerWorkspaceExtension`，客户端 `src/client/features/registry.ts` 的 `registerWorkbenchFeature` / `registerFileViewer`。诊断与驾驶舱模块也走同一条缝（`/oh-story/diagnostics`、`/oh-story/state/*`、`/oh-story/continuity*`），不要改 `workspace-route.ts` / `index.tsx` 主体。二者默认只读；修复、状态迁移与驾驶舱快照必须显式 `confirm: true`，迁移先备份、可回滚，快照只写 `.oh-story/backup/`。
 
 ## 3. 已知宿主坑（不要重复踩）
 
