@@ -20,6 +20,9 @@ import {
  */
 
 const STORY_ROOT = "正文";
+const CHAPTER_EXTENSION = ".md";
+/** 与 continuity 一致的章节命名约定：`第N章…`（允许前导零）。 */
+const CHAPTER_NAME = /^第0*(\d+)章/u;
 const PROJECT_FILE = "project.json";
 const PROJECT_MAX_BYTES = 512 * 1_024;
 const PROJECT_NAME_MAX_LENGTH = 64;
@@ -110,16 +113,32 @@ function childDirectoryNames(entries: readonly FsDirEntry[], exclude: readonly s
     .sort(compareLabels);
 }
 
+/** 章节文件必须同时满足 `.md` 扩展名与 `第N章…` 命名（README、设定等散文不算章节）。 */
+function isChapterName(name: string): boolean {
+  return name.endsWith(CHAPTER_EXTENSION) && CHAPTER_NAME.test(name.slice(0, -CHAPTER_EXTENSION.length));
+}
+
+function isChapterPath(path: string): boolean {
+  return isChapterName(path.slice(path.lastIndexOf("/") + 1));
+}
+
 async function chapterPathsIn(realm: WorkspaceRealm, directory: string): Promise<string[]> {
   const entries = await listDirectory(realm, await resolveInside(realm, directory));
   return entries
-    .filter((entry) => entry.type === "file" && entry.name.toLowerCase().endsWith(".md"))
+    .filter((entry) => entry.type === "file" && isChapterName(entry.name))
     .map((entry) => `${directory}/${entry.name}`)
     .sort(compareLabels);
 }
 
-/** 书籍根自身直属章节优先；没有时再看它自己的 `正文/`（书根布局）。 */
-async function chaptersUnder(realm: WorkspaceRealm, bookRoot: string): Promise<string[]> {
+/**
+ * 书籍根 → 章节清单（按布局判定，而不是"有 .md 就算书"）：
+ * - `正文` → 直属章节；
+ * - 根级书目录（无 `/`，非 `正文`）→ 只认 `<book>/正文/` 下的章节；
+ * - `正文/<目录>` → 直属章节优先，没有时回退 `<目录>/正文/`。
+ */
+async function chapterPathsForBook(realm: WorkspaceRealm, bookRoot: string): Promise<string[]> {
+  if (bookRoot === STORY_ROOT) return chapterPathsIn(realm, STORY_ROOT);
+  if (!bookRoot.includes("/")) return chapterPathsIn(realm, `${bookRoot}/${STORY_ROOT}`);
   const direct = await chapterPathsIn(realm, bookRoot);
   return direct.length > 0 ? direct : chapterPathsIn(realm, `${bookRoot}/${STORY_ROOT}`);
 }
@@ -132,29 +151,29 @@ function workspaceLabel(realm: WorkspaceRealm): string {
 /**
  * 书籍目录发现（不使用 `.active-book`）：
  * a) `正文/` 直属章节 → bookRoot `正文`；
- * b) 根级目录内含 `正文/` 章节 → bookRoot `<目录>`；
+ * b) 根级目录**自带** `正文/` 章节 → bookRoot `<目录>`（仅根级有 .md 不算书）；
  * c) `正文/<目录>/` 内直属章节或其自带 `正文/` 章节 → bookRoot `正文/<目录>`。
  */
 export async function listAudiobookSources(realm: WorkspaceRealm): Promise<AudiobookSource[]> {
   const sources: AudiobookSource[] = [];
-  const storyChapters = await chaptersUnder(realm, STORY_ROOT);
+  const storyChapters = await chapterPathsForBook(realm, STORY_ROOT);
   if (storyChapters.length > 0) sources.push({ bookRoot: STORY_ROOT, name: workspaceLabel(realm), chapters: storyChapters });
   for (const name of childDirectoryNames(await listDirectory(realm, realm.root), [STORY_ROOT, AUDIOBOOK_ROOT])) {
-    const chapters = await chaptersUnder(realm, name);
+    const chapters = await chapterPathsForBook(realm, name);
     if (chapters.length > 0) sources.push({ bookRoot: name, name, chapters });
   }
   const storyRoot = await resolveInside(realm, STORY_ROOT);
   for (const name of childDirectoryNames(await listDirectory(realm, storyRoot), [])) {
     const bookRoot = `${STORY_ROOT}/${name}`;
-    const chapters = await chaptersUnder(realm, bookRoot);
+    const chapters = await chapterPathsForBook(realm, bookRoot);
     if (chapters.length > 0) sources.push({ bookRoot, name, chapters });
   }
   return sources.sort((left, right) => compareLabels(left.bookRoot, right.bookRoot));
 }
 
-/** 书籍根下的章节清单（`正文` 直属章节，或书根自带 `正文/` 的章节）。 */
+/** 书籍根下的章节清单（`正文` 直属、根级书目录的 `正文/`，或 `正文/<目录>` 直属/其 `正文/`）。 */
 export async function listChapterPaths(realm: WorkspaceRealm, bookRoot: string): Promise<string[]> {
-  return chaptersUnder(realm, safeRelativePath(bookRoot));
+  return chapterPathsForBook(realm, safeRelativePath(bookRoot));
 }
 
 /** 校验 TTS 端点：仅 https 或回环 http，禁止内嵌凭证、query 与 hash。 */
@@ -277,7 +296,7 @@ function validateProject(value: unknown): AudiobookProject {
   const source = asRecord(record["source"], "source");
   const chapters = asArray(source["chapters"], "source.chapters").map((item, index) => {
     const path = projectRelativePath(item, `source.chapters[${index}]`);
-    if (!path.toLowerCase().endsWith(".md")) throw invalid(`source.chapters[${index}] 必须是 .md 章节文件。`);
+    if (!isChapterPath(path)) throw invalid(`source.chapters[${index}] 必须是 第N章 命名的 .md 章节文件。`);
     return path;
   });
   return {

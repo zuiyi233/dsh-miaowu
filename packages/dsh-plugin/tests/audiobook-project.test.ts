@@ -10,16 +10,39 @@ import {
 import { CHAPTERS, memoryRealm } from "./audiobook-fixtures.js";
 
 describe("audiobook project", () => {
-  it("发现正文直属章节与 正文/书名 章节", async () => {
+  it("发现正文直属章节、根级书目录与 正文/<书名> 章节", async () => {
     const { realm } = memoryRealm({
       ...CHAPTERS,
+      "正文/README.md": "# 正文目录说明\n",
+      "正文/人物设定.md": "# 人物设定\n",
       "正文/长夜行/第0001章.md": "# 长夜行\n",
       "书名/正文/第0001章.md": "# 书名布局\n",
     });
 
+    // README、设定等非 `第N章` 命名的 .md 不是章节。
     expect(await listChapterPaths(realm, "正文")).toEqual(["正文/第0001章_开篇.md", "正文/第0002章_回声.md"]);
     const sources = await listAudiobookSources(realm);
     expect(sources.map((source) => source.bookRoot)).toEqual(["正文", "书名", "正文/长夜行"].sort((a, b) => a.localeCompare(b, "zh-Hans-CN")));
+  });
+
+  it("根级目录必须自带 正文/ 才算书籍", async () => {
+    const { realm } = memoryRealm({
+      "正文/第0001章_开篇.md": "# 正文\n",
+      "书名/正文/第0001章.md": "# 书名布局\n",
+      "书名/第0002章.md": "# 根级章节不应被发现\n",
+      "大纲/第0001章.md": "# 大纲不是书\n",
+      "大纲/大纲.md": "# 大纲说明\n",
+    });
+
+    const sources = await listAudiobookSources(realm);
+    expect(sources.map((source) => source.bookRoot)).not.toContain("大纲");
+    expect(sources.map((source) => source.bookRoot)).toEqual(["正文", "书名"].sort((a, b) => a.localeCompare(b, "zh-Hans-CN")));
+    // 根级书目录只认 `<book>/正文/`，直属 `第0002章.md` 被忽略。
+    expect(sources.find((source) => source.bookRoot === "书名")?.chapters).toEqual(["书名/正文/第0001章.md"]);
+    expect(await listChapterPaths(realm, "书名")).toEqual(["书名/正文/第0001章.md"]);
+    await expect(createAudiobookProject(realm, {
+      bookRoot: "大纲", name: "大纲", voice: "alloy", baseUrl: "https://api.example.com/v1", model: "tts-1",
+    })).rejects.toMatchObject({ status: 404 });
   });
 
   it("创建项目写入 schemaVersion 1，密钥字段不能落盘", async () => {
