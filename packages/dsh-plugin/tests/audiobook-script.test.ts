@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { createAudiobookProject } from "../src/services/audiobook-project.js";
+import { createAudiobookProject, saveAudiobookProject } from "../src/services/audiobook-project.js";
 import {
   loadChapterScript,
   parseChapterScript,
@@ -9,7 +9,7 @@ import {
   scriptPathFor,
   segmentId,
 } from "../src/services/audiobook-script.js";
-import { memoryRealm } from "./audiobook-fixtures.js";
+import { CHAPTERS, memoryRealm, SANDBOX_POLICY, SESSION } from "./audiobook-fixtures.js";
 
 const PROJECT_PATH = "有声剧/长夜行/project.json";
 const CHAPTER = "第0001章_开篇";
@@ -149,5 +149,53 @@ describe("脚本持久化边界", () => {
     // 脚本不存在时，overwrite 也按新建处理。
     const created = await saveChapterScript(realm, PROJECT_PATH, chapterScript(), true);
     expect(created.path).toBe(scriptPathFor(PROJECT_PATH, CHAPTER));
+  });
+});
+
+describe("沙箱策略透传", () => {
+  it("保存脚本按当前会话解析策略，并作为第五参传给 writeText", async () => {
+    const { realm, policyRequests, writeCalls } = memoryRealm({});
+
+    await saveChapterScript(realm, PROJECT_PATH, chapterScript(), false);
+
+    expect(policyRequests).toEqual([{ session: SESSION }]);
+    expect(writeCalls).toHaveLength(1);
+    expect(writeCalls[0]?.path).toBe(scriptPathFor(PROJECT_PATH, CHAPTER));
+    expect(writeCalls[0]?.sandboxPolicy).toBe(SANDBOX_POLICY);
+  });
+
+  it("创建与保存项目同样按会话解析策略", async () => {
+    const { realm, policyRequests, writeCalls } = memoryRealm({ ...CHAPTERS });
+
+    const record = await createAudiobookProject(realm, {
+      bookRoot: "正文", name: "长夜行", voice: "alloy", baseUrl: "https://api.example.com/v1", model: "tts-1",
+    });
+    await saveAudiobookProject(realm, record.path, record.project, record.version);
+
+    expect(policyRequests).toEqual([{ session: SESSION }, { session: SESSION }]);
+    expect(writeCalls.map((call) => call.sandboxPolicy)).toEqual([SANDBOX_POLICY, SANDBOX_POLICY]);
+  });
+});
+
+describe("脚本大小上限", () => {
+  it("超过 4 MiB 的脚本在写入前返回 413 且不落盘", async () => {
+    const { realm, writes, writeCalls, policyRequests } = memoryRealm({});
+    const oversizedText = "雨".repeat(1_500_000);
+    const oversized = {
+      ...chapterScript(),
+      segments: [{
+        id: segmentId("narration", "narrator", oversizedText, 0),
+        kind: "narration" as const,
+        speakerId: "narrator",
+        text: oversizedText,
+        sourceStart: 0,
+        sourceEnd: oversizedText.length,
+      }],
+    };
+
+    await expect(saveChapterScript(realm, PROJECT_PATH, oversized, true)).rejects.toMatchObject({ status: 413 });
+    expect(writes).toHaveLength(0);
+    expect(writeCalls).toHaveLength(0);
+    expect(policyRequests).toHaveLength(0);
   });
 });

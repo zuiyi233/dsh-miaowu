@@ -264,8 +264,10 @@ function parseScriptDocument(content: string, chapter: string): AudiobookScript 
 }
 
 /**
- * 保存脚本：已有且 `overwrite` 为假返回 409；覆盖按读取到的版本做 CAS，磁盘
- * 版本已变化由 mapFsError 映射为 412；新建用 createIfAbsent，并发创建同样 409。
+ * 保存脚本：超过读取上限（4 MiB）的脚本在落盘前返回 413，避免写出永远读不回的
+ * 文件；已有且 `overwrite` 为假返回 409；覆盖按读取到的版本做 CAS，磁盘版本已
+ * 变化由 mapFsError 映射为 412；新建用 createIfAbsent，并发创建同样 409。写入
+ * 与工作台其他写路径一致，带上当前会话解析出的沙箱策略。
  */
 export async function saveChapterScript(
   realm: WorkspaceRealm,
@@ -276,6 +278,10 @@ export async function saveChapterScript(
   const chapter = chapterName(script.chapter);
   const path = scriptPathFor(projectPath, chapter);
   const normalized = normalizeScript({ ...script, chapter });
+  const serialized = serializeScript(normalized);
+  if (Buffer.byteLength(serialized, "utf8") > SCRIPT_MAX_BYTES) {
+    throw new WorkspaceHttpError(413, "脚本超过 4 MiB 大小限制。");
+  }
   const target = await scriptTarget(realm, projectPath, path);
   const existing = await realm.fs.stat(target);
   if (existing !== undefined && existing.type !== "file") throw new WorkspaceHttpError(415, "脚本路径不是普通文件。");
@@ -284,7 +290,13 @@ export async function saveChapterScript(
     ? { kind: "createIfAbsent" }
     : { kind: "replaceIfVersion", version: existing.version };
   try {
-    const outcome = await realm.fs.writeText(target, serializeScript(normalized), intent, undefined, undefined);
+    const outcome = await realm.fs.writeText(
+      target,
+      serialized,
+      intent,
+      undefined,
+      realm.sandboxPolicy.resolve({ session: realm.agent.session }),
+    );
     return { script: normalized, path, version: String(outcome.version) };
   } catch (error) {
     const mapped = mapFsError(error);

@@ -15,6 +15,20 @@ import type { WorkspaceRealm } from "../src/workspace-route.js";
 
 const CWD = "/books/demo";
 
+/** 会话桩：`sandboxPolicy.resolve` 的入参断言用同一引用。 */
+export const SESSION = { header: { cwd: CWD } };
+
+/** 策略桩：断言 `writeText` 第五参收到同一引用。 */
+export const SANDBOX_POLICY = { mode: "workspace-write", workspaceRoot: CWD };
+
+/** 一次 `writeText` 调用的记录，策略列为第五参（沙箱策略透传断言用）。 */
+export interface MemoryWrite {
+  readonly path: string;
+  readonly content: string;
+  readonly intent: FsWriteIntent | undefined;
+  readonly sandboxPolicy: unknown;
+}
+
 type MemoryFs = Pick<
   FileSystem,
   "resolve" | "contains" | "stat" | "listDir" | "readBytes" | "writeText" | "processPath"
@@ -25,6 +39,10 @@ export interface MemoryRealm {
   /** 按写入顺序记录的 workspace 相对路径。 */
   readonly writes: string[];
   readonly read: (path: string) => string | undefined;
+  /** `sandboxPolicy.resolve` 收到的请求（按调用顺序）。 */
+  readonly policyRequests: readonly { readonly session?: unknown }[];
+  /** 每次 `writeText` 的入参，含第五参沙箱策略。 */
+  readonly writeCalls: readonly MemoryWrite[];
 }
 
 /** 有声剧各测试复用的两章正文语料。 */
@@ -36,6 +54,14 @@ export const CHAPTERS: Record<string, string> = {
 export function memoryRealm(seed: Record<string, string> = {}): MemoryRealm {
   const files = new Map<string, { content: string; version: string }>();
   const writes: string[] = [];
+  const writeCalls: MemoryWrite[] = [];
+  const policyRequests: { session?: unknown }[] = [];
+  const sandboxPolicy = {
+    resolve: (request: { session?: unknown } = {}): typeof SANDBOX_POLICY => {
+      policyRequests.push(request);
+      return SANDBOX_POLICY;
+    },
+  };
   let clock = 0;
   const next = (): FsVersion => `v${String(++clock)}` as FsVersion;
   for (const [path, content] of Object.entries(seed)) files.set(path, { content, version: String(next()) });
@@ -77,12 +103,13 @@ export function memoryRealm(seed: Record<string, string> = {}): MemoryRealm {
       if (file === undefined) throw new FsError("读不到文件", "FS_NOT_FOUND");
       return new TextEncoder().encode(file.content);
     },
-    writeText: async (target: FsTarget, content: string, expected?: FsWriteIntent): Promise<FsWriteOutcome> => {
+    writeText: async (target: FsTarget, content: string, expected?: FsWriteIntent, _signal?: AbortSignal, policy?: unknown): Promise<FsWriteOutcome> => {
       const current = files.get(target.displayPath);
       if (expected?.kind === "createIfAbsent" && current !== undefined) throw new FsError("文件已存在", "FS_NOT_OBSERVED");
       if (expected?.kind === "replaceIfVersion" && (current === undefined || current.version !== String(expected.version))) {
         throw new FsError("版本已过期", "FS_STALE_VERSION");
       }
+      writeCalls.push({ path: target.displayPath, content, intent: expected, sandboxPolicy: policy });
       const version = String(next());
       files.set(target.displayPath, { content, version });
       writes.push(target.displayPath);
@@ -91,8 +118,16 @@ export function memoryRealm(seed: Record<string, string> = {}): MemoryRealm {
     processPath: (target: FsTarget): string => target.displayPath,
   } as unknown as MemoryFs;
   return {
-    realm: { fs: fs as FileSystem, cwd: CWD, root: { targetKey: "" as FsTarget["targetKey"], displayPath: "" } } as unknown as WorkspaceRealm,
+    realm: {
+      fs: fs as FileSystem,
+      cwd: CWD,
+      root: { targetKey: "" as FsTarget["targetKey"], displayPath: "" },
+      agent: { session: SESSION },
+      sandboxPolicy,
+    } as unknown as WorkspaceRealm,
     writes,
     read: (path) => files.get(path)?.content,
+    policyRequests,
+    writeCalls,
   };
 }

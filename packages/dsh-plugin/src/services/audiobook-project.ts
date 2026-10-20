@@ -350,7 +350,13 @@ export async function createAudiobookProject(realm: WorkspaceRealm, input: Audio
   const path = projectPathFor(name);
   const target = await resolveInside(realm, path);
   try {
-    const outcome = await realm.fs.writeText(target, serializeProject(project), { kind: "createIfAbsent" }, undefined, undefined);
+    const outcome = await realm.fs.writeText(
+      target,
+      serializeProject(project),
+      { kind: "createIfAbsent" },
+      undefined,
+      realm.sandboxPolicy.resolve({ session: realm.agent.session }),
+    );
     return { project, path, version: String(outcome.version) };
   } catch (error) {
     const mapped = mapFsError(error);
@@ -391,7 +397,7 @@ export async function saveAudiobookProject(
       serializeProject(normalized),
       { kind: "replaceIfVersion", version: version as FsVersion },
       undefined,
-      undefined,
+      realm.sandboxPolicy.resolve({ session: realm.agent.session }),
     );
     return { project: normalized, path: resolved.path, version: String(outcome.version) };
   } catch (error) {
