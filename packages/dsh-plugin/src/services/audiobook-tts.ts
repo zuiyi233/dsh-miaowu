@@ -60,8 +60,11 @@ function backoffDelayMs(attempt: number): number {
   return exponential + Math.floor(Math.random() * RETRY_JITTER_MS);
 }
 
-/** `Retry-After` 支持秒数与 HTTP 日期，上限 10s；无法解析时交给指数退避。 */
-function parseRetryAfterMs(header: string | null, now: number = Date.now()): number | undefined {
+/**
+ * `Retry-After` 支持秒数与 HTTP 日期，上限 10s；无法解析时交给指数退避。
+ * 导出仅为测试直接覆盖解析与封顶逻辑，生产调用方不需要它。
+ */
+export function parseRetryAfterMs(header: string | null, now: number = Date.now()): number | undefined {
   const value = header?.trim() ?? "";
   if (value === "") return undefined;
   if (/^\d+$/u.test(value)) return Math.min(Number(value) * 1_000, MAX_RETRY_AFTER_MS);

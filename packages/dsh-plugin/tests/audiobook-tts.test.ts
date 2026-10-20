@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { WorkspaceHttpError } from "../src/workspace-route.js";
-import { buildTtsRequest, OpenAiCompatibleTtsClient, type TtsFetch, type TtsRequest } from "../src/services/audiobook-tts.js";
+import {
+  buildTtsRequest,
+  OpenAiCompatibleTtsClient,
+  parseRetryAfterMs,
+  type TtsFetch,
+  type TtsRequest,
+} from "../src/services/audiobook-tts.js";
 
 const CONFIG = {
   baseUrl: "https://api.example.com/v1/",
@@ -44,6 +50,47 @@ async function failure(promise: Promise<unknown>): Promise<WorkspaceHttpError> {
   }
   throw new Error("预期抛出 WorkspaceHttpError");
 }
+
+async function rejectionReason(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+  throw new Error("预期 promise 被拒绝");
+}
+
+function expectAbortError(reason: unknown): void {
+  // 调用方取消的 reason 是 DOMException，退避 sleep 抛的是 Node 自带的 AbortError，
+  // 两者都只按 name 判定；关键是它不能是 502 的 WorkspaceHttpError。
+  const name = typeof reason === "object" && reason !== null ? (reason as { name?: unknown }).name : undefined;
+  expect(name).toBe("AbortError");
+  expect(reason).not.toBeInstanceOf(WorkspaceHttpError);
+}
+
+describe("parseRetryAfterMs", () => {
+  const NOW = Date.UTC(2026, 9, 21, 12, 0, 0);
+
+  it("解析秒数并封顶 10s", () => {
+    expect(parseRetryAfterMs("0")).toBe(0);
+    expect(parseRetryAfterMs("2")).toBe(2_000);
+    expect(parseRetryAfterMs(" 3 ")).toBe(3_000);
+    expect(parseRetryAfterMs("60")).toBe(10_000);
+    expect(parseRetryAfterMs("999999999999999999999")).toBe(10_000);
+  });
+
+  it("解析 HTTP 日期并夹到 [0, 10s]", () => {
+    expect(parseRetryAfterMs(new Date(NOW + 3_000).toUTCString(), NOW)).toBe(3_000);
+    expect(parseRetryAfterMs(new Date(NOW - 3_000).toUTCString(), NOW)).toBe(0);
+    expect(parseRetryAfterMs(new Date(NOW + 60_000).toUTCString(), NOW)).toBe(10_000);
+  });
+
+  it("空值或不可解析时交给指数退避", () => {
+    expect(parseRetryAfterMs(null)).toBeUndefined();
+    expect(parseRetryAfterMs("   ")).toBeUndefined();
+    expect(parseRetryAfterMs("later")).toBeUndefined();
+  });
+});
 
 describe("buildTtsRequest", () => {
   it("只发送标准字段，Authorization 只放在请求头", () => {
@@ -89,7 +136,7 @@ describe("buildTtsRequest", () => {
 describe("OpenAiCompatibleTtsClient", () => {
   it("429 重试后成功，4xx 不重试", async () => {
     const responses = [
-      new Response("busy", { status: 429 }),
+      new Response("busy", { status: 429, headers: { "retry-after": "0" } }),
       audioResponse([1, 2]),
     ];
     const fetchImpl = vi.fn(async () => responses.shift()!);
@@ -137,24 +184,98 @@ describe("OpenAiCompatibleTtsClient", () => {
     const error = await failure(client.synthesize(REQUEST));
 
     expect(error).toMatchObject({ status: 502 });
-    expect(error.message).toContain("3");
+    expect(error.message).toContain("第 3 次尝试");
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
-  it("请求携带 redirect: error 与合并后的超时信号", async () => {
-    const fetchImpl = vi.fn<TtsFetch>(async () => audioResponse([1]));
-    const client = new OpenAiCompatibleTtsClient({ fetchImpl, timeoutMs: 1000 });
+  it("请求携带 redirect: error，调用方取消合并进请求信号并中途生效", async () => {
     const caller = new AbortController();
+    let notifyStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      notifyStarted = resolve;
+    });
+    const fetchImpl = vi.fn<TtsFetch>((_url, init) => {
+      notifyStarted();
+      const requestSignal = init.signal;
+      if (requestSignal === null || requestSignal === undefined) throw new Error("请求缺少取消信号");
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal.addEventListener("abort", () => reject(requestSignal.reason), { once: true });
+      });
+    });
+    const client = new OpenAiCompatibleTtsClient({ fetchImpl, timeoutMs: 60_000 });
 
-    await client.synthesize(REQUEST, caller.signal);
-
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const pending = rejectionReason(client.synthesize(REQUEST, caller.signal));
+    await started;
     const call = fetchImpl.mock.calls[0]!;
+    const requestSignal = call[1]?.signal;
     expect(call[0]).toBe("https://api.example.com/v1/audio/speech");
     expect(call[1]?.redirect).toBe("error");
     expect(call[1]?.method).toBe("POST");
-    expect(call[1]?.signal).toBeInstanceOf(AbortSignal);
+    expect(requestSignal).toBeInstanceOf(AbortSignal);
+    // 关键判据：传给 fetch 的必须是合并信号，而不是调用方信号本身。
+    expect(requestSignal).not.toBe(caller.signal);
+    expect(requestSignal?.aborted).toBe(false);
+
     caller.abort();
+
+    const reason = await pending;
+    expectAbortError(reason);
+    expect(requestSignal?.aborted).toBe(true);
+    expect(requestSignal?.reason).toBe(reason);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("退避等待期间取消也以 AbortError 结束，不折成 502", async () => {
+    const caller = new AbortController();
+    const fetchImpl = vi.fn<TtsFetch>(async () =>
+      new Response("busy", { status: 429, headers: { "retry-after": "10" } }));
+    const client = new OpenAiCompatibleTtsClient({ fetchImpl, timeoutMs: 5_000 });
+
+    const pending = rejectionReason(client.synthesize(REQUEST, caller.signal));
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+    // 让 synthesize 进入 10s 退避 sleep，再在等待期间取消。
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    caller.abort();
+
+    expectAbortError(await pending);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("Retry-After 秒数优先于指数退避", async () => {
+    let calls = 0;
+    const fetchImpl = vi.fn<TtsFetch>(async () => {
+      calls += 1;
+      return calls === 1
+        ? new Response("busy", { status: 429, headers: { "retry-after": "1" } })
+        : audioResponse([7]);
+    });
+    const client = new OpenAiCompatibleTtsClient({ fetchImpl, timeoutMs: 5_000 });
+
+    const startedAt = performance.now();
+    const bytes = await client.synthesize(REQUEST);
+    const elapsed = performance.now() - startedAt;
+
+    expect(Array.from(bytes)).toEqual([7]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    // 指数退避首轮最多 500 + 250ms；>=900ms 只可能来自 Retry-After: 1。
+    expect(elapsed, "Retry-After: 1 应等待约 1s，而非 500–749ms 的指数退避").toBeGreaterThanOrEqual(900);
+  });
+
+  it("content-length 超限时在读体前拒绝并释放连接", async () => {
+    const response = new Response(new Uint8Array(1024), {
+      status: 200,
+      headers: { "content-type": "audio/mpeg", "content-length": "1024" },
+    });
+    const read = vi.spyOn(response, "arrayBuffer");
+    const cancel = vi.spyOn(response.body!, "cancel");
+    const fetchImpl = vi.fn<TtsFetch>(async () => response);
+    const client = new OpenAiCompatibleTtsClient({ fetchImpl, timeoutMs: 1_000, maxBytes: 8 });
+
+    await expect(client.synthesize(REQUEST)).rejects.toMatchObject({ status: 502 });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(read).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalled();
   });
 
   it("错误信息包含主机与状态，但不含密钥或完整 URL", async () => {
