@@ -1,8 +1,8 @@
-import type { FsTarget } from "@deepseek-ai/dsh-fs";
+import { FsError, type FsTarget } from "@deepseek-ai/dsh-fs";
 import { describe, expect, it, vi } from "vitest";
 import type { WorkspaceRealm } from "../src/workspace-route.js";
 import { memoryBinaryFileStore } from "../src/services/audiobook-binary.js";
-import { segmentAudioPath, ttsCacheKey, writeCachedSegment } from "../src/services/audiobook-cache.js";
+import { segmentAudioPath, segmentMetaPath, ttsCacheKey, writeCachedSegment } from "../src/services/audiobook-cache.js";
 import {
   AUDIOBOOK_JOB_ROOT,
   type AudiobookJob,
@@ -159,6 +159,31 @@ it("TTS 失败段被记录，不写该段缓存", async () => {
   expect(binary.files.size).toBe(0);
 });
 
+it("单段失败时保留已完成段，只为失败段记错且不写其缓存", async () => {
+  const { realm, read } = fixtureWithScript();
+  const binary = memoryBinaryFileStore();
+  const fetchImpl = vi.fn(async (_url: string, init: RequestInit): Promise<Response> => {
+    const body = JSON.parse(String(init.body)) as { readonly input?: string };
+    if (body.input === "世界。") return new Response("bad", { status: 400 });
+    return new Response(new Uint8Array([1, 2]), { status: 200, headers: { "content-type": "audio/mpeg" } });
+  });
+  const runtime = runtimeFor(new OpenAiCompatibleTtsClient({ fetchImpl }), binary);
+  const record = await loadAudiobookProject(realm, PROJECT_PATH);
+  const created = await createChapterJob(realm, record, CHAPTER, runtime);
+
+  const done = await runChapterJob(realm, created.job.id, runtime);
+
+  expect(done.status).toBe("failed");
+  expect(done.completedSegments).toBe(1);
+  expect(done.actualRequests).toBe(1);
+  expect(done.failedSegments.map((failure) => failure.segmentId)).toEqual(["s-2"]);
+  expect(binary.files.has(segmentAudioPath(FIRST_KEY, "mp3"))).toBe(true);
+  expect(binary.files.has(segmentAudioPath(SECOND_KEY, "mp3"))).toBe(false);
+  expect(read(segmentMetaPath(FIRST_KEY))).toBeDefined();
+  expect(read(segmentMetaPath(SECOND_KEY))).toBeUndefined();
+  expect((await loadAudiobookJob(realm, created.job.id)).job.completedSegments).toBe(1);
+});
+
 it("planChapterJob 统计缓存命中，成本只计未命中", async () => {
   const { realm, writes } = fixtureWithScript();
   const binary = memoryBinaryFileStore();
@@ -241,6 +266,25 @@ it("同一章节已有排队任务时拒绝再次创建，完成后允许新任�
   expect(await listAudiobookJobs(realm)).toHaveLength(2);
 });
 
+it("并发创建同一项目章节任务只成功一个", async () => {
+  const { realm, writes } = fixtureWithScript();
+  const binary = memoryBinaryFileStore();
+  const runtime = runtimeFor(unusedTts, binary);
+  const record = await loadAudiobookProject(realm, PROJECT_PATH);
+
+  const results = await Promise.allSettled([
+    createChapterJob(realm, record, CHAPTER, runtime),
+    createChapterJob(realm, record, CHAPTER, runtime),
+  ]);
+
+  expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+  const rejected = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+  expect(rejected).toHaveLength(1);
+  expect(rejected[0]?.reason).toMatchObject({ status: 409 });
+  expect(writes.filter((path) => path.startsWith(`${AUDIOBOOK_JOB_ROOT}/`))).toHaveLength(1);
+  expect(await listAudiobookJobs(realm)).toHaveLength(1);
+});
+
 it("取消后当前段完成、后续段不再请求，状态暂停且保留缓存", async () => {
   const { realm } = fixtureWithScript();
   const binary = memoryBinaryFileStore();
@@ -306,6 +350,38 @@ it("任务逐段原子持久化：每次写入都是 CAS 且 JSON 可解析、�
   expect(jobWrites.every((call) => call.sandboxPolicy === SANDBOX_POLICY)).toBe(true);
   expect(policyRequests).toHaveLength(writeCalls.length);
   expect(jobWrites.every((call) => !call.content.includes(SECRET))).toBe(true);
+});
+
+it("任务文件 CAS 冲突时 runChapterJob 返回 409，原文件内容不变", async () => {
+  const fixture = fixtureWithScript();
+  const { realm } = fixture;
+  const binary = memoryBinaryFileStore();
+  const runtime = runtimeFor(new OpenAiCompatibleTtsClient({ fetchImpl: audioFetch() }), binary);
+  const record = await loadAudiobookProject(realm, PROJECT_PATH);
+  const created = await createChapterJob(realm, record, CHAPTER, runtime);
+  const jobPath = `${AUDIOBOOK_JOB_ROOT}/${created.job.id}.json`;
+  const before = fixture.read(jobPath);
+  expect(before).toBeDefined();
+
+  const original = realm.fs.writeText;
+  let injected = false;
+  realm.fs.writeText = async (target, content, intent, signal, policy) => {
+    if (!injected && target.displayPath.startsWith(`${AUDIOBOOK_JOB_ROOT}/`) && intent?.kind === "replaceIfVersion") {
+      injected = true;
+      throw new FsError("stale", "FS_STALE_VERSION");
+    }
+    return await original.call(realm.fs, target, content, intent, signal, policy);
+  };
+  try {
+    await expect(runChapterJob(realm, created.job.id, runtime)).rejects.toMatchObject({ status: 409 });
+  } finally {
+    realm.fs.writeText = original;
+  }
+
+  expect(injected).toBe(true);
+  expect(fixture.read(jobPath)).toBe(before);
+  expect(binary.files.size).toBe(0);
+  expect((await loadAudiobookJob(realm, created.job.id)).job.status).toBe("queued");
 });
 
 describe("loadAudiobookJob", () => {

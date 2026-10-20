@@ -54,6 +54,26 @@ export interface AudiobookJobRuntime {
 /** 模块级取消标记：只有当前进程内的执行者能看到，消费后即删除。 */
 const cancellations = new Map<string, boolean>();
 
+/** 创建任务的进程内串行队列，键为 `项目路径\0章节`；结算后删键，长驻进程不累积。 */
+const createQueues = new Map<string, Promise<void>>();
+
+/**
+ * 在同一“项目+章节”上串行执行创建：并发调用排在上一笔结算之后，使“列出活动
+ * 任务 → 写入新任务”在单宿主进程内成为临界区。任务 ID 随机、新文件走
+ * `createIfAbsent`，文件系统层面拦不住两笔并发创建同时通过判据。上一笔无论
+ * 成败队列都继续推进，任务自身的错误原样抛给调用方。
+ */
+function serializeCreate<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const previous = createQueues.get(key) ?? Promise.resolve();
+  const result = previous.then(task);
+  const settled = result.then(() => undefined, () => undefined);
+  createQueues.set(key, settled);
+  void settled.then(() => {
+    if (createQueues.get(key) === settled) createQueues.delete(key);
+  });
+  return result;
+}
+
 function invalidJob(): WorkspaceHttpError {
   return new WorkspaceHttpError(422, "有声剧任务格式无效。");
 }
@@ -207,6 +227,8 @@ export async function planChapterJob(
 /**
  * 创建章节任务：脚本缺失 409；预估后超过单章字符上限 409；同一项目+章节已有
  * 排队/运行/暂停任务时 409。新任务状态 queued、计数归零，成本取预估未命中。
+ * “列出活动任务 → 写入新任务”整段按项目+章节在进程内串行，并发创建只有一个
+ * 能通过判据。
  */
 export async function createChapterJob(
   realm: WorkspaceRealm,
@@ -214,35 +236,37 @@ export async function createChapterJob(
   chapter: string,
   runtime: AudiobookJobRuntime,
 ): Promise<AudiobookJobRecord> {
-  const scriptRecord = await loadChapterScript(realm, record.path, chapter);
-  if (scriptRecord === undefined) throw new WorkspaceHttpError(409, "章节脚本不存在，请先生成脚本。");
-  const script = scriptRecord.script;
-  const estimate = await planChapterJob(realm, record, script, runtime);
-  if (estimate.chars > record.project.tts.maxCharsPerChapter) {
-    throw new WorkspaceHttpError(409, `章节字符数超过单章上限（${String(record.project.tts.maxCharsPerChapter)}）。`);
-  }
-  const active = (await listAudiobookJobs(realm)).some((job) =>
-    job.projectPath === record.path && job.chapter === script.chapter && ACTIVE_STATUSES.has(job.status));
-  if (active) throw new WorkspaceHttpError(409, "该章节已有排队或进行中的有声剧任务。");
-  const now = runtime.now();
-  const job: AudiobookJob = {
-    schemaVersion: AUDIOBOOK_SCHEMA_VERSION,
-    id: randomUUID(),
-    projectPath: record.path,
-    chapter: script.chapter,
-    sourcePath: script.sourcePath,
-    status: "queued",
-    totalSegments: estimate.segments,
-    completedSegments: 0,
-    failedSegments: [],
-    chars: estimate.chars,
-    estimatedCost: estimate.estimatedCost,
-    actualRequests: 0,
-    createdAt: now,
-    updatedAt: now,
-    outputPath: null,
-  };
-  return await persistNewJob(realm, job);
+  return await serializeCreate(`${record.path}\0${chapter.trim()}`, async () => {
+    const scriptRecord = await loadChapterScript(realm, record.path, chapter);
+    if (scriptRecord === undefined) throw new WorkspaceHttpError(409, "章节脚本不存在，请先生成脚本。");
+    const script = scriptRecord.script;
+    const estimate = await planChapterJob(realm, record, script, runtime);
+    if (estimate.chars > record.project.tts.maxCharsPerChapter) {
+      throw new WorkspaceHttpError(409, `章节字符数超过单章上限（${String(record.project.tts.maxCharsPerChapter)}）。`);
+    }
+    const active = (await listAudiobookJobs(realm)).some((job) =>
+      job.projectPath === record.path && job.chapter === script.chapter && ACTIVE_STATUSES.has(job.status));
+    if (active) throw new WorkspaceHttpError(409, "该章节已有排队或进行中的有声剧任务。");
+    const now = runtime.now();
+    const job: AudiobookJob = {
+      schemaVersion: AUDIOBOOK_SCHEMA_VERSION,
+      id: randomUUID(),
+      projectPath: record.path,
+      chapter: script.chapter,
+      sourcePath: script.sourcePath,
+      status: "queued",
+      totalSegments: estimate.segments,
+      completedSegments: 0,
+      failedSegments: [],
+      chars: estimate.chars,
+      estimatedCost: estimate.estimatedCost,
+      actualRequests: 0,
+      createdAt: now,
+      updatedAt: now,
+      outputPath: null,
+    };
+    return await persistNewJob(realm, job);
+  });
 }
 
 /**
