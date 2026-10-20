@@ -1,0 +1,74 @@
+import { describe, expect, it } from "vitest";
+import {
+  createAudiobookProject,
+  listAudiobookSources,
+  listChapterPaths,
+  loadAudiobookProject,
+  saveAudiobookProject,
+  validateTtsBaseUrl,
+} from "../src/services/audiobook-project.js";
+import { CHAPTERS, memoryRealm } from "./audiobook-fixtures.js";
+
+describe("audiobook project", () => {
+  it("发现正文直属章节与 正文/书名 章节", async () => {
+    const { realm } = memoryRealm({
+      ...CHAPTERS,
+      "正文/长夜行/第0001章.md": "# 长夜行\n",
+      "书名/正文/第0001章.md": "# 书名布局\n",
+    });
+
+    expect(await listChapterPaths(realm, "正文")).toEqual(["正文/第0001章_开篇.md", "正文/第0002章_回声.md"]);
+    const sources = await listAudiobookSources(realm);
+    expect(sources.map((source) => source.bookRoot)).toEqual(["正文", "书名", "正文/长夜行"].sort((a, b) => a.localeCompare(b, "zh-Hans-CN")));
+  });
+
+  it("创建项目写入 schemaVersion 1，密钥字段不能落盘", async () => {
+    const { realm, read } = memoryRealm(CHAPTERS);
+
+    const record = await createAudiobookProject(realm, {
+      bookRoot: "正文",
+      name: "长夜行",
+      voice: "alloy",
+      baseUrl: "https://api.example.com/v1",
+      model: "tts-1",
+    });
+
+    expect(record.path).toBe("有声剧/长夜行/project.json");
+    const saved = JSON.parse(read(record.path) ?? "{}") as Record<string, unknown>;
+    expect(saved.schemaVersion).toBe(1);
+    expect(JSON.stringify(saved)).not.toContain("apiKey");
+    expect(record.project.cast).toEqual([{ id: "narrator", name: "旁白", kind: "narrator", voice: "alloy" }]);
+    expect(record.project.tts.baseUrl).toBe("https://api.example.com/v1");
+  });
+
+  it("保存项目使用 baseVersion CAS，旧版本返回 412", async () => {
+    const { realm } = memoryRealm(CHAPTERS);
+    const created = await createAudiobookProject(realm, {
+      bookRoot: "正文", name: "长夜行", voice: "alloy", baseUrl: "https://api.example.com/v1", model: "tts-1",
+    });
+    const next = { ...created.project, cast: [{ ...created.project.cast[0]!, voice: "verse" }] };
+    const saved = await saveAudiobookProject(realm, created.path, next, created.version);
+    expect(saved.project.cast[0]?.voice).toBe("verse");
+    await expect(saveAudiobookProject(realm, created.path, next, created.version)).rejects.toMatchObject({ status: 412 });
+  });
+
+  it("加载项目只接受 有声剧/ 下 schemaVersion 1 的文件", async () => {
+    const { realm } = memoryRealm({ ...CHAPTERS, "有声剧/旧项目/project.json": JSON.stringify({ schemaVersion: 2 }) });
+    const created = await createAudiobookProject(realm, {
+      bookRoot: "正文", name: "长夜行", voice: "alloy", baseUrl: "https://api.example.com/v1", model: "tts-1",
+    });
+
+    const loaded = await loadAudiobookProject(realm, created.path);
+    expect(loaded.project.source).toEqual({ bookRoot: "正文", chapters: ["正文/第0001章_开篇.md", "正文/第0002章_回声.md"] });
+    await expect(loadAudiobookProject(realm, "正文/project.json")).rejects.toMatchObject({ status: 403 });
+    await expect(loadAudiobookProject(realm, "有声剧/旧项目/project.json")).rejects.toMatchObject({ status: 422 });
+  });
+
+  it("拒绝非 loopback 明文端点与 URL 凭证", () => {
+    expect(validateTtsBaseUrl("https://api.example.com/v1")).toBe("https://api.example.com/v1");
+    expect(validateTtsBaseUrl("http://127.0.0.1:8080/v1")).toBe("http://127.0.0.1:8080/v1");
+    expect(() => validateTtsBaseUrl("http://api.example.com/v1")).toThrow(/https/u);
+    expect(() => validateTtsBaseUrl("https://user:pass@api.example.com/v1")).toThrow(/凭证/u);
+    expect(() => validateTtsBaseUrl("https://api.example.com/v1?x=1")).toThrow(/query/u);
+  });
+});
