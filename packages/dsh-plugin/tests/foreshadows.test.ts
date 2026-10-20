@@ -420,7 +420,7 @@ describe("foreshadows: import from A3 sidecar", () => {
 
 describe("foreshadows: reminders and snooze", () => {
   it("returns due items per chapter and hides snoozed until expiry", async () => {
-    const { fs, cwd } = isolatedCase();
+    const { fs, files, cwd } = isolatedCase();
     const dueNow = await createItem(fs, cwd, { book: "斗破", title: "戒指", plannedPayoffChapter: "ch2" });
     await callForeshadows(fs, cwd, "POST", `/oh-story/foreshadows/${dueNow.id}/status`, { status: "planted" });
     const anytime = await createItem(fs, cwd, { book: "斗破", title: "退婚" });
@@ -467,6 +467,9 @@ describe("foreshadows: reminders and snooze", () => {
 
     const missing = await callForeshadows(fs, cwd, "POST", "/oh-story/foreshadows/snooze", { id: "nope" });
     expect(missing.status).toBe(404);
+    const storeRoot = cwd.replace(/^\/+/u, "");
+    expect(files.get(`${storeRoot}/.oh-story/foreshadows.json`)?.content).toContain('"schemaVersion": 1');
+    expect(files.get(`${storeRoot}/.oh-story/foreshadows-snooze.json`)?.content).toContain('"schemaVersion": 1');
   });
 });
 

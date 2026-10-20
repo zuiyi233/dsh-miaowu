@@ -89,6 +89,7 @@ Boundaries and protocols for each workbench are in the [architecture notes](docs
 The capabilities below are provided by this repository (`dsh-miaowu`) on top of the upstream four workbenches; upstream `oh-story-dsh` does not have them. Search, history, tasks, backup, foreshadows, bookshelf and vault state lives by default in JSON/JSONL files under the workspace `.oh-story/` directory, with no second database, agent runtime or session store; DSH still owns sessions, models, providers, permissions and run records.
 
 - **Full-text search**: CJK text and pinyin channels with line-level hits that carry path, line and offset; the index lives in `.oh-story/index/`, refreshes lazily by file version on query and can be rebuilt in full.
+- **Self-diagnostics**: the 自诊断 panel in the novel / short-drama workbench reports six groups (host, runtime, workspace, data, credentials, integration) as P0/P1/P2. The report is read-only; support bundles require explicit confirmation and are redacted by default. Confirmed repairs cover index rebuild, backup rerun and expired-lock inspection, while state-format migrations back up first and can be rolled back.
 - **Version history / rollback / audit / line annotations**: the latest 50 snapshots per file, rollback guarded by version checks against concurrent edits; `audit.jsonl` records writes, and annotations re-anchor by quote, marking `moved` or `stale` instead of being lost.
 - **Candidate staging**: the agent registers suggestions with `oh_story_task stage_candidate` without writing files; you confirm, amend or apply them in the "任务与候选" panel.
 - **run / checkpoint / resume**: long jobs track step progress and checkpoints and resume from the most recent paused or failed run (built-in recipes: novel-chapter, drama-batch, game-content).
@@ -101,6 +102,7 @@ The capabilities below are provided by this repository (`dsh-miaowu`) on top of 
 - **喵呜小说工坊 preset**: the full standard-mode tool surface plus a Chinese fiction-writing persona, installed from a source checkout into DSH's Agent preset directory.
 - **Live file-tree refresh**: files written by role subagents, background jobs and scripts are re-listed quietly about every 4 seconds while the Session runs; hidden pages and in-flight requests are skipped.
 - **Per-session / per-workspace layout persistence**: three-pane and floating layouts are stored per session and the workbench open/closed choice per workspace; reset lives in layout settings.
+- **Upstream sync skeleton**: `pnpm sync:upstream` is a dry run by default and compares the four knowledge pins plus the declared DSH range; `--apply` requires a clean tree, calls the existing asset scripts and never commits, pushes, tags or publishes. The report carries the rollback command.
 
 See [docs/FORK-FEATURES.md](docs/FORK-FEATURES.md) for enablement, optional status and the UI/tool boundary of each capability.
 

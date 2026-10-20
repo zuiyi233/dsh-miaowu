@@ -18,6 +18,7 @@ import {
   registerWorkspaceExtension,
   type WorkspaceWriteEvent,
 } from "./registry.js";
+import { STATE_SCHEMA_VERSION } from "./state-contract.js";
 
 /**
  * 功能 A1:版本化 + 审计 + 行级批注.
@@ -383,7 +384,7 @@ async function loadAnnotationMap(realm: WorkspaceRealm): Promise<Record<string, 
 async function saveAnnotationMap(realm: WorkspaceRealm, map: Record<string, Annotation[]>): Promise<void> {
   const target = await resolveStoreTarget(realm, ANNOTATIONS_NAME);
   if (target === undefined) return;
-  await realm.fs.writeText(target, JSON.stringify(map), undefined, undefined, undefined);
+  await realm.fs.writeText(target, JSON.stringify({ schemaVersion: STATE_SCHEMA_VERSION, ...map }), undefined, undefined, undefined);
 }
 
 export async function listAnnotations(realm: WorkspaceRealm, path: string): Promise<Annotation[]> {

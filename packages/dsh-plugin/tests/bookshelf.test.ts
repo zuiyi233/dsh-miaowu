@@ -329,6 +329,7 @@ describe("损坏 shelf.json 降级为空并允许重建", () => {
       "video:recap1",
     ]);
     expect(store.read(".oh-story/shelf.json")).toContain("novel:仙剑");
+    expect(store.read(".oh-story/shelf.json")).toContain('"schemaVersion": 1');
   });
 });
 

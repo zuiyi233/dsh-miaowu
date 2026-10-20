@@ -4,7 +4,7 @@ import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "
 import { realpathSync } from "node:fs";
 import { createServer as createHttpServer, request as httpRequest, type Server as HttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Locator, type Page } from "@playwright/test";
@@ -34,6 +34,25 @@ export function listTarEntries(bytes: Uint8Array): string[] {
     offset += 512 + Math.ceil(size / 512) * 512;
   }
   return entries;
+}
+
+/** Recursively test parsed strings; JSON escaping cannot hide a Windows path here. */
+export function payloadContains(value: unknown, needles: readonly string[]): boolean {
+  if (typeof value === "string") return needles.some((needle) => needle !== "" && value.includes(needle));
+  if (Array.isArray(value)) return value.some((item) => payloadContains(item, needles));
+  if (value !== null && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).some((item) => payloadContains(item, needles));
+  }
+  return false;
+}
+
+export function payloadMatches(value: unknown, pattern: RegExp): boolean {
+  if (typeof value === "string") return pattern.test(value);
+  if (Array.isArray(value)) return value.some((item) => payloadMatches(item, pattern));
+  if (value !== null && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).some((item) => payloadMatches(item, pattern));
+  }
+  return false;
 }
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -1274,6 +1293,65 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
       || JSON.stringify(generatedVideo.previews.map((preview) => preview.role)) !== JSON.stringify(["source", "edited", "final"])) {
       throw new Error(`Story Session workspace route failed: ${JSON.stringify(storyWorkspacePayload)}`);
     }
+    const diagnosticsResponse = await dshFetch(`${origin}/oh-story/diagnostics?sessionId=${encodeURIComponent(storySession.sessionId)}`);
+    const diagnosticsPayload = await diagnosticsResponse.json() as {
+      readonly readOnly?: boolean;
+      readonly checks?: readonly { readonly id: string; readonly group: string; readonly status: string }[];
+      readonly summary?: { readonly p0?: number; readonly p1?: number; readonly p2?: number };
+    };
+    const diagnosticGroups = ["host", "runtime", "workspace", "data", "credentials", "integration"];
+    if (!diagnosticsResponse.ok || diagnosticsPayload.readOnly !== true
+      || !diagnosticGroups.every((group) => diagnosticsPayload.checks?.some((check) => check.group === group))
+      || diagnosticsPayload.summary?.p0 !== 0
+      || payloadContains(diagnosticsPayload, [storyRoot, homedir()])) {
+      throw new Error(`Packaged diagnostics route failed: ${JSON.stringify({ status: diagnosticsResponse.status, summary: diagnosticsPayload.summary, groups: diagnosticsPayload.checks?.map((check) => check.group) })}`);
+    }
+    const inventoryResponse = await dshFetch(`${origin}/oh-story/state/inventory?sessionId=${encodeURIComponent(storySession.sessionId)}`);
+    const inventoryPayload = await inventoryResponse.json() as {
+      readonly generatedAt?: string;
+      readonly schemaVersion?: number;
+      readonly entries?: readonly { readonly id: string; readonly path: string; readonly status: string }[];
+    };
+    const inventoryEntries = inventoryPayload.entries ?? [];
+    const inventoryById = new Map(inventoryEntries.map((entry) => [entry.id, entry]));
+    const inventoryStatuses = ["ok", "legacy", "newer", "corrupt", "missing", "not-inspected"];
+    const expectedInventoryPaths: readonly (readonly [string, string])[] = [
+      ["shelf", ".oh-story/shelf.json"],
+      ["foreshadows", ".oh-story/foreshadows.json"],
+      ["history", ".oh-story/history/"],
+      ["search-index", ".oh-story/index/"]
+    ];
+    // A fresh workspace legitimately reports most entries as missing; what must not
+    // happen is a real document surfacing as corrupt/newer, or a descriptor wired to
+    // the wrong path. Statuses therefore stay enum-checked rather than fixed.
+    if (!inventoryResponse.ok || inventoryPayload.schemaVersion !== 1
+      || Number.isNaN(Date.parse(inventoryPayload.generatedAt ?? ""))
+      || inventoryEntries.length !== 15
+      || new Set(inventoryEntries.map((entry) => entry.id)).size !== inventoryEntries.length
+      || inventoryEntries.some((entry) => !entry.path.startsWith(".oh-story/") || !inventoryStatuses.includes(entry.status))
+      || expectedInventoryPaths.some(([id, path]) => inventoryById.get(id)?.path !== path)
+      || inventoryEntries.some((entry) => entry.status === "corrupt" || entry.status === "newer")) {
+      throw new Error(`Packaged state inventory route failed: ${JSON.stringify(inventoryPayload)}`);
+    }
+    const bundleWithoutConfirm = await dshFetch(`${origin}/oh-story/diagnostics/bundle?sessionId=${encodeURIComponent(storySession.sessionId)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    });
+    if (bundleWithoutConfirm.status !== 400) {
+      throw new Error(`Support bundle exported without confirmation: ${String(bundleWithoutConfirm.status)}.`);
+    }
+    const bundleResponse = await dshFetch(`${origin}/oh-story/diagnostics/bundle?sessionId=${encodeURIComponent(storySession.sessionId)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: true })
+    });
+    const bundlePayload = await bundleResponse.json() as { readonly redacted?: boolean; readonly logSummary?: { readonly available?: boolean } };
+    if (!bundleResponse.ok || bundlePayload.redacted !== true || bundlePayload.logSummary?.available !== false
+      || payloadContains(bundlePayload, [storyRoot, homedir()])
+      || payloadMatches(bundlePayload, /\bsk-[A-Za-z0-9_-]{8,}/u)) {
+      throw new Error(`Packaged redacted support bundle failed: ${JSON.stringify({ status: bundleResponse.status, redacted: bundlePayload.redacted })}`);
+    }
     const preflightResponse = await dshFetch(`${origin}/oh-story/drama-preflight`);
     const preflightPayload = await preflightResponse.json() as {
       readonly comfyui?: {
@@ -1879,6 +1957,36 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         await page.getByText("当前 workspace 还没有短剧项目。", { exact: false }).waitFor({ state: "visible", timeout: 10_000 });
         await storyTab.click();
         await page.locator(".oh-story-kind").filter({ hasText: "小说" }).waitFor({ state: "visible", timeout: 10_000 });
+        const diagnosticsButton = page.getByRole("button", { name: "自诊断", exact: true });
+        await diagnosticsButton.waitFor({ state: "visible", timeout: 10_000 });
+        await diagnosticsButton.click();
+        const diagnosticsPanel = page.locator(".oh-diag-panel");
+        await diagnosticsPanel.waitFor({ state: "visible", timeout: 10_000 });
+        const diagnosticsMeta = diagnosticsPanel.locator(".oh-diag-meta");
+        await diagnosticsMeta.filter({ hasText: "诊断于" }).waitFor({ state: "visible", timeout: 10_000 });
+        for (const group of ["宿主", "运行时", "工作区", "数据", "凭据", "集成"]) {
+          await diagnosticsPanel.getByRole("heading", { name: group, exact: true }).waitFor({ state: "visible", timeout: 10_000 });
+        }
+        if (await diagnosticsPanel.locator(".oh-diag-error").count() > 0) {
+          throw new Error(`Diagnostics panel rendered an error: ${await diagnosticsPanel.locator(".oh-diag-error").innerText()}`);
+        }
+        const p0Chip = await diagnosticsPanel.locator(".oh-diag-chip[data-kind='p0']").innerText();
+        if (p0Chip !== "P0 0") {
+          throw new Error(`Diagnostics panel reported a P0 in the packaged smoke: ${p0Chip}`);
+        }
+        const panelText = await diagnosticsPanel.innerText();
+        if (panelText.includes(storyRoot) || panelText.includes(homedir())) {
+          throw new Error("Diagnostics panel leaked an absolute workspace or home path.");
+        }
+        const metaBeforeRefresh = await diagnosticsMeta.innerText();
+        await diagnosticsPanel.getByRole("button", { name: "刷新", exact: true }).click();
+        await page.waitForFunction(
+          ({ selector, before }) => document.querySelector(selector)?.textContent !== before,
+          { selector: ".oh-diag-meta", before: metaBeforeRefresh },
+          { timeout: 10_000 }
+        );
+        await diagnosticsButton.click();
+        await diagnosticsPanel.waitFor({ state: "detached", timeout: 10_000 });
       }
       await prepareDemoSurface(page);
       const previewTab = page.getByRole("tab", { name: "预览" });

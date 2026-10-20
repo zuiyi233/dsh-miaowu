@@ -11,8 +11,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- 小说 / 短剧工作台新增「自诊断」面板：按宿主、运行时、工作区、数据、凭据、集成六组检查，用 P0/P1/P2 标出「为什么不能用」；报告只读，支持包必须显式确认并按路径、密钥、会话载荷和绝对路径脱敏。可确认执行的修复只有重建检索索引、重跑全量备份与检查过期锁；过期锁在当前 DSH 文件系统接口没有删除能力时只报告、不代删。
+- `.oh-story` 状态底座：书架、伏笔/抑制、拆书 sidecar 与批注写入 `schemaVersion: 1`；只读盘点列出每类状态的文件数、版本、条目、字节与文档内时间戳；显式迁移先写备份与清单，支持按清单回滚，派生索引、密钥、JSONL、顶层任务数组与不可变备份不参与自动迁移。
+- 新增启动预检：宿主版本未知或超出 `engines.dsh`、Node 低于 24 时发出明确告警，不阻断插件加载，也不静默降级。
+- 新增 `pnpm sync:upstream` 同步工厂骨架：默认 dry-run 对比四套知识资产 pin 与 DSH 声明范围；`--apply` 在干净工作树上调用既有资产脚本，可选 `--verify` 跑全量门禁与打包冒烟；不提交、不推送、不打 tag、不发布，报告带回滚命令。`pnpm test:sync-upstream` 已纳入 `pnpm verify`。
+
 ### Changed
 
+- 客户端内联 CSS 改为构建期 esbuild minify：样式语义不变，浏览器包当前 392,311 字节，继续守住 400,000 字节预算。
 - 发行身份改为 fork 自己的线：发布标签前缀改为 `miaowu-vX.Y.Z`（下一个发布版本起），tarball 名与仓库地址统一为 `dsh-miaowu-dsh-<version>.tgz` 与 `zuiyi233/dsh-miaowu`；发布前先做 fork 源预检，拒绝把上游提交或上游标签当作发布源，并移除只服务上游的恢复工作流。
 - 双语 README 的安装路径按实际发布状态改写：0.1.18 的预构建包与 npm 包都还没发布，推荐从源码构建 0.1.18；最近可用的预构建包 v0.1.16 作为快速试用路径；v0.1.18 的 Release 资产与 npm 安装收进「发布后可用」折叠块。Badge、Releases、Issues、独立 profile 安装与项目表一并指向本 fork，上游只在出处与历史记录中保留。
 - 新增 [docs/FORK-FEATURES.md](docs/FORK-FEATURES.md)，双语 README 增加「Fork 专有能力」一节：全文检索（CJK + 拼音）、版本历史/回滚/审计/行级批注、候选暂存、run/checkpoint/resume、备份三件套、伏笔闭环、书架、可选凭据保险库、`worldbuilding`/`publishing`/`finalize` 三个自有 Skills、ComfyUI 本地接入、喵呜小说工坊预设、运行中文件树刷新与按会话/工作区布局持久化。

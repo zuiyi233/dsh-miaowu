@@ -23,11 +23,25 @@
 | 伏笔闭环 | 小说工作台面板 | 随插件可用 | `.oh-story/foreshadows.json`、`foreshadows-snooze.json` |
 | 书架 | 小说 / 短剧工作台面板 | 随插件可用 | `.oh-story/shelf.json` |
 | 可选凭据保险库 | HTTP 路由，无独立面板 | **默认关闭** | `.oh-story/vault/`；需 `DSH_MIAOWU_VAULT_ENABLED=1` |
+| 自诊断 | 小说 / 短剧工作台「自诊断」面板 + `/oh-story/diagnostics` | 随插件可用 | 六组只读检查、支持包、显式修复；状态盘点见 `.oh-story/` |
 | `worldbuilding` / `publishing` / `finalize` | 三个自有 Skills | 随插件可用 | 通过 Skills 目录发现，`/worldbuilding` 等入口 |
 | ComfyUI 本地接入 | 短剧生产适配器 + `oh_story_comfyui` 工具 | 需外部配置 | 本机或局域网 ComfyUI 服务 + API-format 工作流 |
 | 喵呜小说工坊 | DSH Agent 预设 | 需手动安装 | 源码 checkout 运行 `pnpm --filter @dsh-miaowu/dsh preset:install` |
 | 文件树运行中自动刷新 | 工作台行为 | 随插件可用 | 会话运行期间约每 4 秒安静重列 |
 | 布局持久化 | 工作台行为 | 随插件可用 | 浏览器存储：布局按会话、开合按工作区 |
+
+## 自诊断与状态版本
+
+- 工作台「自诊断」面板调用 `/oh-story/diagnostics`，按宿主、运行时、工作区、数据、凭据、集成六组给出通过 / 注意 / 失败 / 未知，并用 P0（完全不可用）、P1（核心能力受损）、P2（提示）分级。报告只读，不写会话、`workspace.json` 或 `~/.dsh`。
+- 支持包必须显式确认后才导出，默认深度脱敏：只含版本、运行时、顶层结构、状态盘点和诊断结论，不含文件内容、密钥字节、会话载荷或绝对路径。宿主没有官方日志读取接口，因此 `logSummary.available` 为 `false`，不伪造日志摘要。
+- 显式修复只有三类：重建检索索引、重新做全量备份、检查过期锁。锁清理在已安装的 DSH 文件系统接口没有删除能力时只报告、不代删；状态迁移另有独立的计划 / 应用 / 回滚接口，应用前先写备份。
+- 启动预检只读插件与宿主清单：宿主版本未知、超出 `engines.dsh` 或 Node 低于 24 时发出明确告警，不阻断加载，也不静默降级。
+- `.oh-story` 的可变 JSON 文档（书架、伏笔抑制、拆书 sidecar、批注等）写入 `schemaVersion: 1`；历史 / 审计 JSONL、任务顶层数组、检索索引、锁和备份快照保持原格式，按兼容规则读取，不参与 v1 自动迁移。迁移必须显式确认，先备份再写入，可按备份清单回滚。
+
+## 上游同步
+
+- `pnpm sync:upstream` 默认 dry-run：读取四套知识资产的固定 pin，与 `--latest` JSON 或 GitHub release 对比，报告 current / behind / ahead / diverged / unavailable 和 DSH 声明范围状态，不写任何文件。
+- `pnpm sync:upstream --apply --upstream-root <dir>` 要求工作树干净，调用既有 `assets:sync:*` 与 `assets:check`；`--verify` 再跑 `pnpm verify` 与打包冒烟。它不提交、不推送、不打 tag、不发布，报告写到 OS 临时目录并打印回滚命令。回滚只覆盖已跟踪文件，同步新增的未跟踪文件需按报告中的提示手动清理。
 
 ## 检索与编辑
 

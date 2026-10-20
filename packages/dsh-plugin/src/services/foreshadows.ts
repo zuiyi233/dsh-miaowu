@@ -12,6 +12,7 @@ import {
   type WorkspaceRouteOptions,
 } from "../workspace-route.js";
 import { registerWorkspaceExtension } from "./registry.js";
+import { STATE_SCHEMA_VERSION } from "./state-contract.js";
 
 /**
  * D2 伏笔埋设→提醒→回收闭环.
@@ -332,11 +333,11 @@ async function saveJson(realm: WorkspaceRealm, rel: string, payload: unknown): P
 }
 
 export async function saveForeshadows(realm: WorkspaceRealm, items: readonly Foreshadow[]): Promise<void> {
-  await saveJson(realm, FORESHADOWS_FILE, { items });
+  await saveJson(realm, FORESHADOWS_FILE, { schemaVersion: STATE_SCHEMA_VERSION, items });
 }
 
 export async function saveSnoozes(realm: WorkspaceRealm, items: readonly SnoozeRecord[]): Promise<void> {
-  await saveJson(realm, SNOOZE_FILE, { items });
+  await saveJson(realm, SNOOZE_FILE, { schemaVersion: STATE_SCHEMA_VERSION, items });
 }
 
 function asAnalysisInput(value: unknown): AnalysisForeshadowInput | undefined {

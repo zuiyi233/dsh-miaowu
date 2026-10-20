@@ -8,6 +8,7 @@ import "./tasks-feature.js";
 import "./backup-feature.js";
 import "./foreshadows-feature.js";
 import "./bookshelf-feature.js";
+import "./diagnostics-feature.js";
 
 export function registerClientFeatures(): void {
   // Feature modules above register themselves on import; nothing else to mount here.

@@ -14,6 +14,7 @@ import { registerOhStoryProductionTool } from "./production-tool.js";
 import { registerOhStoryTaskTool } from "./task-tool.js";
 import { registerWorkspaceRoute } from "./workspace-route.js";
 import { registerWorkspaceServices } from "./services/index.js";
+import { runStartupPrecheck } from "./services/startup-precheck.js";
 import { assertTrustedWorkspaceAuthority } from "./workspace-request-trust.js";
 
 export { createDramaSkillProvider, createDshMiaowuSkillProvider, createNovelToGameSkillProvider, createOhStorySkillProvider, createVideoRecapSkillProvider, defaultDshMiaowuSkillRoot, dshMiaowuSkillContent, parseBundledSkill } from "./skill-provider.js";
@@ -57,6 +58,7 @@ export async function apply(context: Context, config: Config = {}): Promise<void
   registerOhStoryTaskTool(context);
   await registerOhStoryRoleTool(context);
   registerWorkspaceServices();
+  runStartupPrecheck(context);
   registerWorkspaceRoute(context, { maxBytes: config.editorMaxBytes ?? 2_097_152, trustedHosts });
   // Register the bundled media adapters for this host up front so the first
   // short-drama-produce run has a config to pass; the preflight route repeats

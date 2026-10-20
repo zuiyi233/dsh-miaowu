@@ -11,6 +11,7 @@ import {
   type WorkspaceRouteOptions,
 } from "../workspace-route.js";
 import { registerWorkspaceExtension } from "./registry.js";
+import { STATE_SCHEMA_VERSION } from "./state-contract.js";
 
 /**
  * 功能 D2:书架多作品管理.
@@ -210,7 +211,7 @@ export async function loadShelf(realm: WorkspaceRealm): Promise<ShelfData> {
 export async function saveShelf(realm: WorkspaceRealm, data: ShelfData): Promise<void> {
   const target = await shelfTarget(realm);
   if (target === undefined) return;
-  await realm.fs.writeText(target, JSON.stringify({ entries: data.entries }, null, 2), undefined, undefined, undefined);
+  await realm.fs.writeText(target, JSON.stringify({ schemaVersion: STATE_SCHEMA_VERSION, entries: data.entries }, null, 2), undefined, undefined, undefined);
 }
 
 async function childDirectories(

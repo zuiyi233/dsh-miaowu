@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
-import { build, type Plugin } from "esbuild";
+import { build, transform, type Plugin } from "esbuild";
 
 import { isLocalArtifactPath } from "../packages/dsh-plugin/build-path-policy.js";
 
@@ -51,10 +51,13 @@ const inlineCss: Plugin = {
       path: resolve(args.resolveDir, args.path.slice(0, -"?inline".length)),
       namespace: "inline-css"
     }));
-    builder.onLoad({ filter: /.*/, namespace: "inline-css" }, async (args) => ({
-      contents: await readFile(args.path, "utf8"),
-      loader: "text"
-    }));
+    builder.onLoad({ filter: /.*/, namespace: "inline-css" }, async (args) => {
+      // The text loader embeds the stylesheet verbatim, so minify it here: the
+      // browser bundle's 400 KB budget counts every raw comment and indent.
+      const source = await readFile(args.path, "utf8");
+      const { code } = await transform(source, { loader: "css", minify: true });
+      return { contents: code, loader: "text" };
+    });
   }
 };
 

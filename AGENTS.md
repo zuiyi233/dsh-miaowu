@@ -26,13 +26,13 @@
 
 - 版本号看 `packages/dsh-plugin/package.json`（根 `package.json` 要一致），当前源码 0.1.18。npm 包 `@dsh-miaowu/dsh` **尚未发布**（registry 返回 404），GitHub Release 目前只有 `v0.1.16` 预构建包，0.1.17 / 0.1.18 只能源码构建。
 - fork 的发布 Tag 一律 `miaowu-vX.Y.Z`，**不要复用上游 `v*` Tag**。`scripts/release.mjs` 只接受这个前缀，并会拒绝缺少 fork 入口（`packages/dsh-plugin/src/services/index.ts` 与 `createDshMiaowuSkillProvider`）或源提交不在 `main` 上（源提交必须是 `main` 的祖先，通常就是 `main` 顶端）的发布。
-- 打 Tag 前先跑 `node scripts/release.mjs check --tag miaowu-vX.Y.Z`（同时核对根/包版本一致、`CHANGELOG.md` 有该版本的带日期标题），再按 `docs/RELEASING.md` 执行；未经用户明确授权不要 push Tag 或发布。
+- 打 Tag 前先跑 `node scripts/release.mjs check --tag miaowu-vX.Y.Z`（同时核对根/包版本一致、`CHANGELOG.md` 有该版本的带日期标题），再按 `docs/RELEASING.md` 执行；未经用户明确授权不要 push Tag 或发布。上游发布后的同步先跑 `pnpm sync:upstream --dry-run --json`，`--apply` 要求干净工作树与四套上游 checkout，工厂本身不提交/推送/打 tag/发布。
 
 ## 2. 插件边界（红线）
 
 - DSH 拥有模型、provider、preset、权限、roots、runs、sessions。**本插件只做领域贡献**：skills、roles、tools（`oh_story_*` 具名注册）、hooks（`tools/pre-execute`、`tools/post-execute` 写法守卫）、`/oh-story/*` 工作台路由、客户端 workbench。
 - **绝不碰**：会话持久化（`sessionPersistence` / `borrowSession` / `session-query`）、`workspace.json` 注册表结构、`~/.dsh` 下任何宿主状态文件的写入（读可以，改必须用户明确点头且先备份）。
-- 扩展走注册表缝：Host 侧 `src/services/registry.ts` 的 `registerWorkspaceExtension`，客户端 `src/client/features/registry.ts` 的 `registerWorkbenchFeature` / `registerFileViewer`。不要改 `workspace-route.ts` / `index.tsx` 主体。
+- 扩展走注册表缝：Host 侧 `src/services/registry.ts` 的 `registerWorkspaceExtension`，客户端 `src/client/features/registry.ts` 的 `registerWorkbenchFeature` / `registerFileViewer`。诊断模块也走同一条缝（`/oh-story/diagnostics`、`/oh-story/state/inventory`、`/oh-story/state/migrate`），不要改 `workspace-route.ts` / `index.tsx` 主体。诊断默认只读；修复与状态迁移必须显式 `confirm: true`，迁移先备份、可回滚。
 
 ## 3. 已知宿主坑（不要重复踩）
 

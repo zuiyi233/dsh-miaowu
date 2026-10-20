@@ -323,6 +323,6 @@ describe("sidecar 与查询", () => {
     const sidecar = parseBookTree("斗破", [asInput("拆文库/斗破/角色档案与关系.md", CHARACTERS)]);
     const path = await writeSidecar(fs, CWD, root, sidecar);
     expect(path).toBe(".oh-story/analysis/斗破.json");
-    expect(await readSidecar(fs, CWD, root, "斗破", 1_048_576)).toMatchObject({ book: "斗破" });
+    expect(await readSidecar(fs, CWD, root, "斗破", 1_048_576)).toMatchObject({ book: "斗破", schemaVersion: 1 });
   });
 });

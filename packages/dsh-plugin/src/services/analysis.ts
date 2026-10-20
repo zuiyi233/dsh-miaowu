@@ -15,6 +15,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { FileSystem, FsTarget } from "@deepseek-ai/dsh-fs";
 import { send, workspaceRealm, WorkspaceHttpError, type WorkspaceRouteOptions } from "../workspace-route.js";
 import { registerWorkspaceExtension } from "./registry.js";
+import { STATE_SCHEMA_VERSION } from "./state-contract.js";
 
 export const ANALYSIS_EXTENSION_NAME = "oh-story-analysis";
 const LIBRARY_ROOT = "拆文库";
@@ -662,7 +663,7 @@ export async function writeSidecar(
 ): Promise<string> {
   const path = `${ANALYSIS_ROOT}/${sidecar.book}.json`;
   const target = await resolveInside(fs, cwd, root, path);
-  await fs.writeText(target, `${JSON.stringify(sidecar, null, 2)}\n`);
+  await fs.writeText(target, `${JSON.stringify({ ...sidecar, schemaVersion: STATE_SCHEMA_VERSION }, null, 2)}\n`);
   return path;
 }
 

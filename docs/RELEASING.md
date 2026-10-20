@@ -14,6 +14,28 @@ dist-tag on a version the plugin does not declare). Each issue carries the sync
 checklist. Close an issue to decline that version; it will not be reopened.
 Run `pnpm upstream:updates` for a local dry run.
 
+## Upstream sync factory (skeleton)
+
+`pnpm sync:upstream` is the one-command sync path that sits between an
+`upstream-update` issue and a reviewed release:
+
+- `pnpm sync:upstream --dry-run --json` (the default) reads the four pinned
+  manifests, compares them with a `--latest` JSON map or the public GitHub
+  release API, and reports `current` / `behind` / `ahead` / `diverged` /
+  `unavailable` plus the declared DSH range. It writes nothing; network
+  failures become `unavailable` instead of throwing.
+- `pnpm sync:upstream --apply --upstream-root <dir>` requires a clean working
+  tree and the four upstream checkouts, then runs the existing
+  `assets:sync:*` chain and `assets:check`. Add `--verify` to run
+  `pnpm verify` and `pnpm test:dsh` afterwards.
+- The factory never commits, pushes, tags, publishes or calls the paid
+  provider. It writes a JSON report with `baseSha`, per-set status, DSH range
+  status, step results and a rollback command. The rollback command restores
+  tracked files only; untracked files introduced by a sync must be removed
+  manually per the report note.
+- `pnpm test:sync-upstream` is part of `pnpm verify`; it exercises the pure
+  diff/report logic and the apply gates without network or checkouts.
+
 ## Fork status (2026-10-20)
 
 The release pipeline now matches this fork's identity:

@@ -306,11 +306,12 @@ describe("批注创建与删除", () => {
   });
 
   it("损坏的 annotations.json 降级为空并可继续写入", async () => {
-    const { realm, seed } = setup({ [NOTE_FILE]: "第一行\n第二行" });
+    const { realm, seed, read } = setup({ [NOTE_FILE]: "第一行\n第二行" });
     seed(".oh-story/annotations.json", "{broken", "corrupt");
     expect(await listAnnotations(realm, NOTE_FILE)).toEqual([]);
     await createAnnotation(realm, NOTE_FILE, { lineStart: 1, lineEnd: 1, note: "n", kind: "review" });
     expect(await listAnnotations(realm, NOTE_FILE)).toHaveLength(1);
+    expect(read(".oh-story/annotations.json")).toContain('"schemaVersion":1');
   });
 });
 

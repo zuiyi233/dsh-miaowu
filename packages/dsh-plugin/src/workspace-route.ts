@@ -26,9 +26,9 @@ const DRAMA_DIRECTORIES = ["输入", "项目开发", "设定集", "剧集", "交
 const GAME_DIRECTORY = "game-adaptations";
 // Preview studios need only a small manifest-driven subset, so discover them before a very large
 // prose workspace can consume the shared listing budget.
-const CREATIVE_DIRECTORIES = [VIDEO_DIRECTORY, GAME_DIRECTORY, ...STORY_DIRECTORIES, ...DRAMA_DIRECTORIES] as const;
+export const CREATIVE_DIRECTORIES = [VIDEO_DIRECTORY, GAME_DIRECTORY, ...STORY_DIRECTORIES, ...DRAMA_DIRECTORIES] as const;
 // Oh Story short fiction keeps one book as three files at the book root (DSH: the workspace root).
-const SHORT_STORY_FILES = ["正文.md", "设定.md", "小节大纲.md"] as const;
+export const SHORT_STORY_FILES = ["正文.md", "设定.md", "小节大纲.md"] as const;
 const ROOT_FILES = new Set<string>(["short-drama.json", ...SHORT_STORY_FILES]);
 /**
  * 书名目录标记:强 marker 为一级子目录直接包含 正文/ 或 追踪/ 子目录

@@ -12,6 +12,14 @@
 - **剩余 P2 / 延后项**：短剧生产素材/分镜板浮动面板、esbuild 多入口拆包、`availableActions` 服务端下发（现为前端状态表）、保险库 UI；`scripts/native-dsh-smoke.ts` 在 `tsc -p tsconfig.lint.json --noEmit` 下有 41 个既有类型错误（不在 `pnpm verify` 门禁内）。
 - **明确不在范围**：改编 P3（有声/漫画/翻译/版权签约）不随本轮交付，见 `docs/小说全流程覆盖评估.md`。
 
+## 2026-10-20 P1-A 自诊断 / P1-C 同步工厂骨架
+
+- **已交付**：只读状态盘点（`state-inventory.ts` + `state-contract.ts`）、显式可回滚迁移（`state-migrations.ts`）、六组诊断引擎（`diagnostics.ts`）、宿主路由与支持包（`diagnostics-route.ts` / `support-bundle.ts`）、启动预检、小说/短剧「自诊断」面板、`pnpm sync:upstream` 骨架。
+- **状态版本**：书架、伏笔/抑制、拆书 sidecar、批注写入 `schemaVersion: 1`；历史/审计 JSONL、任务顶层数组、检索索引、锁与备份快照按兼容规则读取，不参与 v1 自动迁移。迁移必须显式确认，先备份后写入，支持按清单回滚；中途失败会补偿已写文件并在错误里给出备份目录。
+- **修复审计发现**：检索 `meta.json` 不再被误判为行索引；不可迁移的 legacy 文档不再显示无效迁移按钮；GET 计划可直接用于 POST apply；会话「不可读/超时/畸形」分流；密钥文件不再产生逐条 P2；Windows 路径脱敏不区分大小写；冒烟不再用 JSON 转义后的字符串做恒真路径断言。
+- **验证**：`pnpm verify` 退出 0（61 个测试文件 / 650 项；sync-factory 16/16）；`pnpm test:dsh` 与 `pnpm test:dsh:rc` 在 DSH 0.2.1-rc.2 / 0.2.0-rc.2 上均 `"ok": true`，并新增诊断路由、支持包确认/脱敏、状态盘点与面板六组断言；浏览器包 392,311 字节。
+- **已知限制**：DSH fs 缝没有删除 API，过期锁只报告不代删；`sessionQuery.readSession` 没有 abort 信号，5 秒超时只能分类不能取消底层读取；顶层任务数组与 JSONL 的 v2 迁移未做。P1-B 连续性驾驶舱、P2-A 质量评测、P2-B 性能规模尚未开工；P3 仍按条件触发。
+
 ## 第一优先（高价值，直接对应现有差距）
 
 | # | 功能 | 借鉴来源 | 落点 | 状态 | 落点（实施后） |
@@ -49,5 +57,5 @@
 ## 工程注记（实施后，2026-09-05，历史）
 
 - 扩展缝：`src/services/registry.ts`（registerWorkspaceExtension + onWorkspaceWrite）+ `src/client/features/registry.ts`（registerWorkbenchFeature + registerFileViewer），并行代理据此无冲突交付
-- 客户端构建已开 esbuild 完整 minify（403KB → 266KB，预算 400KB 内重新有富余）
+- 客户端构建已开 esbuild 完整 minify，并自 2026-10-20 起对 `?inline` CSS 做构建期 minify；当前 `client.js` 392,311 字节（预算 400,000）
 - 历史债务（2026-09-05）：`client/index.tsx` 约 2060 行超 900 行软上限；该债务已于 Phase A-D 拆为 16 行入口壳（见 2026-10-20 复核）。仍延后：短剧生产素材板独立浮动、esbuild 多入口拆包、availableActions 服务端下发（现为前端状态表）
