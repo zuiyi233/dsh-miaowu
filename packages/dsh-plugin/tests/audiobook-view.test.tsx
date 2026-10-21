@@ -105,4 +105,13 @@ describe("AudiobookView", () => {
     expect(CREATIVE_DIRECTORIES).toContain("有声剧");
     expect(mediaMimeTypeForPath("有声剧/x.mp3")).toBe("audio/mpeg");
   });
+
+  it("有声剧排在叙事目录之后,避免共享文件上限先被脚本/音频耗尽", () => {
+    const audiobook = CREATIVE_DIRECTORIES.indexOf("有声剧");
+    expect(audiobook).toBeGreaterThan(-1);
+    for (const prose of ["正文", "大纲", "设定"] as const) {
+      expect(CREATIVE_DIRECTORIES.indexOf(prose)).toBeGreaterThan(-1);
+      expect(CREATIVE_DIRECTORIES.indexOf(prose)).toBeLessThan(audiobook);
+    }
+  });
 });

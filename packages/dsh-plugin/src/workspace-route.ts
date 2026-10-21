@@ -25,8 +25,11 @@ const STORY_DIRECTORIES = ["正文", "大纲", "设定", "追踪", "对标", "�
 const DRAMA_DIRECTORIES = ["输入", "项目开发", "设定集", "剧集", "交付", "创作者决策", "审查"] as const;
 const GAME_DIRECTORY = "game-adaptations";
 // Preview studios need only a small manifest-driven subset, so discover them before a very large
-// prose workspace can consume the shared listing budget.
-export const CREATIVE_DIRECTORIES = [VIDEO_DIRECTORY, GAME_DIRECTORY, "有声剧", ...STORY_DIRECTORIES, ...DRAMA_DIRECTORIES] as const;
+// prose workspace can consume the shared listing budget. Prose roots come before the audiobook
+// output tree for the same reason: `listFiles` walks this list in order under one shared
+// FILE_LIMIT, so a long novel's scripts/MP3s under 有声剧/ must not exhaust the budget before
+// 正文/大纲/设定 are walked (that would silently hide prose files from the workbench tree).
+export const CREATIVE_DIRECTORIES = [VIDEO_DIRECTORY, GAME_DIRECTORY, ...STORY_DIRECTORIES, "有声剧", ...DRAMA_DIRECTORIES] as const;
 // Oh Story short fiction keeps one book as three files at the book root (DSH: the workspace root).
 export const SHORT_STORY_FILES = ["正文.md", "设定.md", "小节大纲.md"] as const;
 const ROOT_FILES = new Set<string>(["short-drama.json", ...SHORT_STORY_FILES]);
