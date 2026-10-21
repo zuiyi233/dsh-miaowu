@@ -23,7 +23,8 @@ import {
  * 截取尾部用于报错。
  *
  * 命令执行与能力预检分开：`hostCommandRunner` 只负责跑命令并收集有上限的
- * 输出，`probeTool` 用 `--version` 加 5 秒超时判断 ffmpeg/ffprobe 是否可用；
+ * 输出，`probeTool` 用 `-version` 加 5 秒超时判断 ffmpeg/ffprobe 是否可用
+ * （ffmpeg 系工具只认单横线参数，`--version` 会被当成未知选项并失败）；
  * 导出本身不重复探测，由路由在进入导出前预检。
  */
 
@@ -33,7 +34,8 @@ const AUDIO_DIRECTORY = "音频";
 const MP3_EXTENSION = ".mp3";
 const CONCAT_EXTENSION = ".txt";
 const PROBE_TIMEOUT_MS = 5_000;
-const PROBE_ARGUMENT = "--version";
+/** ffmpeg/ffprobe 只接受单横线参数；`--version` 会以未知选项失败。 */
+const PROBE_ARGUMENT = "-version";
 /** 命令输出收集上限（stdout/stderr 各一份），避免失控进程撑爆宿主内存。 */
 const COMMAND_OUTPUT_MAX_BYTES = 64 * 1_024;
 const STDERR_TAIL_CHARS = 300;
@@ -125,7 +127,7 @@ export function hostCommandRunner(): CommandRunner {
 }
 
 /**
- * 探测系统工具：跑 `[tool, "--version"]`，退出码 0 即可用。探测永远不抛错：
+ * 探测系统工具：跑 `[tool, "-version"]`，退出码 0 即可用。探测永远不抛错：
  * 超时、进程无法启动或任何命令失败都返回 false，由调用方决定降级或报错。
  */
 export async function probeTool(runner: CommandRunner, tool: string): Promise<boolean> {

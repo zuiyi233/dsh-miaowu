@@ -64,6 +64,7 @@ const BODY_LIMIT = 64 * 1_024;
 const SEGMENT_AUDIO_MAX_BYTES = 50 * 1_024 * 1_024;
 const TTS_KEY_ENV = "OH_STORY_TTS_API_KEY";
 const TTS_BASE_URL_ENV = "OH_STORY_TTS_BASE_URL";
+const TTS_MODEL_ENV = "OH_STORY_TTS_MODEL";
 const SECRET_KEY_PATTERN = /api.?key|authorization|token|secret/iu;
 const JOB_ROUTE = /^\/oh-story\/audiobook\/jobs\/([^/]+)(?:\/(cancel|run))?$/u;
 const SOURCE_EXTENSION = ".md";
@@ -142,6 +143,26 @@ function requiredString(body: Readonly<Record<string, unknown>>, key: string): s
   return value.trim();
 }
 
+/**
+ * 可选字符串字段：请求体优先，缺省（未提供或空串）时回退宿主环境变量；
+ * 两处都没有值时返回 400，错误里同时点出字段名与环境变量名。
+ */
+function optionalString(
+  body: Readonly<Record<string, unknown>>,
+  key: string,
+  env: Readonly<Record<string, string | undefined>>,
+  envKey: string,
+): string {
+  const raw = body[key];
+  if (raw !== undefined && typeof raw !== "string") throw new WorkspaceHttpError(400, `${key} 必须是字符串。`);
+  const fromBody = typeof raw === "string" ? raw.trim() : "";
+  const value = fromBody !== "" ? fromBody : (env[envKey] ?? "").trim();
+  if (value === "") {
+    throw new WorkspaceHttpError(400, `缺少 ${key}：请在请求体提供，或设置环境变量 ${envKey}。`);
+  }
+  return value;
+}
+
 function projectNameOf(path: string): string {
   const segments = path.split("/");
   return segments.length >= 3 ? (segments.at(-2) ?? path) : path;
@@ -168,16 +189,31 @@ async function chapterSummaries(realm: WorkspaceRealm, record: AudiobookProjectR
   const summaries: AudiobookChapterSummary[] = [];
   for (const sourcePath of record.project.source.chapters) {
     const chapter = chapterNameOf(sourcePath);
-    const script = await loadChapterScript(realm, record.path, chapter);
+    const scriptPath = scriptPathFor(record.path, chapter);
+    const scriptInfo = await realm.fs.stat(await realm.fs.resolve(scriptPath, { cwd: realm.cwd }));
+    const hasScript = scriptInfo?.type === "file";
+    let segmentCount = 0;
+    let scriptError: string | undefined;
+    if (hasScript) {
+      try {
+        const script = await loadChapterScript(realm, record.path, chapter);
+        segmentCount = script?.script.segments.length ?? 0;
+      } catch (error) {
+        // 单章脚本损坏只降级该章摘要，不拖垮整个项目视图；其余错误照常上抛。
+        if (!(error instanceof WorkspaceHttpError) || error.status !== 422) throw error;
+        scriptError = error.message;
+      }
+    }
     const audioPath = chapterAudioPathFor(record.path, chapter);
     const audioInfo = await realm.fs.stat(await realm.fs.resolve(audioPath, { cwd: realm.cwd }));
     const job = latestJob(jobs, record.path, chapter);
     summaries.push({
       sourcePath,
       chapter,
-      scriptPath: scriptPathFor(record.path, chapter),
-      hasScript: script !== undefined,
-      segmentCount: script?.script.segments.length ?? 0,
+      scriptPath,
+      hasScript,
+      segmentCount,
+      ...(scriptError === undefined ? {} : { scriptError }),
       audioPath: audioInfo?.type === "file" ? audioPath : null,
       jobId: job?.id ?? null,
       jobStatus: job?.status ?? null,
@@ -289,12 +325,13 @@ export async function handleAudiobookRequest(
         const body = await jsonBody(request, BODY_LIMIT);
         assertNoSecretKeys(body, "body");
         const realm = await workspaceRealm(context, url);
+        const runtime = runtimeOf(realm, deps);
         const record = await createAudiobookProject(realm, {
           bookRoot: requiredString(body, "bookRoot"),
           name: requiredString(body, "name"),
           voice: requiredString(body, "voice"),
-          baseUrl: requiredString(body, "baseUrl"),
-          model: requiredString(body, "model"),
+          baseUrl: optionalString(body, "baseUrl", runtime.env, TTS_BASE_URL_ENV),
+          model: optionalString(body, "model", runtime.env, TTS_MODEL_ENV),
         });
         send(response, 201, { record });
         return true;
@@ -323,7 +360,9 @@ export async function handleAudiobookRequest(
       const sourcePath = record.project.source.chapters.find((candidate) => chapterNameOf(candidate) === chapter);
       if (sourcePath === undefined) throw new WorkspaceHttpError(404, "有声剧项目里没有该章节。");
       const confirm = body["confirm"] === true;
-      const existing = await loadChapterScript(realm, record.path, chapter);
+      // 存在性只看 stat，不预先解析：损坏脚本也要能用 confirm 覆盖。
+      const scriptPath = scriptPathFor(record.path, chapter);
+      const existing = await realm.fs.stat(await realm.fs.resolve(scriptPath, { cwd: realm.cwd }));
       if (existing !== undefined && !confirm) {
         throw new WorkspaceHttpError(400, "章节脚本已存在，覆盖需要显式确认（confirm: true）。");
       }
@@ -379,7 +418,15 @@ export async function handleAudiobookRequest(
         if (loaded.job.status !== "paused" && loaded.job.status !== "failed") {
           throw new WorkspaceHttpError(409, "只有已暂停或失败的任务可以恢复。");
         }
+        // 恢复同样是付费入口：启动前先过与新建任务相同的门禁（密钥、旁白、脚本、单章上限）。
         const runtime = runtimeOf(realm, deps);
+        const record = await loadAudiobookProject(realm, loaded.job.projectPath);
+        const scriptRecord = await loadChapterScript(realm, record.path, loaded.job.chapter);
+        if (scriptRecord === undefined) throw new WorkspaceHttpError(409, "章节脚本不存在，请先生成脚本。");
+        const estimate = await planChapterJob(realm, record, scriptRecord.script, runtime);
+        if (estimate.chars > record.project.tts.maxCharsPerChapter) {
+          throw new WorkspaceHttpError(409, `章节字符数超过单章上限（${String(record.project.tts.maxCharsPerChapter)}）。`);
+        }
         launchJob(context, realm, jobId, runtime, deps);
         send(response, 202, { job: loaded.job });
         return true;

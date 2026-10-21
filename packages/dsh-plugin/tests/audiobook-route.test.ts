@@ -114,7 +114,11 @@ function cacheKeyFor(text: string): string {
   });
 }
 
-function jobDocument(id: string, status: AudiobookJob["status"]): string {
+function jobDocument(
+  id: string,
+  status: AudiobookJob["status"],
+  overrides: Partial<AudiobookJob> = {},
+): string {
   const job: AudiobookJob = {
     schemaVersion: 1,
     id,
@@ -131,6 +135,7 @@ function jobDocument(id: string, status: AudiobookJob["status"]): string {
     createdAt: NOW,
     updatedAt: NOW,
     outputPath: null,
+    ...overrides,
   };
   return JSON.stringify(job);
 }
@@ -320,6 +325,42 @@ describe("POST /oh-story/audiobook/project", () => {
     expect(String(asRecord(result.json)["error"])).toContain("密钥");
     expect(harness.writes).toHaveLength(0);
   });
+
+  it("body 缺省 baseUrl/model 时回退环境变量", async () => {
+    const harness = fixture({
+      env: {
+        OH_STORY_TTS_API_KEY: SECRET,
+        OH_STORY_TTS_BASE_URL: "https://env.example.com/v1",
+        OH_STORY_TTS_MODEL: "env-tts-1",
+      },
+    });
+    const result = await callRoute(harness, "POST", "/oh-story/audiobook/project", {
+      bookRoot: "正文",
+      name: "新书",
+      voice: "alloy",
+    });
+
+    expect(result.status).toBe(201);
+    const tts = asRecord(asRecord(asRecord(asRecord(result.json)["record"])["project"])["tts"]);
+    expect(tts["baseUrl"]).toBe("https://env.example.com/v1");
+    expect(tts["model"]).toBe("env-tts-1");
+    expect(harness.read("有声剧/新书/project.json")).toContain("env-tts-1");
+  });
+
+  it("body 与环境变量都没有 baseUrl/model 时返回 400 且不写文件", async () => {
+    const harness = fixture({ env: { OH_STORY_TTS_API_KEY: SECRET } });
+    const result = await callRoute(harness, "POST", "/oh-story/audiobook/project", {
+      bookRoot: "正文",
+      name: "新书",
+      voice: "alloy",
+    });
+
+    expect(result.status).toBe(400);
+    const message = String(asRecord(result.json)["error"]);
+    expect(message).toContain("baseUrl");
+    expect(message).toContain("OH_STORY_TTS_BASE_URL");
+    expect(harness.writes).toHaveLength(0);
+  });
 });
 
 describe("GET /oh-story/audiobook/project", () => {
@@ -354,6 +395,28 @@ describe("GET /oh-story/audiobook/project", () => {
     expect(second.audioPath).toBeNull();
     expect(second.jobId).toBeNull();
     expect(view.preflight.ttsKey).toBe("present");
+    expect(harness.writes).toHaveLength(0);
+  });
+
+  it("单章脚本损坏时降级为 200 摘要，不拖垮整份视图", async () => {
+    const harness = fixture({ seed: { [SCRIPT_PATH]: "{not-json" } });
+
+    const result = await callRoute(
+      harness,
+      "GET",
+      `/oh-story/audiobook/project?path=${encodeURIComponent(PROJECT_PATH)}`,
+    );
+
+    expect(result.status).toBe(200);
+    const view = projectView(result);
+    const first = view.chapters[0]!;
+    expect(first.scriptPath).toBe(SCRIPT_PATH);
+    expect(first.hasScript).toBe(true);
+    expect(first.segmentCount).toBe(0);
+    expect(first.scriptError).toContain("脚本格式无效");
+    const second = view.chapters[1]!;
+    expect(second.hasScript).toBe(false);
+    expect(second.scriptError).toBeUndefined();
     expect(harness.writes).toHaveLength(0);
   });
 });
@@ -422,6 +485,28 @@ describe("POST /oh-story/audiobook/script", () => {
     });
     expect(result.status).toBe(404);
     expect(harness.writes).toHaveLength(0);
+  });
+
+  it("损坏脚本未确认返回 400，确认后可以覆盖", async () => {
+    const harness = fixture({ seed: { [SCRIPT_PATH]: "{not-json" } });
+
+    const denied = await callRoute(harness, "POST", "/oh-story/audiobook/script", {
+      path: PROJECT_PATH,
+      chapter: CHAPTER,
+    });
+    expect(denied.status).toBe(400);
+    expect(String(asRecord(denied.json)["error"])).toContain("confirm: true");
+    expect(harness.writes).toHaveLength(0);
+
+    const confirmed = await callRoute(harness, "POST", "/oh-story/audiobook/script", {
+      path: PROJECT_PATH,
+      chapter: CHAPTER,
+      confirm: true,
+    });
+    expect(confirmed.status).toBe(200);
+    expect(asRecord(asRecord(confirmed.json)["script"])["path"]).toBe(SCRIPT_PATH);
+    expect(harness.writes).toEqual([SCRIPT_PATH]);
+    expect(harness.read(SCRIPT_PATH)).toContain("\"segments\"");
   });
 });
 
@@ -518,6 +603,52 @@ describe("POST /oh-story/audiobook/jobs/:id/run", () => {
     expect(result.status).toBe(202);
     expect(asRecord(asRecord(result.json)["job"])["status"]).toBe("paused");
     expect(harness.runCalls.map((call) => call.jobId)).toEqual([JOB_ID]);
+  });
+
+  it("缺少 TTS 密钥时不启动并返回 503", async () => {
+    const harness = fixture({
+      seed: { [`${AUDIOBOOK_JOB_ROOT}/${JOB_ID}.json`]: jobDocument(JOB_ID, "paused") },
+      env: { OH_STORY_TTS_BASE_URL: TTS.baseUrl },
+    });
+    const result = await callRoute(harness, "POST", `/oh-story/audiobook/jobs/${JOB_ID}/run`, { confirm: true });
+
+    expect(result.status).toBe(503);
+    expect(String(asRecord(result.json)["error"])).toContain("OH_STORY_TTS_API_KEY");
+    expect(harness.runCalls).toHaveLength(0);
+    expect(harness.writes).toHaveLength(0);
+  });
+
+  it("章节脚本缺失时不启动并返回 409", async () => {
+    const harness = fixture({
+      seed: {
+        [`${AUDIOBOOK_JOB_ROOT}/${JOB_ID}.json`]: jobDocument(JOB_ID, "paused", {
+          chapter: SECOND_CHAPTER,
+          sourcePath: "正文/第0002章_回声.md",
+        }),
+      },
+    });
+    const result = await callRoute(harness, "POST", `/oh-story/audiobook/jobs/${JOB_ID}/run`, { confirm: true });
+
+    expect(result.status).toBe(409);
+    expect(String(asRecord(result.json)["error"])).toContain("脚本不存在");
+    expect(harness.runCalls).toHaveLength(0);
+    expect(harness.writes).toHaveLength(0);
+  });
+
+  it("超过单章字符上限时不启动并返回 409", async () => {
+    const overLimitProject: AudiobookProject = { ...PROJECT, tts: { ...TTS, maxCharsPerChapter: 1 } };
+    const harness = fixture({
+      seed: {
+        [PROJECT_PATH]: JSON.stringify(overLimitProject),
+        [`${AUDIOBOOK_JOB_ROOT}/${JOB_ID}.json`]: jobDocument(JOB_ID, "paused"),
+      },
+    });
+    const result = await callRoute(harness, "POST", `/oh-story/audiobook/jobs/${JOB_ID}/run`, { confirm: true });
+
+    expect(result.status).toBe(409);
+    expect(String(asRecord(result.json)["error"])).toContain("上限");
+    expect(harness.runCalls).toHaveLength(0);
+    expect(harness.writes).toHaveLength(0);
   });
 
   it("非暂停/失败任务返回 409", async () => {

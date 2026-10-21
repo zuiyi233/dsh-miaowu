@@ -128,6 +128,8 @@ export interface AudiobookChapterSummary {
   readonly scriptPath: string;
   readonly hasScript: boolean;
   readonly segmentCount: number;
+  /** 脚本存在但读取/校验失败时的错误摘要；此时 hasScript 仍为 true、segmentCount 为 0。 */
+  readonly scriptError?: string;
   readonly audioPath: string | null;
   readonly jobId: string | null;
   readonly jobStatus: AudiobookJobStatus | null;

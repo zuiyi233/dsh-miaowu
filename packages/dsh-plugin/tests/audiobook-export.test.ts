@@ -292,13 +292,32 @@ describe("probeTool", () => {
         options?: CommandRunOptions,
       ): Promise<CommandResult> => {
         expect(command).toBe("ffmpeg");
-        expect(args).toEqual(["--version"]);
+        expect(args).toEqual(["-version"]);
         expect(options).toEqual({ timeoutMs: 5_000 });
         return { code: 0, stdout: "ffmpeg version 7", stderr: "" };
       },
     );
 
     expect(await probeTool({ run }, "ffmpeg")).toBe(true);
+  });
+
+  it("探测参数是单横线 -version，不是双横线 --version", async () => {
+    const run = vi.fn(
+      async (
+        command: string,
+        args: readonly string[],
+        options?: CommandRunOptions,
+      ): Promise<CommandResult> => {
+        expect(command).toBe("ffprobe");
+        expect(args).toEqual(["-version"]);
+        expect(args).not.toContain("--version");
+        expect(options).toEqual({ timeoutMs: 5_000 });
+        return { code: 0, stdout: "ffprobe version 7", stderr: "" };
+      },
+    );
+
+    expect(await probeTool({ run }, "ffprobe")).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
   it("probeTool 在命令失败时返回 false", async () => {
