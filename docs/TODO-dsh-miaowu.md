@@ -1,7 +1,7 @@
 # dsh-miaowu 待开发清单
 
 > 来源：参考项目（DSH-better-sidebar / NarraLume / Scriverse / oh-story-dsh 上游）借鉴分析 + `docs/小说全流程覆盖评估.md` 差距核查
-> 基线：dsh-miaowu v0.1.6（oh-story-dsh fork + rebrand，2026-09-04）· 更新日期：2026-09-05 · 复核日期：2026-10-20
+> 基线：dsh-miaowu v0.1.6（oh-story-dsh fork + rebrand，2026-09-04）· 更新日期：2026-09-05 · 复核日期：2026-10-21
 > 实施状态：✅ 已完成（2026-09-05，四个 Phase 全部落库，`pnpm verify` 全绿）· ⏳ 部分/简化交付 · ⬜ 未做
 > 参考素材：`参考项目/` 目录下各调研文档（已被 git 忽略，仅本机留存）
 
@@ -28,6 +28,15 @@
 - **P2-B 骨架**：`scripts/perf-scale.mjs` 合成 1000 章 / 1M 汉字 / 10k 文件 / 200 run，测遍历、章节枚举、读取+hash、状态 JSON、备份式收集；`pnpm test:perf` 已入门禁，完整基准不入门禁。本机最终复核 `read-hash-1m` 以 537.32 ms 超出 500 ms 原始预算，已如实记录；它不是插件级 UI SLO。详见 `docs/PERFORMANCE.md`。
 - **构建优化**：客户端 esbuild 直接输出 UTF-8，避免默认 ASCII 将中文转成 `\uXXXX`；包体从 392,311 降到 372,317 字节，400,000 预算不变。
 - **P3**：仍按路线图条件触发，默认不做多端/云/实时协作。
+
+## 2026-10-21 有声剧 N4-A 交付
+
+- **N4-A 已交付（单章单旁白纵向切片）**：`audiobook-*` 服务（项目发现/持久化、确定性切分、内容寻址缓存、OpenAI-compatible TTS、章节 job、ffmpeg 导出、二进制存储）、`/oh-story/audiobook/*` 路由、小说工作台「有声剧」面板；项目/脚本/音频写 `有声剧/`，缓存与任务写 `.oh-story/audiobook/`，不写 DSH 会话、`workspace.json` 或 `~/.dsh`。启动任务、恢复任务与导出都必须 `confirm: true`；`OH_STORY_TTS_API_KEY` 只从宿主环境读取，密钥不入项目、缓存、响应或日志。
+- **N4-A 验证**：`pnpm verify` 退出 0（lint、typecheck、五项资产 parity、DSH boundary、release 25/25、upstream-update 3/3、sync-factory 16/16、eval 7/7、perf 6/6、72 个测试文件 / 810 通过 + 1 跳过、build），浏览器包 385,856 字节（预算 400,000）；`pnpm test:dsh` 与 `pnpm test:dsh:rc` 在 DSH `0.2.1-rc.2` / `0.2.0-rc.2` 上均 `"ok": true`。打包冒烟新增只读 overview 探测（预检字段、`sources` 数组、密钥与绝对路径不泄漏）和「有声剧」面板探测（预检文案、无错误、不建项目、不调 TTS）。本机没有 ffmpeg/ffprobe，真实 MP3 编码未验证。详见 [VALIDATION.md](VALIDATION.md) 的 2026-10-21 有声剧审计。
+- **N4-B 待交付（多角色）**：旁白 + 至少 3 个角色、音色映射保存/恢复、手工修正说话人后只重生成受影响段、未指派对白阻塞整章完成。
+- **N4-C 待交付（完整有声剧）**：本地 BGM/音效与可编辑 cue 时间轴、响度 -16 LUFS ±1 与 true peak ≤ -1.5 dBTP、SRT/LRC、M4B 章节与封面、发布包与授权清单校验。
+- **N4-D 待交付（批量化与质量）**：≥20 章整书批量、成本报告可审计、无孤儿文件、两周实盘或等效样本。**DSH 重启后的自动续跑也延后到 N4-D**（N4-A 只保留显式恢复暂停/失败任务，不会在启动时自动继续计费）。
+- **P3**：仍按路线图条件触发（漫画/翻译/版权签约等改编能力不随 N4-A 解锁；有声由 N4 承接）。
 
 ## 第一优先（高价值，直接对应现有差距）
 

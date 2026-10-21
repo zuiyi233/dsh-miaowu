@@ -20,6 +20,7 @@
 - 小说 / 短剧工作台新增「驾驶舱」面板：只读聚合书架、伏笔、run / 候选、审计保存、备份、历史、状态异常、章节追踪与检索索引，给出「今天」视图和确定性 P0/P1/P2 风险；`POST /oh-story/continuity/snapshot` 必须显式确认，创建包含当前书与 `.oh-story` 状态的整体备份（不含会话与 vault 主密钥），只写 `.oh-story/backup/`；快照会按当前书根补收 `书名/正文/` 布局，遇到超过单文件上限或 2000 文件截断时拒绝写入，避免把不完整结果报成成功；多书歧义时快照与交接清单都拒绝执行。`GET /oh-story/continuity/handoff` 生成带 SHA-256 校验和的项目交接清单，不可读文件列入 `skipped`，达到 2000 文件上限时拒绝而不静默截断。章节发现支持 `正文/书名/第N章.md` 与 `书名/正文/` 布局并读取 `.active-book`；多本书缺少当前书、`.active-book` 指向无效目录或追踪字段无法解析时给出 P1，用户可编辑状态文件里的绝对路径 / `..` 不会进入风险与最近保存。
 - 新增 P2-A 结构评测骨架：固定语料 + 确定性 rubric + 双版本对比 + badcase 清单（`pnpm eval:quality`、`pnpm test:eval`）。它不调用模型、不产生质量结论、不是发布门禁。
 - 新增 P2-B 原始原语基准：合成 1000 章 / 1M 字符 / 10k 文件工作区，测量遍历、章节枚举、读取与 hash、状态 JSON、备份式收集（`pnpm perf:scale`、`pnpm test:perf`）。完整基准不进入门禁，且明确不是插件级 UI SLO；本机复核中 `read-hash-1m` 曾以 537 ms 超过 500 ms 预算，已如实记录。
+- 小说工作台新增「有声剧」面板（N4-A 纵向切片）：从 `正文/` 发现书籍与章节，确定性切分为旁白片段，按内容寻址缓存（`.oh-story/audiobook/cache/<sha256>/`）调用 OpenAI-compatible TTS，按章预估成本、生成音频，并用 ffmpeg 拼接导出 192 kbps MP3。启动任务、恢复暂停/失败任务与导出都需要显式确认；`OH_STORY_TTS_API_KEY` 只从宿主环境读取，可选 `OH_STORY_TTS_BASE_URL` / `OH_STORY_TTS_MODEL`，密钥不写入项目、缓存、响应或日志。项目、脚本与音频写在工作区 `有声剧/`，缓存与任务写在 `.oh-story/audiobook/`，不写 DSH 会话、`workspace.json` 或 `~/.dsh`。当前只支持单章单旁白，没有 BGM、M4B、字幕、多角色与重启自动续跑；N4-B/C/D 仍待交付。
 
 ### Changed
 

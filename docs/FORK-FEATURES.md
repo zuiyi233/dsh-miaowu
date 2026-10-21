@@ -25,6 +25,7 @@
 | 可选凭据保险库 | HTTP 路由，无独立面板 | **默认关闭** | `.oh-story/vault/`；需 `DSH_MIAOWU_VAULT_ENABLED=1` |
 | 自诊断 | 小说 / 短剧工作台「自诊断」面板 + `/oh-story/diagnostics` | 随插件可用 | 六组只读检查、支持包、显式修复；状态盘点见 `.oh-story/` |
 | 连续性驾驶舱 | 小说 / 短剧工作台「驾驶舱」面板 + `/oh-story/continuity` | 随插件可用 | 今天视图、P0/P1/P2 风险、显式快照、可复制交接清单（manifest + SHA-256） |
+| 有声剧（N4-A） | 小说工作台「有声剧」面板 + `/oh-story/audiobook/*` | 需 TTS 服务；导出需 ffmpeg/ffprobe | `有声剧/` 项目、脚本与音频；`.oh-story/audiobook/` 缓存与任务；单章单旁白 |
 | `worldbuilding` / `publishing` / `finalize` | 三个自有 Skills | 随插件可用 | 通过 Skills 目录发现，`/worldbuilding` 等入口 |
 | ComfyUI 本地接入 | 短剧生产适配器 + `oh_story_comfyui` 工具 | 需外部配置 | 本机或局域网 ComfyUI 服务 + API-format 工作流 |
 | 喵呜小说工坊 | DSH Agent 预设 | 需手动安装 | 源码 checkout 运行 `pnpm --filter @dsh-miaowu/dsh preset:install` |
@@ -45,6 +46,16 @@
 - 确定性风险规则按 P0/P1/P2 分级：状态损坏或密钥库只有密文没有主密钥、schema 比插件新、多本书缺少或写坏 `.active-book`、追踪状态无法解析、失败 / 暂停的 run、待确认候选、到期伏笔、从未备份或超过 7 天未备份、追踪落后最新章节、最新章节没有历史快照、检索索引未建立、拆书 sidecar 缺失、回收站即将到期。每条风险在有文件可指向时给出可打开的相对路径，并附下一步；`正文/书名/` 与 `书名/正文/` 两种布局的候选会统一判定，多书一律不静默挑第一本。用户可编辑状态里出现的绝对路径 / `..` 会被过滤，不进入面板。
 - `POST /oh-story/continuity/snapshot` 是面板唯一写入动作，必须 `confirm: true`，只写 `.oh-story/backup/`：按当前书根补收 `书名/正文/` 布局，包含 `.oh-story` 状态、不含 vault 主密钥；超过单文件上限或达到 2000 文件截断时拒绝写入。`GET /oh-story/continuity/handoff` 生成项目交接清单（文本资产 + 选定 `.oh-story` 状态 + 排序后的 SHA-256 校验和），不可读 / 超限的状态文件列入 `skipped`，达到 2000 个文件上限时拒绝而不是静默截断。多书歧义时两者都返回 409，要求先写 `.active-book`。面板可复制该清单。
 - P2-A 结构评测骨架见 [EVALUATION.md](EVALUATION.md)：固定语料 + 确定性 rubric + 双版本对比 + badcase 清单，**不调用模型、不是发布门禁**。P2-B 原始原语基准见 [PERFORMANCE.md](PERFORMANCE.md)，明确不是插件级 UI SLO。
+
+## 有声剧（N4-A）
+
+- 入口是小说工作台的「有声剧」面板与 `/oh-story/audiobook/*` 路由。N4-A 只做**单章、单旁白音色**的纵向切片：从 `正文/` 发现书籍与章节，确定性切分成旁白片段，按章生成脚本、预估成本、生成音频，并用 ffmpeg 导出 MP3。
+- TTS 走 OpenAI-compatible 语音端点，每次只发送 `model` / `input` / `voice` / `response_format` / `speed` 五个标准字段。端点与模型在创建项目时确定：请求体优先，缺省回退 `OH_STORY_TTS_BASE_URL` 与 `OH_STORY_TTS_MODEL`（没有内置默认值，两处都缺时创建返回 400）；端点只接受 https 或回环 http，拒绝内嵌凭证、query 与 hash。`OH_STORY_TTS_API_KEY` 只从宿主环境读取，生成音频时必需；请求体里出现密钥字段直接 400，密钥永不落盘。
+- 缓存按内容寻址：`.oh-story/audiobook/cache/<sha256>/{audio.mp3|wav,meta.json}`，键只取端点（去尾斜杠）、模型、音色、语速、格式与文本，不含密钥、时间戳或本机路径；同段重跑命中缓存时不发 TTS 请求，`meta.json` 只记录请求参数、字节数、字符数、文本哈希与创建时间。章节任务进度在 `.oh-story/audiobook/jobs/`，每段结束后用 CAS 持久化，暂停或失败重跑不会重复累计已完成段。
+- 导出需要宿主机上的 `ffmpeg` 与 `ffprobe`：预检逐项报告是否就绪；导出把缓存片段用 concat 拼接、以 libmp3lame 编码为 192 kbps MP3，再用 ffprobe 校验时长。ffmpeg/ffprobe 缺失时导出返回明确 503，不写半成品。
+- 付费调用一律显式确认：启动任务、恢复暂停/失败任务、导出 MP3 都要求 `confirm: true`，面板在调用 TTS 或 ffmpeg 前弹出确认框；`dryRun` 只返回预估成本，不发请求。
+- 明确限制（N4-A）：只支持单旁白，不做多角色配音；没有 BGM/音效、M4B、章节封面与 SRT/LRC 字幕，也不做完整响度归一化（`project.json` 预留了 `export` 与 `cues` 字段，本切片不消费）；DSH 重启后不会自动续跑，需要人在面板或显式请求里恢复；N4-B 多角色、N4-C 完整有声剧、N4-D 批量化与质量仍待交付。
+- 状态归属：项目、脚本与音频写在工作区 `有声剧/`，缓存与任务写在 `.oh-story/audiobook/`；不写 DSH 会话、`workspace.json` 或 `~/.dsh` 状态。
 
 ## 上游同步
 

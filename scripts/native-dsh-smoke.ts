@@ -930,10 +930,18 @@ async function main(): Promise<void> {
     }
     if (!useRealDeepSeek) mockDeepSeek = await startMockDeepSeek();
     if (!useRealDeepSeek) mockComfyUI = await startMockComfyUI();
+    // The audiobook overview only reports whether a TTS key is present. A
+    // sentinel (or the developer's own exported key) makes both the "present"
+    // branch and the no-leak assertion real without ever calling TTS.
+    const audiobookTtsKey = (process.env.OH_STORY_TTS_API_KEY ?? "").trim() || "oh-story-smoke-tts-sentinel-key";
+    // Short values would make substring checks vacuous, so only a plausible key is
+    // treated as a leak needle.
+    const audiobookTtsNeedles = audiobookTtsKey.length >= 8 ? [audiobookTtsKey] : [];
     const env = {
       ...process.env,
       COREPACK_ENABLE_PROJECT_SPEC: "0",
       DSH_HOME: dshHome,
+      OH_STORY_TTS_API_KEY: audiobookTtsKey,
       // DSH also loads Skills from ~/.agents/skills and prefers them over a plugin's. An author who
       // installed Oh Story for another agent would otherwise satisfy (or break) the catalog checks.
       DSH_AGENTS_HOME: join(temporaryRoot, "agents"),
@@ -1292,6 +1300,31 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
       || generatedVideo?.title !== "DSH Video Recap Smoke" || generatedVideo.state !== "ready"
       || JSON.stringify(generatedVideo.previews.map((preview) => preview.role)) !== JSON.stringify(["source", "edited", "final"])) {
       throw new Error(`Story Session workspace route failed: ${JSON.stringify(storyWorkspacePayload)}`);
+    }
+    // Read-only audiobook probe: the overview reports preflight presence, the
+    // source list and existing projects. The sentinel key must never be echoed,
+    // and neither may absolute workspace/home paths.
+    const audiobookOverviewResponse = await dshFetch(`${origin}/oh-story/audiobook?sessionId=${encodeURIComponent(storySession.sessionId)}`);
+    const audiobookOverviewPayload = await audiobookOverviewResponse.json() as {
+      readonly preflight?: { readonly ttsKey?: unknown; readonly ttsHost?: unknown; readonly ffmpeg?: unknown; readonly ffprobe?: unknown };
+      readonly sources?: unknown;
+      readonly projects?: unknown;
+      readonly errors?: unknown;
+    };
+    if (!audiobookOverviewResponse.ok
+      || (audiobookOverviewPayload.preflight?.ttsKey !== "missing" && audiobookOverviewPayload.preflight?.ttsKey !== "present")
+      || typeof audiobookOverviewPayload.preflight?.ffmpeg !== "boolean"
+      || typeof audiobookOverviewPayload.preflight?.ffprobe !== "boolean"
+      || !Array.isArray(audiobookOverviewPayload.sources)
+      || !Array.isArray(audiobookOverviewPayload.projects)
+      || !Array.isArray(audiobookOverviewPayload.errors)
+      || payloadContains(audiobookOverviewPayload, [...audiobookTtsNeedles, storyRoot, homedir()])) {
+      throw new Error(`Packaged audiobook overview failed: ${JSON.stringify({
+        status: audiobookOverviewResponse.status,
+        preflight: audiobookOverviewPayload.preflight,
+        sources: audiobookOverviewPayload.sources,
+        projects: audiobookOverviewPayload.projects
+      })}`);
     }
     const diagnosticsResponse = await dshFetch(`${origin}/oh-story/diagnostics?sessionId=${encodeURIComponent(storySession.sessionId)}`);
     const diagnosticsPayload = await diagnosticsResponse.json() as {
@@ -2055,6 +2088,40 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         }
         await continuityButton.click();
         await cockpitPanel.waitFor({ state: "detached", timeout: 10_000 });
+        // The audiobook panel is read-only here: it loads the overview, shows the
+        // preflight and must not create a project or call TTS. The TTS sentinel is
+        // set in the Host environment, so the key chip reads "configured" while the
+        // chip text, never the key value, reaches the page.
+        const audiobookButton = page.getByRole("button", { name: "有声剧", exact: true });
+        await audiobookButton.waitFor({ state: "visible", timeout: 10_000 });
+        const audiobookErrorsBefore = pageErrors.length;
+        await audiobookButton.click();
+        const audiobookDrawer = page.getByRole("complementary", { name: "有声剧", exact: true });
+        await audiobookDrawer.waitFor({ state: "visible", timeout: 10_000 });
+        await audiobookDrawer.getByRole("heading", { name: "有声剧", exact: true }).waitFor({ state: "visible", timeout: 10_000 });
+        const audiobookPreflight = audiobookDrawer.getByRole("group", { name: "有声剧预检" });
+        await audiobookPreflight.waitFor({ state: "visible", timeout: 10_000 });
+        const audiobookPreflightText = await audiobookPreflight.innerText();
+        if (!audiobookPreflightText.includes("TTS 密钥已配置")
+          && !audiobookPreflightText.includes("缺少 OH_STORY_TTS_API_KEY")) {
+          throw new Error(`Audiobook panel missed the TTS key preflight: ${JSON.stringify(audiobookPreflightText)}`);
+        }
+        if (!/ffmpeg (?:就绪|未就绪)/u.test(audiobookPreflightText) || !/ffprobe (?:就绪|未就绪)/u.test(audiobookPreflightText)) {
+          throw new Error(`Audiobook panel missed the ffmpeg/ffprobe preflight: ${JSON.stringify(audiobookPreflightText)}`);
+        }
+        if (await audiobookDrawer.locator(".oh-diag-error").count() > 0) {
+          throw new Error(`Audiobook panel rendered an error: ${await audiobookDrawer.locator(".oh-diag-error").innerText()}`);
+        }
+        const audiobookText = await audiobookDrawer.innerText();
+        if (audiobookText.includes(storyRoot) || audiobookText.includes(homedir())
+          || audiobookTtsNeedles.some((needle) => audiobookText.includes(needle))) {
+          throw new Error("Audiobook panel leaked an absolute workspace/home path or the TTS key.");
+        }
+        if (pageErrors.length !== audiobookErrorsBefore) {
+          throw new Error(`Audiobook panel raised browser errors: ${pageErrors.slice(audiobookErrorsBefore).join("; ")}`);
+        }
+        await audiobookButton.click();
+        await audiobookDrawer.waitFor({ state: "detached", timeout: 10_000 });
       }
       await prepareDemoSurface(page);
       const previewTab = page.getByRole("tab", { name: "预览" });
