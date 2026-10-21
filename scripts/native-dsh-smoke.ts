@@ -1302,8 +1302,12 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
       throw new Error(`Story Session workspace route failed: ${JSON.stringify(storyWorkspacePayload)}`);
     }
     // Read-only audiobook probe: the overview reports preflight presence, the
-    // source list and existing projects. The sentinel key must never be echoed,
-    // and neither may absolute workspace/home paths.
+    // discovered sources and existing projects. The Host environment always
+    // carries a TTS key here, so "missing" means the env wiring broke; the key
+    // value must never be echoed, and neither may absolute workspace/home paths.
+    // Both parsed strings and the raw serialization are scanned so JSON escaping
+    // cannot hide a leak, and failures print counts/shapes only — never the
+    // payload, which would make a regression echo the key into the log.
     const audiobookOverviewResponse = await dshFetch(`${origin}/oh-story/audiobook?sessionId=${encodeURIComponent(storySession.sessionId)}`);
     const audiobookOverviewPayload = await audiobookOverviewResponse.json() as {
       readonly preflight?: { readonly ttsKey?: unknown; readonly ttsHost?: unknown; readonly ffmpeg?: unknown; readonly ffprobe?: unknown };
@@ -1311,19 +1315,32 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
       readonly projects?: unknown;
       readonly errors?: unknown;
     };
+    const audiobookSources = Array.isArray(audiobookOverviewPayload.sources)
+      ? audiobookOverviewPayload.sources as readonly { readonly bookRoot?: unknown; readonly chapters?: unknown }[]
+      : [];
+    const audiobookSourceShapes = audiobookSources.map((source) => ({
+      bookRoot: typeof source.bookRoot === "string" ? source.bookRoot : null,
+      chapters: Array.isArray(source.chapters) ? source.chapters.length : -1
+    }));
+    const audiobookOverviewSerialized = JSON.stringify(audiobookOverviewPayload);
     if (audiobookOverviewResponse.status !== 200
-      || (audiobookOverviewPayload.preflight?.ttsKey !== "missing" && audiobookOverviewPayload.preflight?.ttsKey !== "present")
+      || audiobookOverviewPayload.preflight?.ttsKey !== "present"
       || typeof audiobookOverviewPayload.preflight?.ffmpeg !== "boolean"
       || typeof audiobookOverviewPayload.preflight?.ffprobe !== "boolean"
       || !Array.isArray(audiobookOverviewPayload.sources)
       || !Array.isArray(audiobookOverviewPayload.projects)
       || !Array.isArray(audiobookOverviewPayload.errors)
-      || payloadContains(audiobookOverviewPayload, [...audiobookTtsNeedles, storyRoot, homedir()])) {
+      || audiobookSourceShapes.length === 0
+      || !audiobookSourceShapes.some((source) => source.chapters > 0)
+      || payloadContains(audiobookOverviewPayload, [storyRoot, homedir()])
+      || audiobookTtsNeedles.some((needle) => audiobookOverviewSerialized.includes(needle))) {
       throw new Error(`Packaged audiobook overview failed: ${JSON.stringify({
         status: audiobookOverviewResponse.status,
         preflight: audiobookOverviewPayload.preflight,
-        sources: audiobookOverviewPayload.sources,
-        projects: audiobookOverviewPayload.projects
+        sourceCount: audiobookSourceShapes.length,
+        sources: audiobookSourceShapes,
+        projectCount: Array.isArray(audiobookOverviewPayload.projects) ? audiobookOverviewPayload.projects.length : typeof audiobookOverviewPayload.projects,
+        errorCount: Array.isArray(audiobookOverviewPayload.errors) ? audiobookOverviewPayload.errors.length : typeof audiobookOverviewPayload.errors
       })}`);
     }
     const diagnosticsResponse = await dshFetch(`${origin}/oh-story/diagnostics?sessionId=${encodeURIComponent(storySession.sessionId)}`);
@@ -2089,9 +2106,10 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         await continuityButton.click();
         await cockpitPanel.waitFor({ state: "detached", timeout: 10_000 });
         // The audiobook panel is read-only here: it loads the overview, shows the
-        // preflight and must not create a project or call TTS. The TTS sentinel is
-        // set in the Host environment, so the key chip reads "configured" while the
-        // chip text, never the key value, reaches the page.
+        // preflight and must not create a project or call TTS. The TTS key is set
+        // in the Host environment, so the positive key chip is the only accepted
+        // state — a "missing" chip would mean the env wiring broke. The chip text,
+        // never the key value, reaches the page.
         const audiobookButton = page.getByRole("button", { name: "有声剧", exact: true });
         await audiobookButton.waitFor({ state: "visible", timeout: 10_000 });
         const audiobookErrorsBefore = pageErrors.length;
@@ -2102,9 +2120,8 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         const audiobookPreflight = audiobookDrawer.getByRole("group", { name: "有声剧预检" });
         await audiobookPreflight.waitFor({ state: "visible", timeout: 10_000 });
         const audiobookPreflightText = await audiobookPreflight.innerText();
-        if (!audiobookPreflightText.includes("TTS 密钥已配置")
-          && !audiobookPreflightText.includes("缺少 OH_STORY_TTS_API_KEY")) {
-          throw new Error(`Audiobook panel missed the TTS key preflight: ${JSON.stringify(audiobookPreflightText)}`);
+        if (!audiobookPreflightText.includes("TTS 密钥已配置")) {
+          throw new Error(`Audiobook panel did not report a configured TTS key: ${JSON.stringify(audiobookPreflightText)}`);
         }
         if (!/ffmpeg (?:就绪|未就绪)/u.test(audiobookPreflightText) || !/ffprobe (?:就绪|未就绪)/u.test(audiobookPreflightText)) {
           throw new Error(`Audiobook panel missed the ffmpeg/ffprobe preflight: ${JSON.stringify(audiobookPreflightText)}`);
@@ -2113,9 +2130,14 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
           throw new Error(`Audiobook panel rendered an error: ${await audiobookDrawer.locator(".oh-diag-error").innerText()}`);
         }
         const audiobookText = await audiobookDrawer.innerText();
-        if (audiobookText.includes(storyRoot) || audiobookText.includes(homedir())
-          || audiobookTtsNeedles.some((needle) => audiobookText.includes(needle))) {
-          throw new Error("Audiobook panel leaked an absolute workspace/home path or the TTS key.");
+        if (audiobookText.includes(storyRoot) || audiobookText.includes(homedir())) {
+          throw new Error("Audiobook panel leaked an absolute workspace/home path.");
+        }
+        // The markup is scanned too: a value that only reaches an attribute would
+        // not show up in innerText.
+        const audiobookMarkup = await audiobookDrawer.innerHTML();
+        if (audiobookTtsNeedles.some((needle) => audiobookText.includes(needle) || audiobookMarkup.includes(needle))) {
+          throw new Error("Audiobook panel leaked the TTS key.");
         }
         if (pageErrors.length !== audiobookErrorsBefore) {
           throw new Error(`Audiobook panel raised browser errors: ${pageErrors.slice(audiobookErrorsBefore).join("; ")}`);
