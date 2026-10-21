@@ -187,8 +187,9 @@ export function validateTtsBaseUrl(raw: string): string {
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new WorkspaceHttpError(400, "TTS 端点必须使用 https 地址。");
   if (url.username !== "" || url.password !== "") throw new WorkspaceHttpError(400, "TTS 端点不能内嵌凭证。");
-  if (url.search !== "") throw new WorkspaceHttpError(400, "TTS 端点不能带 query 参数。");
-  if (url.hash !== "") throw new WorkspaceHttpError(400, "TTS 端点不能带 hash 片段。");
+  // 单独的 `?`/`#` 会被 URL 解析成空 search/hash，必须按原始文本拒绝。
+  if (url.search !== "" || text.includes("?")) throw new WorkspaceHttpError(400, "TTS 端点不能带 query 参数。");
+  if (url.hash !== "" || text.includes("#")) throw new WorkspaceHttpError(400, "TTS 端点不能带 hash 片段。");
   if (url.protocol === "http:" && !LOOPBACK_TTS_HOSTS.has(url.hostname)) {
     throw new WorkspaceHttpError(400, "明文 http 只允许本机回环地址，其他端点必须使用 https。");
   }
@@ -391,10 +392,14 @@ export async function saveAudiobookProject(
   const version = baseVersion.trim();
   if (version === "") throw new WorkspaceHttpError(400, "缺少基础版本号。");
   const normalized = validateProject(project);
+  const serialized = serializeProject(normalized);
+  if (Buffer.byteLength(serialized, "utf8") > PROJECT_MAX_BYTES) {
+    throw new WorkspaceHttpError(413, "有声剧项目超过 512 KiB 大小限制。");
+  }
   try {
     const outcome = await realm.fs.writeText(
       resolved.target,
-      serializeProject(normalized),
+      serialized,
       { kind: "replaceIfVersion", version: version as FsVersion },
       undefined,
       realm.sandboxPolicy.resolve({ session: realm.agent.session }),

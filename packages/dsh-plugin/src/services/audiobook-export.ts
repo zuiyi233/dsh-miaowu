@@ -242,6 +242,11 @@ function stderrTail(stderr: string): string {
   return compact.length <= STDERR_TAIL_CHARS ? compact : `…${compact.slice(compact.length - STDERR_TAIL_CHARS)}`;
 }
 
+/** 章节成品音频的唯一构造点：`有声剧/<书>/音频/<章节>.mp3`。 */
+export function chapterAudioPathFor(projectPath: string, chapter: string): string {
+  return `${AUDIOBOOK_ROOT}/${projectDirectoryName(projectPath)}/${AUDIO_DIRECTORY}/${chapterName(chapter)}${MP3_EXTENSION}`;
+}
+
 /**
  * 导出整章 MP3：确认每个片段的缓存音频都存在，写 concat 清单，跑一次 ffmpeg
  * 合成到临时文件，ffprobe 确认时长后改名到最终路径；任何失败都清理清单与
@@ -255,7 +260,6 @@ export async function exportChapterMp3(
   runtime: AudiobookExportRuntime,
 ): Promise<AudiobookExportResult> {
   const name = chapterName(chapter);
-  const book = projectDirectoryName(record.path);
   const project = record.project;
   const voice = narratorVoice(project);
   const extension = audioExtension(project);
@@ -277,8 +281,8 @@ export async function exportChapterMp3(
     segmentTargets.push(target);
   }
 
-  const directoryPath = `${AUDIOBOOK_ROOT}/${book}/${AUDIO_DIRECTORY}`;
-  const outputPath = `${directoryPath}/${name}${MP3_EXTENSION}`;
+  const outputPath = chapterAudioPathFor(record.path, name);
+  const directoryPath = outputPath.slice(0, outputPath.lastIndexOf("/"));
   const output = await outputTarget(realm, directoryPath, outputPath);
   const jobKey = randomUUID();
   const listTarget = await tempTarget(realm, `${jobKey}${CONCAT_EXTENSION}`);

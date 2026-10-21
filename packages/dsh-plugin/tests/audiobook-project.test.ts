@@ -94,4 +94,27 @@ describe("audiobook project", () => {
     expect(() => validateTtsBaseUrl("https://user:pass@api.example.com/v1")).toThrow(/凭证/u);
     expect(() => validateTtsBaseUrl("https://api.example.com/v1?x=1")).toThrow(/query/u);
   });
+
+  it("拒绝只有分隔符的裸 query 与 hash", () => {
+    // `new URL("...?")` 的 search 为空，必须按原文识别出多余的 `?`/`#`。
+    expect(() => validateTtsBaseUrl("https://api.example.com/v1?")).toThrow(/query/u);
+    expect(() => validateTtsBaseUrl("https://api.example.com/v1#")).toThrow(/hash/u);
+    expect(() => validateTtsBaseUrl("http://127.0.0.1:8080/v1?#")).toThrow(/query/u);
+  });
+
+  it("保存超过 512 KiB 的项目在写盘前返回 413", async () => {
+    const { realm, writes } = memoryRealm(CHAPTERS);
+    const created = await createAudiobookProject(realm, {
+      bookRoot: "正文", name: "长夜行", voice: "alloy", baseUrl: "https://api.example.com/v1", model: "tts-1",
+    });
+    const writesBefore = writes.length;
+    const oversized = {
+      ...created.project,
+      cast: [{ ...created.project.cast[0]!, voice: "x".repeat(512 * 1_024) }],
+    };
+
+    await expect(saveAudiobookProject(realm, created.path, oversized, created.version))
+      .rejects.toMatchObject({ status: 413 });
+    expect(writes.length).toBe(writesBefore);
+  });
 });
