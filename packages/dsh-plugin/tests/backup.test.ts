@@ -227,6 +227,12 @@ describe("三类备份创建", () => {
     expect(verifyBundleHash(bundle as BackupBundle)).toBe(true);
   });
 
+  it("整体备份收录 有声剧/ 下的项目文本", async () => {
+    const { realm } = setup({ ...SEED, "有声剧/长夜行/project.json": '{"schemaVersion":1}' });
+    const paths = (await collectScopeFiles(realm, undefined, 1_000_000)).map((file) => file.path);
+    expect(paths).toContain("有声剧/长夜行/project.json");
+  });
+
   it("备份列表摘要含 kind/counts/hash 前 8 位,损坏文件降级跳过", async () => {
     const { realm } = setup(SEED);
     await createBackup(realm, "bundle", "正文", 1_000_000, Date.UTC(2026, 8, 5));

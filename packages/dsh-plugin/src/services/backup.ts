@@ -86,6 +86,7 @@ const BACKUP_CREATIVE_ROOTS = [
   "审查",
   "game-adaptations",
   "video-recaps",
+  "有声剧",
 ] as const;
 const BACKUP_ROOT_FILE = "short-drama.json";
 const MAX_BACKUP_FILES = 2000;
