@@ -1,9 +1,16 @@
 import { createHash } from "node:crypto";
-import type { FsTarget, FsWriteIntent } from "@deepseek-ai/dsh-fs";
+import type { FsTarget, FsVersion, FsWriteIntent } from "@deepseek-ai/dsh-fs";
 import { mapFsError, readVersionedFile, WorkspaceHttpError, type WorkspaceRealm } from "../workspace-route.js";
+import {
+  UNKNOWN_SPEAKER_ID,
+  isSpeakerAssignable,
+  resolveCast,
+} from "./audiobook-cast.js";
 import {
   AUDIOBOOK_ROOT,
   AUDIOBOOK_SCHEMA_VERSION,
+  type AudiobookAssignment,
+  type AudiobookAssignmentSummary,
   type AudiobookProjectRecord,
   type AudiobookScript,
   type AudiobookScriptRecord,
@@ -15,7 +22,7 @@ import {
  *
  * 切分只做纯函数变换（段落 → 旁白/对白片段），同样的输入永远得到同样的片段
  * 编号与源偏移，便于缓存键与断点重跑；对白统一是 `unknown` 说话人，旁白固定
- * `narrator`，N4-A 不做角色识别。持久化沿用项目文档的 CAS 习惯：新建
+ * `narrator`，N4-B 仍不做角色自动识别，由人工在脚本上指派。持久化沿用项目文档的 CAS 习惯：新建
  * `createIfAbsent`，覆盖 `replaceIfVersion`，已有脚本未确认时 409。
  */
 
@@ -39,11 +46,28 @@ export const SOURCE_MAX_BYTES = 4 * 1_024 * 1_024;
 const SCRIPT_MAX_BYTES = 4 * 1_024 * 1_024;
 
 const NARRATOR = "narrator";
-const UNKNOWN_SPEAKER = "unknown";
+const UNKNOWN_SPEAKER = UNKNOWN_SPEAKER_ID;
 
 /** 稳定片段编号：同一 (kind, speaker, text, sourceStart) 永远得到同一 id。 */
 export function segmentId(kind: AudiobookSegment["kind"], speakerId: string, text: string, sourceStart: number): string {
   return `s-${createHash("sha256").update(`${kind}|${speakerId}|${text}|${String(sourceStart)}`, "utf8").digest("hex").slice(0, 12)}`;
+}
+
+/** 重新解析的指派迁移键：说话人不参与，文本与源偏移相同即视为同一片段。 */
+function assignmentKey(segment: AudiobookSegment): string {
+  return `${segment.kind}\0${segment.text}\0${String(segment.sourceStart)}`;
+}
+
+/** 改说话人后按设计文档重算片段编号，cue 会因此悬空并需重新绑定。 */
+function withSpeaker(segment: AudiobookSegment, speakerId: string): AudiobookSegment {
+  if (speakerId === segment.speakerId) return segment;
+  return { ...segment, speakerId, id: segmentId(segment.kind, speakerId, segment.text, segment.sourceStart) };
+}
+
+/** 解析成功后的脚本与指派保留统计；路由把它原样返回给工作台。 */
+export interface AudiobookScriptParseResult {
+  readonly record: AudiobookScriptRecord;
+  readonly assignmentSummary: AudiobookAssignmentSummary;
 }
 
 /** 按空行切段，保留每段在源文本中的起始偏移。 */
@@ -270,11 +294,11 @@ function parseScriptDocument(content: string, chapter: string): AudiobookScript 
  * 变化由 mapFsError 映射为 412；新建用 createIfAbsent，并发创建同样 409。写入
  * 与工作台其他写路径一致，带上当前会话解析出的沙箱策略。
  */
-export async function saveChapterScript(
+async function writeChapterScript(
   realm: WorkspaceRealm,
   projectPath: string,
   script: AudiobookScript,
-  overwrite: boolean,
+  intent: FsWriteIntent,
 ): Promise<AudiobookScriptRecord> {
   const chapter = chapterName(script.chapter);
   const path = scriptPathFor(projectPath, chapter);
@@ -284,12 +308,6 @@ export async function saveChapterScript(
     throw new WorkspaceHttpError(413, "脚本超过 4 MiB 大小限制。");
   }
   const target = await scriptTarget(realm, projectPath, path);
-  const existing = await realm.fs.stat(target);
-  if (existing !== undefined && existing.type !== "file") throw new WorkspaceHttpError(415, "脚本路径不是普通文件。");
-  if (existing !== undefined && !overwrite) throw new WorkspaceHttpError(409, "脚本已存在，覆盖需要确认。");
-  const intent: FsWriteIntent = existing === undefined
-    ? { kind: "createIfAbsent" }
-    : { kind: "replaceIfVersion", version: existing.version };
   try {
     const outcome = await realm.fs.writeText(
       target,
@@ -304,6 +322,24 @@ export async function saveChapterScript(
     if (mapped?.status === 412 && intent.kind === "createIfAbsent") throw new WorkspaceHttpError(409, "脚本已存在，覆盖需要确认。");
     throw mapped ?? new WorkspaceHttpError(500, "脚本写入失败。");
   }
+}
+
+export async function saveChapterScript(
+  realm: WorkspaceRealm,
+  projectPath: string,
+  script: AudiobookScript,
+  overwrite: boolean,
+): Promise<AudiobookScriptRecord> {
+  const chapter = chapterName(script.chapter);
+  const path = scriptPathFor(projectPath, chapter);
+  const target = await scriptTarget(realm, projectPath, path);
+  const existing = await realm.fs.stat(target);
+  if (existing !== undefined && existing.type !== "file") throw new WorkspaceHttpError(415, "脚本路径不是普通文件。");
+  if (existing !== undefined && !overwrite) throw new WorkspaceHttpError(409, "脚本已存在，覆盖需要确认。");
+  const intent: FsWriteIntent = existing === undefined
+    ? { kind: "createIfAbsent" }
+    : { kind: "replaceIfVersion", version: existing.version };
+  return await writeChapterScript(realm, projectPath, script, intent);
 }
 
 /** 读取脚本：缺失返回 undefined；坏 JSON、错误 schemaVersion 或章节不符返回 422。 */
@@ -341,28 +377,121 @@ export async function assertScriptSourceFresh(realm: WorkspaceRealm, script: Aud
   if (sha256(file.content) !== script.sourceSha256) throw stale;
 }
 
+/** 旧脚本读取：缺失或损坏都视为没有可迁移的指派，其余错误照常上抛。 */
+async function loadPreviousScript(
+  realm: WorkspaceRealm,
+  projectPath: string,
+  chapter: string,
+): Promise<AudiobookScriptRecord | undefined> {
+  try {
+    return await loadChapterScript(realm, projectPath, chapter);
+  } catch (error) {
+    // 422 坏 JSON/schema、413 超限都属于可用 confirm 覆盖的旧脚本；权限错误照常上抛。
+    if (error instanceof WorkspaceHttpError && (error.status === 422 || error.status === 413)) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * 重新解析时迁移手工指派：只在 `(kind, text, sourceStart)` 相同的片段间保留，
+ * 文本改动的片段回到默认说话人，并在统计里记为 dropped。N4-A 的脚本没有指派时
+ * 这一步是空操作。
+ */
+function preserveAssignments(
+  previous: AudiobookScript | undefined,
+  segments: readonly AudiobookSegment[],
+): { readonly segments: readonly AudiobookSegment[]; readonly summary: AudiobookAssignmentSummary } {
+  if (previous === undefined) return { segments, summary: { preserved: 0, dropped: 0 } };
+  const carried = new Map<string, string>();
+  for (const old of previous.segments) {
+    if (old.kind !== "dialogue" || old.speakerId === UNKNOWN_SPEAKER) continue;
+    const key = assignmentKey(old);
+    if (!carried.has(key)) carried.set(key, old.speakerId);
+  }
+  if (carried.size === 0) return { segments, summary: { preserved: 0, dropped: 0 } };
+  const used = new Set<string>();
+  const next = segments.map((segment) => {
+    const key = assignmentKey(segment);
+    const speakerId = carried.get(key);
+    if (speakerId === undefined) return segment;
+    used.add(key);
+    return withSpeaker(segment, speakerId);
+  });
+  return { segments: next, summary: { preserved: used.size, dropped: carried.size - used.size } };
+}
+
 /**
  * 解析章节正文并落盘脚本：章节名取源文件名去掉 `.md`，sourceSha256 为正文
- * UTF-8 内容的 sha256；已存在脚本且未确认覆盖时返回 409。
+ * UTF-8 内容的 sha256；已存在脚本且未确认覆盖时返回 409。覆盖时按文本与源偏移
+ * 迁移手工说话人指派，返回保留/丢弃计数供工作台提示。
  */
 export async function parseChapterScript(
   realm: WorkspaceRealm,
   project: AudiobookProjectRecord,
   sourcePath: string,
   overwrite = false,
-): Promise<AudiobookScriptRecord> {
+): Promise<AudiobookScriptParseResult> {
   const path = workspacePathOrNull(sourcePath);
   if (path === null) throw new WorkspaceHttpError(400, "正文路径必须是工作区内的相对路径。");
   const target = await resolveInside(realm, path);
   const file = await readVersionedFile(realm.fs, target, SOURCE_MAX_BYTES);
   const name = path.slice(path.lastIndexOf("/") + 1);
   const chapter = chapterName(name.endsWith(SOURCE_EXTENSION) ? name.slice(0, -SOURCE_EXTENSION.length) : name);
+  const previous = await loadPreviousScript(realm, project.path, chapter);
+  const { segments, summary } = preserveAssignments(previous?.script, parseChapterText(file.content));
   const script: AudiobookScript = {
     schemaVersion: AUDIOBOOK_SCHEMA_VERSION,
     chapter,
     sourcePath: path,
     sourceSha256: sha256(file.content),
-    segments: parseChapterText(file.content),
+    segments,
   };
-  return saveChapterScript(realm, project.path, script, overwrite);
+  return { record: await saveChapterScript(realm, project.path, script, overwrite), assignmentSummary: summary };
+}
+
+/**
+ * 保存手工说话人指派：只改 `speakerId`（按设计文档重算片段 id），文本与源偏移
+ * 不动。`unknown` 用于清空；旁白段只允许保持旁白成员；角色必须存在于当前 cast。
+ * 使用客户端 `baseVersion` 做 CAS，避免覆盖另一个面板刚保存的指派。
+ */
+export async function assignChapterSpeakers(
+  realm: WorkspaceRealm,
+  project: AudiobookProjectRecord,
+  chapter: string,
+  baseVersion: string,
+  assignments: readonly AudiobookAssignment[],
+): Promise<AudiobookScriptRecord> {
+  const name = chapterName(chapter);
+  const version = baseVersion.trim();
+  if (version === "") throw new WorkspaceHttpError(400, "缺少基础版本号。");
+  if (assignments.length === 0) throw new WorkspaceHttpError(400, "没有需要保存的说话人指派。");
+  const record = await loadChapterScript(realm, project.path, name);
+  if (record === undefined) throw new WorkspaceHttpError(409, "章节脚本不存在，请先生成脚本。");
+  if (record.version !== version) throw new WorkspaceHttpError(412, "脚本已被其他修改，请刷新后重试。");
+  const cast = resolveCast(project.project);
+  const indexes = new Map(record.script.segments.map((segment, index) => [segment.id, index]));
+  const patches = new Map<number, string>();
+  for (const assignment of assignments) {
+    const index = indexes.get(assignment.segmentId);
+    if (index === undefined) throw new WorkspaceHttpError(400, `脚本里没有片段 ${assignment.segmentId}。`);
+    if (!isSpeakerAssignable(cast, assignment.speakerId)) {
+      throw new WorkspaceHttpError(400, `角色 ${assignment.speakerId} 不在角色表里。`);
+    }
+    const segment = record.script.segments[index]!;
+    if (segment.kind === "narration" && assignment.speakerId !== cast.narrator.id) {
+      throw new WorkspaceHttpError(400, "旁白片段只能由旁白角色朗读。");
+    }
+    if (patches.has(index)) throw new WorkspaceHttpError(400, `片段 ${assignment.segmentId} 重复指派。`);
+    patches.set(index, assignment.speakerId);
+  }
+  const segments = record.script.segments.map((segment, index) => {
+    const speakerId = patches.get(index);
+    return speakerId === undefined ? segment : withSpeaker(segment, speakerId);
+  });
+  return await writeChapterScript(
+    realm,
+    project.path,
+    { ...record.script, segments },
+    { kind: "replaceIfVersion", version: version as FsVersion },
+  );
 }

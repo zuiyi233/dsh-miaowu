@@ -12,3 +12,8 @@
 .oh-audiobook-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .oh-audiobook-actions .oh-diag-action { padding: 3px 7px; }
 .oh-audiobook-audio { display: block; width: 160px; height: 26px; }
+.oh-audiobook-cast-input { width: 100%; min-width: 96px; padding: 3px 5px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 5px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); font: inherit; }
+.oh-audiobook-cast-id { color: var(--dsw-alias-label-secondary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; word-break: break-all; }
+.oh-audiobook-segments tr[data-unassigned] td { color: var(--dsw-alias-state-danger-primary); }
+.oh-audiobook-segment-text { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oh-audiobook-segment-speaker { max-width: 160px; padding: 3px 5px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 5px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); font: inherit; }

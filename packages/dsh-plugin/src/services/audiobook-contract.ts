@@ -1,5 +1,5 @@
 /**
- * 有声剧（N4-A）领域契约。
+ * 有声剧（N4-B）领域契约。
  *
  * 只包含类型与常量：项目/脚本/job 的结构、路由、缓存与 job 目录。所有持久化
  * 文档都带 schemaVersion 1；密钥永不落盘——TTS 端点与模型写在项目里，密钥由
@@ -94,8 +94,26 @@ export interface AudiobookScriptRecord {
   readonly version: string;
 }
 
+/** 说话人指派的单条补丁：`unknown` 表示清空指派。 */
+export interface AudiobookAssignment {
+  readonly segmentId: string;
+  readonly speakerId: string;
+}
+
+/** 重新解析时手工指派的去向：文本与源偏移未变的片段保留，其余重置。 */
+export interface AudiobookAssignmentSummary {
+  readonly preserved: number;
+  readonly dropped: number;
+}
+
 /** `POST /oh-story/audiobook/script` 的成功响应；面板与路由共用同一形状。 */
 export interface AudiobookScriptParseResponse {
+  readonly script: AudiobookScriptRecord;
+  readonly assignmentSummary: AudiobookAssignmentSummary;
+}
+
+/** `GET/PUT /oh-story/audiobook/script` 的成功响应。 */
+export interface AudiobookScriptViewResponse {
   readonly script: AudiobookScriptRecord;
 }
 
@@ -136,6 +154,8 @@ export interface AudiobookChapterSummary {
   readonly scriptPath: string;
   readonly hasScript: boolean;
   readonly segmentCount: number;
+  /** 对白中说话人缺失或已从 cast 删除的段数；大于 0 时整章不能生成/导出。 */
+  readonly unassignedSegments: number;
   /** 脚本存在但读取/校验失败时的错误摘要；此时 hasScript 仍为 true、segmentCount 为 0。 */
   readonly scriptError?: string;
   readonly audioPath: string | null;

@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { createAudiobookProject, saveAudiobookProject } from "../src/services/audiobook-project.js";
+import type { AudiobookProjectRecord } from "../src/services/audiobook-contract.js";
 import {
+  assignChapterSpeakers,
   loadChapterScript,
   parseChapterScript,
   parseChapterText,
@@ -99,7 +101,7 @@ describe("parseChapterScript", () => {
       bookRoot: "正文", name: "长夜行", voice: "alloy", baseUrl: "https://api.example.com/v1", model: "tts-1",
     });
 
-    const record = await parseChapterScript(realm, project, SOURCE_PATH);
+    const { record, assignmentSummary } = await parseChapterScript(realm, project, SOURCE_PATH);
 
     expect(record.path).toBe("有声剧/长夜行/脚本/第0001章_开篇.json");
     expect(record.script.chapter).toBe(CHAPTER);
@@ -109,11 +111,12 @@ describe("parseChapterScript", () => {
       ["narration", "夜色。"],
       ["dialogue", "走吧。"],
     ]);
+    expect(assignmentSummary).toEqual({ preserved: 0, dropped: 0 });
     expect(JSON.parse(read(record.path) ?? "{}")).toMatchObject({ schemaVersion: 1, chapter: CHAPTER });
 
     await expect(parseChapterScript(realm, project, SOURCE_PATH)).rejects.toMatchObject({ status: 409 });
     const replaced = await parseChapterScript(realm, project, SOURCE_PATH, true);
-    expect(replaced.version).not.toBe(record.version);
+    expect(replaced.record.version).not.toBe(record.version);
     await expect(parseChapterScript(realm, project, "正文/第0009章_缺失.md")).rejects.toMatchObject({ status: 404 });
   });
 });
@@ -197,5 +200,98 @@ describe("脚本大小上限", () => {
     expect(writes).toHaveLength(0);
     expect(writeCalls).toHaveLength(0);
     expect(policyRequests).toHaveLength(0);
+  });
+});
+
+async function multiRoleProject(realm: Parameters<typeof createAudiobookProject>[0]): Promise<AudiobookProjectRecord> {
+  const created = await createAudiobookProject(realm, {
+    bookRoot: "正文", name: "长夜行", voice: "alloy", baseUrl: "https://api.example.com/v1", model: "tts-1",
+  });
+  return await saveAudiobookProject(realm, created.path, {
+    ...created.project,
+    cast: [
+      created.project.cast[0]!,
+      { id: "role-linfan", name: "林帆", kind: "character", voice: "verse" },
+      { id: "role-shen", name: "沈秋", kind: "character", voice: "echo" },
+    ],
+  }, created.version);
+}
+
+async function replaceSource(realm: Parameters<typeof createAudiobookProject>[0], path: string, content: string): Promise<void> {
+  const target = await realm.fs.resolve(path, { cwd: realm.cwd });
+  const info = await realm.fs.stat(target);
+  if (info === undefined || info.type !== "file") throw new Error("source missing");
+  await realm.fs.writeText(target, content, { kind: "replaceIfVersion", version: info.version });
+}
+
+describe("说话人指派", () => {
+  const SOURCE = "旁白。\n\n“林帆来了。”\n\n“我听见了。”\n";
+
+  it("按 segmentId 指派对白，重算 id 并做 CAS；非法目标被拒绝", async () => {
+    const { realm } = memoryRealm({ [SOURCE_PATH]: SOURCE });
+    const project = await multiRoleProject(realm);
+    const parsed = await parseChapterScript(realm, project, SOURCE_PATH);
+    const dialoges = parsed.record.script.segments.filter((segment) => segment.kind === "dialogue");
+    expect(dialoges).toHaveLength(2);
+    expect(dialoges.map((segment) => segment.speakerId)).toEqual(["unknown", "unknown"]);
+
+    const saved = await assignChapterSpeakers(
+      realm,
+      project,
+      CHAPTER,
+      parsed.record.version,
+      [{ segmentId: dialoges[0]!.id, speakerId: "role-linfan" }],
+    );
+    expect(saved.script.segments.find((segment) => segment.text === "林帆来了。")).toMatchObject({
+      speakerId: "role-linfan",
+      id: segmentId("dialogue", "role-linfan", "林帆来了。", dialoges[0]!.sourceStart),
+    });
+    expect(saved.script.segments.find((segment) => segment.text === "我听见了。")?.speakerId).toBe("unknown");
+    expect((await loadChapterScript(realm, PROJECT_PATH, CHAPTER))?.script).toEqual(saved.script);
+
+    await expect(assignChapterSpeakers(realm, project, CHAPTER, parsed.record.version, [
+      { segmentId: saved.script.segments[1]!.id, speakerId: "role-shen" },
+    ])).rejects.toMatchObject({ status: 412 });
+    await expect(assignChapterSpeakers(realm, project, CHAPTER, saved.version, [
+      { segmentId: "s-missing", speakerId: "role-shen" },
+    ])).rejects.toMatchObject({ status: 400 });
+    await expect(assignChapterSpeakers(realm, project, CHAPTER, saved.version, [
+      { segmentId: saved.script.segments[1]!.id, speakerId: "role-deleted" },
+    ])).rejects.toMatchObject({ status: 400 });
+    await expect(assignChapterSpeakers(realm, project, CHAPTER, saved.version, [
+      { segmentId: saved.script.segments[0]!.id, speakerId: "role-shen" },
+    ])).rejects.toMatchObject({ status: 400, message: expect.stringContaining("旁白片段") });
+    await expect(assignChapterSpeakers(realm, project, CHAPTER, saved.version, [
+      { segmentId: saved.script.segments[1]!.id, speakerId: "role-linfan" },
+      { segmentId: saved.script.segments[1]!.id, speakerId: "role-shen" },
+    ])).rejects.toMatchObject({ status: 400, message: expect.stringContaining("重复") });
+
+    const cleared = await assignChapterSpeakers(realm, project, CHAPTER, saved.version, [
+      { segmentId: saved.script.segments[1]!.id, speakerId: "unknown" },
+    ]);
+    expect(cleared.script.segments[1]?.speakerId).toBe("unknown");
+  });
+
+  it("重新解析保留文本未变片段的指派，文本变化的片段记 dropped", async () => {
+    const { realm } = memoryRealm({ [SOURCE_PATH]: SOURCE });
+    const project = await multiRoleProject(realm);
+    const parsed = await parseChapterScript(realm, project, SOURCE_PATH);
+    const dialogue = parsed.record.script.segments.filter((segment) => segment.kind === "dialogue");
+    const assigned = await assignChapterSpeakers(realm, project, CHAPTER, parsed.record.version, [
+      { segmentId: dialogue[0]!.id, speakerId: "role-linfan" },
+      { segmentId: dialogue[1]!.id, speakerId: "role-shen" },
+    ]);
+
+    const reused = await parseChapterScript(realm, project, SOURCE_PATH, true);
+    expect(reused.assignmentSummary).toEqual({ preserved: 2, dropped: 0 });
+    expect(reused.record.script.segments.filter((segment) => segment.kind === "dialogue").map((segment) => segment.speakerId))
+      .toEqual(["role-linfan", "role-shen"]);
+
+    await replaceSource(realm, SOURCE_PATH, "旁白。\n\n“林帆走了。”\n\n“我听见了。”\n");
+    const changed = await parseChapterScript(realm, project, SOURCE_PATH, true);
+    expect(changed.assignmentSummary).toEqual({ preserved: 1, dropped: 1 });
+    expect(changed.record.script.segments.filter((segment) => segment.kind === "dialogue").map((segment) => [segment.text, segment.speakerId]))
+      .toEqual([["林帆走了。", "unknown"], ["我听见了。", "role-shen"]]);
+    expect(assigned.version).not.toBe(changed.record.version);
   });
 });

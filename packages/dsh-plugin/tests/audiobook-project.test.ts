@@ -75,6 +75,26 @@ describe("audiobook project", () => {
     await expect(saveAudiobookProject(realm, created.path, next, created.version)).rejects.toMatchObject({ status: 412 });
   });
 
+  it("保存并恢复多角色音色映射", async () => {
+    const { realm } = memoryRealm(CHAPTERS);
+    const created = await createAudiobookProject(realm, {
+      bookRoot: "正文", name: "长夜行", voice: "alloy", baseUrl: "https://api.example.com/v1", model: "tts-1",
+    });
+    const cast = [
+      created.project.cast[0]!,
+      { id: "role-linfan", name: "林帆", kind: "character" as const, voice: "verse" },
+      { id: "role-shen", name: "沈秋", kind: "character" as const, voice: "echo" },
+      { id: "role-gu", name: "顾遥", kind: "character" as const, voice: "shimmer" },
+    ];
+
+    const saved = await saveAudiobookProject(realm, created.path, { ...created.project, cast }, created.version);
+    const loaded = await loadAudiobookProject(realm, created.path);
+
+    expect(saved.project.cast).toEqual(cast);
+    expect(loaded.project.cast).toEqual(cast);
+    expect(loaded.version).toBe(saved.version);
+  });
+
   it("加载项目只接受 有声剧/ 下 schemaVersion 1 的文件", async () => {
     const { realm } = memoryRealm({ ...CHAPTERS, "有声剧/旧项目/project.json": JSON.stringify({ schemaVersion: 2 }) });
     const created = await createAudiobookProject(realm, {
@@ -100,6 +120,30 @@ describe("audiobook project", () => {
     expect(() => validateTtsBaseUrl("https://api.example.com/v1?")).toThrow(/query/u);
     expect(() => validateTtsBaseUrl("https://api.example.com/v1#")).toThrow(/hash/u);
     expect(() => validateTtsBaseUrl("http://127.0.0.1:8080/v1?#")).toThrow(/query/u);
+  });
+
+  it("保存与加载都拒绝重复旁白、重复 id 与保留 unknown 角色", async () => {
+    const { realm } = memoryRealm(CHAPTERS);
+    const created = await createAudiobookProject(realm, {
+      bookRoot: "正文", name: "长夜行", voice: "alloy", baseUrl: "https://api.example.com/v1", model: "tts-1",
+    });
+    const narrator = created.project.cast[0]!;
+    const character = { id: "role-linfan", name: "林帆", kind: "character" as const, voice: "verse" };
+
+    await expect(saveAudiobookProject(realm, created.path, {
+      ...created.project,
+      cast: [narrator, { ...character, kind: "narrator" }],
+    }, created.version)).rejects.toMatchObject({ status: 422, message: expect.stringContaining("恰好有一个旁白") });
+
+    await expect(saveAudiobookProject(realm, created.path, {
+      ...created.project,
+      cast: [narrator, character, { ...character, name: "另一个林帆" }],
+    }, created.version)).rejects.toMatchObject({ status: 422, message: expect.stringContaining("id 重复") });
+
+    await expect(saveAudiobookProject(realm, created.path, {
+      ...created.project,
+      cast: [narrator, { ...character, id: "unknown" }],
+    }, created.version)).rejects.toMatchObject({ status: 422, message: expect.stringContaining("保留值") });
   });
 
   it("拒绝以点开头的项目名，避免创建后从项目列举里消失", async () => {

@@ -400,6 +400,7 @@ describe("GET /oh-story/audiobook/project", () => {
     const first = view.chapters[0]!;
     expect(first.hasScript).toBe(true);
     expect(first.segmentCount).toBe(2);
+    expect(first.unassignedSegments).toBe(0);
     expect(first.scriptPath).toBe(SCRIPT_PATH);
     expect(first.audioPath).toBe(AUDIO_PATH);
     expect(first.jobId).toBe(JOB_ID);
@@ -407,6 +408,7 @@ describe("GET /oh-story/audiobook/project", () => {
     const second = view.chapters[1]!;
     expect(second.hasScript).toBe(false);
     expect(second.segmentCount).toBe(0);
+    expect(second.unassignedSegments).toBe(0);
     expect(second.audioPath).toBeNull();
     expect(second.jobId).toBeNull();
     expect(view.preflight.ttsKey).toBe("present");
@@ -971,6 +973,130 @@ describe("未知路由", () => {
     const harness = fixture();
     expect((await callRoute(harness, "GET", "/oh-story/audiobook/unknown")).handled).toBe(false);
     expect((await callRoute(harness, "GET", "/oh-story/audiobook/export")).handled).toBe(false);
+    expect(harness.writes).toHaveLength(0);
+  });
+});
+
+describe("GET/PUT /oh-story/audiobook/script", () => {
+  const MULTI_PROJECT: AudiobookProject = {
+    ...PROJECT,
+    cast: [
+      ...PROJECT.cast,
+      { id: "role-linfan", name: "林帆", kind: "character", voice: "verse" },
+    ],
+  };
+  const MULTI_SCRIPT: AudiobookScript = {
+    ...SCRIPT,
+    segments: [
+      ...SCRIPT.segments,
+      { id: "s-dialog", kind: "dialogue", speakerId: "unknown", text: "走吧。", sourceStart: 6, sourceEnd: 9 },
+    ],
+  };
+
+  function multiFixture(): Fixture {
+    return fixture({
+      seed: {
+        [PROJECT_PATH]: JSON.stringify(MULTI_PROJECT),
+        [SCRIPT_PATH]: JSON.stringify(MULTI_SCRIPT),
+      },
+    });
+  }
+
+  it("GET 只读返回单章脚本，缺脚本 404，越界项目路径 403", async () => {
+    const harness = multiFixture();
+    const result = await callRoute(
+      harness,
+      "GET",
+      `/oh-story/audiobook/script?path=${encodeURIComponent(PROJECT_PATH)}&chapter=${encodeURIComponent(CHAPTER)}`,
+    );
+
+    expect(result.status).toBe(200);
+    const record = asRecord(asRecord(result.json)["script"]);
+    expect(record["path"]).toBe(SCRIPT_PATH);
+    expect(String(record["version"])).not.toBe("");
+    expect(asRecord(record["script"])["segments"]).toHaveLength(3);
+    expect(harness.writes).toHaveLength(0);
+
+    const missing = await callRoute(
+      harness,
+      "GET",
+      `/oh-story/audiobook/script?path=${encodeURIComponent(PROJECT_PATH)}&chapter=${encodeURIComponent(SECOND_CHAPTER)}`,
+    );
+    expect(missing.status).toBe(404);
+
+    const denied = await callRoute(
+      harness,
+      "GET",
+      `/oh-story/audiobook/script?path=${encodeURIComponent("正文/project.json")}&chapter=${encodeURIComponent(CHAPTER)}`,
+    );
+    expect(denied.status).toBe(403);
+    expect(harness.writes).toHaveLength(0);
+  });
+
+  it("PUT 只改说话人并重算 id，旧 baseVersion 返回 412", async () => {
+    const harness = multiFixture();
+    const loaded = await callRoute(
+      harness,
+      "GET",
+      `/oh-story/audiobook/script?path=${encodeURIComponent(PROJECT_PATH)}&chapter=${encodeURIComponent(CHAPTER)}`,
+    );
+    const loadedRecord = asRecord(asRecord(loaded.json)["script"]);
+    const version = String(loadedRecord["version"]);
+
+    const saved = await callRoute(harness, "PUT", "/oh-story/audiobook/script", {
+      path: PROJECT_PATH,
+      chapter: CHAPTER,
+      baseVersion: version,
+      assignments: [{ segmentId: "s-dialog", speakerId: "role-linfan" }],
+    });
+
+    expect(saved.status).toBe(200);
+    const savedRecord = asRecord(asRecord(saved.json)["script"]);
+    expect(String(savedRecord["version"])).not.toBe(version);
+    const dialogue = (asRecord(savedRecord["script"])["segments"] as unknown[])
+      .map((segment) => asRecord(segment))
+      .find((segment) => segment["text"] === "走吧。")!;
+    expect(dialogue["speakerId"]).toBe("role-linfan");
+    expect(dialogue["id"]).not.toBe("s-dialog");
+    expect(harness.writes).toEqual([SCRIPT_PATH]);
+
+    const stale = await callRoute(harness, "PUT", "/oh-story/audiobook/script", {
+      path: PROJECT_PATH,
+      chapter: CHAPTER,
+      baseVersion: version,
+      assignments: [{ segmentId: "s-dialog", speakerId: "role-linfan" }],
+    });
+    expect(stale.status).toBe(412);
+
+    const unknownRole = await callRoute(harness, "PUT", "/oh-story/audiobook/script", {
+      path: PROJECT_PATH,
+      chapter: CHAPTER,
+      baseVersion: String(savedRecord["version"]),
+      assignments: [{ segmentId: String(dialogue["id"]), speakerId: "role-deleted" }],
+    });
+    expect(unknownRole.status).toBe(400);
+
+    const empty = await callRoute(harness, "PUT", "/oh-story/audiobook/script", {
+      path: PROJECT_PATH,
+      chapter: CHAPTER,
+      baseVersion: String(savedRecord["version"]),
+      assignments: [],
+    });
+    expect(empty.status).toBe(400);
+  });
+
+  it("章节摘要统计未指派对白", async () => {
+    const harness = multiFixture();
+    const result = await callRoute(
+      harness,
+      "GET",
+      `/oh-story/audiobook/project?path=${encodeURIComponent(PROJECT_PATH)}`,
+    );
+
+    expect(result.status).toBe(200);
+    const view = projectView(result);
+    expect(view.chapters[0]?.unassignedSegments).toBe(1);
+    expect(view.chapters[1]?.unassignedSegments).toBe(0);
     expect(harness.writes).toHaveLength(0);
   });
 });

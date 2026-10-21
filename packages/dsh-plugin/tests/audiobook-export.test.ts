@@ -10,6 +10,7 @@ import {
   type MemoryBinaryFileStore,
 } from "../src/services/audiobook-binary.js";
 import { segmentAudioPath, ttsCacheKey } from "../src/services/audiobook-cache.js";
+import { segmentVoice, resolveCast } from "../src/services/audiobook-cast.js";
 import type {
   AudiobookProject,
   AudiobookProjectRecord,
@@ -68,11 +69,11 @@ const RECORD_PATH = "有声剧/长夜行/project.json";
 const FINAL_PATH = "有声剧/长夜行/音频/第0001章_开篇.mp3";
 const TEMP_PREFIX = ".oh-story/audiobook/tmp/";
 
-function cacheKeyFor(text: string, format: "mp3" | "wav" = "mp3"): string {
+function cacheKeyFor(text: string, format: "mp3" | "wav" = "mp3", voice = "alloy"): string {
   return ttsCacheKey({
     baseUrl: TTS.baseUrl,
     model: TTS.model,
-    voice: "alloy",
+    voice,
     speed: TTS.speed,
     responseFormat: format,
     text,
@@ -90,14 +91,25 @@ interface Fixture {
 }
 
 function fixture(
-  options: { readonly responseFormat?: "mp3" | "wav"; readonly run?: CommandRunner["run"] } = {},
+  options: {
+    readonly responseFormat?: "mp3" | "wav";
+    readonly run?: CommandRunner["run"];
+    readonly project?: AudiobookProject;
+    readonly script?: AudiobookScript;
+    readonly cache?: boolean;
+  } = {},
 ): Fixture {
   const format = options.responseFormat ?? "mp3";
-  const project: AudiobookProject = { ...PROJECT, tts: { ...TTS, responseFormat: format } };
+  const project: AudiobookProject = options.project ?? { ...PROJECT, tts: { ...TTS, responseFormat: format } };
+  const script = options.script ?? SCRIPT;
   const { realm } = memoryRealm();
   const binary = memoryBinaryFileStore();
-  for (const segment of SCRIPT.segments) {
-    binary.files.set(segmentAudioPath(cacheKeyFor(segment.text, format), format), new Uint8Array([1, 2, 3]));
+  const cast = resolveCast(project);
+  for (const segment of script.segments) {
+    if (options.cache === false) continue;
+    const voice = segmentVoice(cast, segment);
+    if (voice === undefined) continue;
+    binary.files.set(segmentAudioPath(cacheKeyFor(segment.text, format, voice), format), new Uint8Array([1, 2, 3]));
   }
   const calls: string[][] = [];
   const lists: string[] = [];
@@ -128,7 +140,7 @@ function fixture(
     calls,
     lists,
     record: { project, path: RECORD_PATH, version: "v1" },
-    script: SCRIPT,
+    script,
   };
 }
 
@@ -529,4 +541,56 @@ it.skipIf(!realToolsReady)(`真实 ffmpeg 合成整章 MP3（${REAL_SKIP_REASON}
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+describe("exportChapterMp3 多角色", () => {
+  const MULTI_PROJECT: AudiobookProject = {
+    ...PROJECT,
+    cast: [
+      { id: "narrator", name: "旁白", kind: "narrator", voice: "alloy" },
+      { id: "role-linfan", name: "林帆", kind: "character", voice: "verse" },
+    ],
+  };
+  const MULTI_SCRIPT: AudiobookScript = {
+    schemaVersion: 1,
+    chapter: "第0001章_开篇",
+    sourcePath: "正文/第0001章_开篇.md",
+    sourceSha256: "0".repeat(64),
+    segments: [
+      { id: "s-1", kind: "narration", speakerId: "narrator", text: "旁白。", sourceStart: 0, sourceEnd: 3 },
+      { id: "s-2", kind: "dialogue", speakerId: "role-linfan", text: "林帆来了。", sourceStart: 5, sourceEnd: 10 },
+    ],
+  };
+
+  it("按每段角色音色查缓存，concat 清单包含两个不同的缓存键", async () => {
+    const { realm, runtime, record, script, lists } = fixture({ project: MULTI_PROJECT, script: MULTI_SCRIPT });
+
+    const result = await exportChapterMp3(realm, record, CHAPTER, script, runtime);
+
+    expect(result.path).toBe(FINAL_PATH);
+    expect(lists).toHaveLength(1);
+    expect(lists[0]).toContain(cacheKeyFor("旁白。", "mp3", "alloy"));
+    expect(lists[0]).toContain(cacheKeyFor("林帆来了。", "mp3", "verse"));
+    expect(lists[0]).not.toContain(cacheKeyFor("林帆来了。", "mp3", "alloy"));
+  });
+
+  it("缺少任一角色的缓存音频就拒绝整章导出，不调用 ffmpeg", async () => {
+    const { realm, runtime, record, script, calls } = fixture({ project: MULTI_PROJECT, script: MULTI_SCRIPT, cache: false });
+
+    await expect(exportChapterMp3(realm, record, CHAPTER, script, runtime))
+      .rejects.toMatchObject({ status: 409, message: expect.stringContaining("还没有完整生成") });
+    expect(calls).toEqual([]);
+  });
+
+  it("未指派对白在导出前被拦截，不调用 ffmpeg", async () => {
+    const unassigned: AudiobookScript = {
+      ...MULTI_SCRIPT,
+      segments: MULTI_SCRIPT.segments.map((segment) => segment.kind === "dialogue" ? { ...segment, speakerId: "unknown" } : segment),
+    };
+    const { realm, runtime, record, script, calls } = fixture({ project: MULTI_PROJECT, script: unassigned, cache: false });
+
+    await expect(exportChapterMp3(realm, record, CHAPTER, script, runtime))
+      .rejects.toMatchObject({ status: 409, message: expect.stringContaining("1 段对白") });
+    expect(calls).toEqual([]);
+  });
 });

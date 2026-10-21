@@ -9,11 +9,13 @@ import {
   type WorkspaceRealm,
   type WorkspaceRouteOptions,
 } from "../workspace-route.js";
+import { resolveCast, unassignedSegmentsIn } from "./audiobook-cast.js";
 import { hostBinaryFileStore } from "./audiobook-binary.js";
 import {
   AUDIOBOOK_ACTIVE_JOB_STATUSES,
   AUDIOBOOK_CACHE_ROOT,
   AUDIOBOOK_ROUTES,
+  type AudiobookAssignment,
   type AudiobookChapterSummary,
   type AudiobookJob,
   type AudiobookOverview,
@@ -50,7 +52,7 @@ import {
   validateTtsBaseUrl,
 } from "./audiobook-project.js";
 import { registerWorkspaceExtension } from "./registry.js";
-import { loadChapterScript, parseChapterScript, scriptPathFor, assertScriptSourceFresh } from "./audiobook-script.js";
+import { assignChapterSpeakers, loadChapterScript, parseChapterScript, scriptPathFor, assertScriptSourceFresh } from "./audiobook-script.js";
 import { OpenAiCompatibleTtsClient } from "./audiobook-tts.js";
 
 /**
@@ -146,6 +148,26 @@ function requiredString(body: Readonly<Record<string, unknown>>, key: string): s
   return value.trim();
 }
 
+/** 指派请求只接受 `{ segmentId, speakerId }[]`；业务校验（片段/角色是否存在）留给脚本服务。 */
+function assignmentList(value: unknown): readonly AudiobookAssignment[] {
+  if (!Array.isArray(value) || value.length === 0) throw new WorkspaceHttpError(400, "assignments 必须是非空数组。");
+  return value.map((item, index) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      throw new WorkspaceHttpError(400, `assignments[${String(index)}] 必须是对象。`);
+    }
+    const record = item as Readonly<Record<string, unknown>>;
+    const segmentId = record["segmentId"];
+    const speakerId = record["speakerId"];
+    if (typeof segmentId !== "string" || segmentId.trim() === "") {
+      throw new WorkspaceHttpError(400, `assignments[${String(index)}].segmentId 必须是非空字符串。`);
+    }
+    if (typeof speakerId !== "string" || speakerId.trim() === "") {
+      throw new WorkspaceHttpError(400, `assignments[${String(index)}].speakerId 必须是非空字符串。`);
+    }
+    return { segmentId: segmentId.trim(), speakerId: speakerId.trim() };
+  });
+}
+
 /**
  * 可选字符串字段：请求体优先，缺省（未提供或空串）时回退宿主环境变量；
  * 两处都没有值时返回 400，错误里同时点出字段名与环境变量名。
@@ -197,6 +219,7 @@ function otherActiveJob(jobs: readonly AudiobookJob[], current: AudiobookJob): A
 
 async function chapterSummaries(realm: WorkspaceRealm, record: AudiobookProjectRecord): Promise<AudiobookChapterSummary[]> {
   const jobs = await listAudiobookJobs(realm);
+  const cast = resolveCast(record.project);
   const summaries: AudiobookChapterSummary[] = [];
   for (const sourcePath of record.project.source.chapters) {
     const chapter = chapterNameOf(sourcePath);
@@ -204,11 +227,13 @@ async function chapterSummaries(realm: WorkspaceRealm, record: AudiobookProjectR
     const scriptInfo = await realm.fs.stat(await realm.fs.resolve(scriptPath, { cwd: realm.cwd }));
     const hasScript = scriptInfo?.type === "file";
     let segmentCount = 0;
+    let unassignedSegments = 0;
     let scriptError: string | undefined;
     if (hasScript) {
       try {
         const script = await loadChapterScript(realm, record.path, chapter);
         segmentCount = script?.script.segments.length ?? 0;
+        unassignedSegments = script === undefined ? 0 : unassignedSegmentsIn(cast, script.script).length;
       } catch (error) {
         // 单章脚本损坏只降级该章摘要，不拖垮整个项目视图；其余错误照常上抛。
         if (!(error instanceof WorkspaceHttpError) || error.status !== 422) throw error;
@@ -224,6 +249,7 @@ async function chapterSummaries(realm: WorkspaceRealm, record: AudiobookProjectR
       scriptPath,
       hasScript,
       segmentCount,
+      unassignedSegments,
       ...(scriptError === undefined ? {} : { scriptError }),
       audioPath: audioInfo?.type === "file" ? audioPath : null,
       jobId: job?.id ?? null,
@@ -362,23 +388,53 @@ export async function handleAudiobookRequest(
       }
     }
 
-    if (url.pathname === AUDIOBOOK_ROUTES.script && method === "POST") {
-      const body = await jsonBody(request, BODY_LIMIT);
-      assertNoSecretKeys(body, "body");
-      const chapter = requiredString(body, "chapter");
-      const realm = await workspaceRealm(context, url);
-      const record = await loadAudiobookProject(realm, requiredString(body, "path"));
-      const sourcePath = record.project.source.chapters.find((candidate) => chapterNameOf(candidate) === chapter);
-      if (sourcePath === undefined) throw new WorkspaceHttpError(404, "有声剧项目里没有该章节。");
-      const confirm = body["confirm"] === true;
-      // 存在性只看 stat，不预先解析：损坏脚本也要能用 confirm 覆盖。
-      const scriptPath = scriptPathFor(record.path, chapter);
-      const existing = await realm.fs.stat(await realm.fs.resolve(scriptPath, { cwd: realm.cwd }));
-      if (existing !== undefined && !confirm) {
-        throw new WorkspaceHttpError(400, "章节脚本已存在，覆盖需要显式确认（confirm: true）。");
+    if (url.pathname === AUDIOBOOK_ROUTES.script) {
+      if (method === "GET") {
+        const path = url.searchParams.get("path")?.trim() ?? "";
+        const chapter = url.searchParams.get("chapter")?.trim() ?? "";
+        if (path === "" || chapter === "") throw new WorkspaceHttpError(400, "缺少有声剧项目路径或章节。");
+        const realm = await workspaceRealm(context, url);
+        const record = await loadAudiobookProject(realm, path);
+        const script = await loadChapterScript(realm, record.path, chapter);
+        if (script === undefined) throw new WorkspaceHttpError(404, "章节脚本不存在。");
+        send(response, 200, { script });
+        return true;
       }
-      send(response, 200, { script: await parseChapterScript(realm, record, sourcePath, confirm) });
-      return true;
+      if (method === "POST") {
+        const body = await jsonBody(request, BODY_LIMIT);
+        assertNoSecretKeys(body, "body");
+        const chapter = requiredString(body, "chapter");
+        const realm = await workspaceRealm(context, url);
+        const record = await loadAudiobookProject(realm, requiredString(body, "path"));
+        const sourcePath = record.project.source.chapters.find((candidate) => chapterNameOf(candidate) === chapter);
+        if (sourcePath === undefined) throw new WorkspaceHttpError(404, "有声剧项目里没有该章节。");
+        const confirm = body["confirm"] === true;
+        // 存在性只看 stat，不预先解析：损坏脚本也要能用 confirm 覆盖。
+        const scriptPath = scriptPathFor(record.path, chapter);
+        const existing = await realm.fs.stat(await realm.fs.resolve(scriptPath, { cwd: realm.cwd }));
+        if (existing !== undefined && !confirm) {
+          throw new WorkspaceHttpError(400, "章节脚本已存在，覆盖需要显式确认（confirm: true）。");
+        }
+        const parsed = await parseChapterScript(realm, record, sourcePath, confirm);
+        send(response, 200, { script: parsed.record, assignmentSummary: parsed.assignmentSummary });
+        return true;
+      }
+      if (method === "PUT") {
+        const body = await jsonBody(request, BODY_LIMIT);
+        assertNoSecretKeys(body, "body");
+        const assignments = assignmentList(body["assignments"]);
+        const realm = await workspaceRealm(context, url);
+        const record = await loadAudiobookProject(realm, requiredString(body, "path"));
+        const script = await assignChapterSpeakers(
+          realm,
+          record,
+          requiredString(body, "chapter"),
+          requiredString(body, "baseVersion"),
+          assignments,
+        );
+        send(response, 200, { script });
+        return true;
+      }
     }
 
     if (url.pathname === AUDIOBOOK_ROUTES.jobs && method === "POST") {

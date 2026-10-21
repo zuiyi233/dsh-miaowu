@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { FsTarget, FsVersion } from "@deepseek-ai/dsh-fs";
 import { mapFsError, readVersionedFile, WorkspaceHttpError, type WorkspaceRealm } from "../workspace-route.js";
+import { assertAssignable, requiredSegmentVoice, resolveCast } from "./audiobook-cast.js";
 import type { BinaryFileStore } from "./audiobook-binary.js";
 import {
   planChapterCost,
@@ -33,7 +34,7 @@ import type { TtsClient } from "./audiobook-tts.js";
  * 任务文档固定落 `.oh-story/audiobook/jobs/<id>.json`（schemaVersion 1），只在
  * 创建时 `createIfAbsent`，之后每次状态/计数变化都用读取到的版本做 CAS；写入
  * 一律带当前会话解析出的沙箱策略。任务里只有路径、计数与成本，没有正文全文、
- * 没有密钥。N4-A 不做重启自动恢复：进程重启后已存的状态原样保留，排队/运行中
+ * 没有密钥。N4-B 仍不做重启自动恢复：进程重启后已存的状态原样保留，排队/运行中
  * 的残留任务可由显式请求恢复；同一任务在同一进程内只允许一个执行者，顶层失败
  * 会尽力把任务标成 failed，不让它永远停在 running。
  */
@@ -184,15 +185,6 @@ function requireTtsKey(runtime: AudiobookJobRuntime): string {
   return apiKey;
 }
 
-/** N4-A 所有片段（含对白）都用旁白音色；缺旁白无法合成，返回 422。 */
-function narratorVoice(project: AudiobookProject): string {
-  const narrator = project.cast.find((member) => member.kind === "narrator");
-  if (narrator === undefined || narrator.voice.trim() === "") {
-    throw new WorkspaceHttpError(422, "有声剧项目缺少旁白音色。");
-  }
-  return narrator.voice;
-}
-
 function audioExtension(project: AudiobookProject): CachedAudioExtension {
   return project.tts.responseFormat;
 }
@@ -222,9 +214,10 @@ async function cachedAudioTarget(
 }
 
 /**
- * 章节成本预估：先要求运行时密钥（缺密钥 503，不触碰文件系统），再按旁白音色
- * 为每个片段构造缓存键并用二进制存储确认是否已有音频；命中数交给
- * `planChapterCost` 做与缓存模块一致的计费（只计未命中的字符）。
+ * 章节成本预估：先要求运行时密钥（缺密钥 503，不触碰文件系统），再按每段解析
+ * 出的音色构造缓存键并用二进制存储确认是否已有音频；命中数交给
+ * `planChapterCost` 做与缓存模块一致的计费（只计未命中的字符）。未指派说话人
+ * 的对白在密钥检查之后、任何缓存/计费之前返回 409。
  */
 export async function planChapterJob(
   realm: WorkspaceRealm,
@@ -234,16 +227,17 @@ export async function planChapterJob(
 ): Promise<AudiobookCostEstimate> {
   requireTtsKey(runtime);
   const project = record.project;
-  const voice = narratorVoice(project);
+  const cast = resolveCast(project);
+  assertAssignable(cast, script);
   const extension = audioExtension(project);
   const keys = await Promise.all(script.segments.map(async (segment) => {
-    const key = cacheKeyFor(project, voice, segment.text);
+    const key = cacheKeyFor(project, requiredSegmentVoice(cast, segment), segment.text);
     const cached = await runtime.binary.stat(await cachedAudioTarget(realm, key, extension));
     // 零字节缓存文件（写入中断）不算命中，与导出「size <= 0 即未生成」保持一致。
     return cached === undefined || cached.size <= 0 ? undefined : key;
   }));
   const cached = new Set(keys.filter((key): key is string => key !== undefined));
-  return planChapterCost(project, script, cached);
+  return planChapterCost(project, script, cached, (segment) => requiredSegmentVoice(cast, segment));
 }
 
 /**
@@ -361,10 +355,12 @@ async function executeChapterJob(
   const scriptRecord = await loadChapterScript(realm, loaded.job.projectPath, loaded.job.chapter);
   if (scriptRecord === undefined) throw new WorkspaceHttpError(409, "章节脚本不存在，无法执行有声剧任务。");
   const project = projectRecord.project;
-  const voice = narratorVoice(project);
+  const cast = resolveCast(project);
   const extension = audioExtension(project);
   const script = scriptRecord.script;
   if (script.segments.length === 0) throw new WorkspaceHttpError(409, "章节脚本没有可生成的片段。");
+  // 排队后脚本/角色表可能被改过：执行前再拦一次未指派，任务落 failed 而不是用错音色。
+  assertAssignable(cast, script);
 
   let record = await persistJob(realm, {
     ...loaded.job,
@@ -394,6 +390,7 @@ async function executeChapterJob(
       return paused.job;
     }
 
+    const voice = requiredSegmentVoice(cast, segment);
     const key = cacheKeyFor(project, voice, segment.text);
     const cached = await runtime.binary.stat(await cachedAudioTarget(realm, key, extension));
     if (cached === undefined || cached.size <= 0) {

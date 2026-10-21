@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { FsTarget } from "@deepseek-ai/dsh-fs";
 import { WorkspaceHttpError, type WorkspaceRealm } from "../workspace-route.js";
+import { assertAssignable, requiredSegmentVoice, resolveCast } from "./audiobook-cast.js";
 import type { BinaryFileStore } from "./audiobook-binary.js";
 import { segmentAudioPath, ttsCacheKey, type CachedAudioExtension } from "./audiobook-cache.js";
 import {
@@ -203,15 +204,6 @@ function projectDirectoryName(projectPath: string): string {
   return segments[1] ?? "";
 }
 
-/** N4-A 所有片段（含对白）都用旁白音色合成；缺旁白无法导出，返回 422。 */
-function narratorVoice(project: AudiobookProject): string {
-  const narrator = project.cast.find((member) => member.kind === "narrator");
-  if (narrator === undefined || narrator.voice.trim() === "") {
-    throw new WorkspaceHttpError(422, "有声剧项目缺少旁白音色。");
-  }
-  return narrator.voice;
-}
-
 function audioExtension(project: AudiobookProject): CachedAudioExtension {
   return project.tts.responseFormat;
 }
@@ -313,16 +305,17 @@ export async function exportChapterMp3(
 ): Promise<AudiobookExportResult> {
   const name = chapterName(chapter);
   const project = record.project;
-  const voice = narratorVoice(project);
+  const cast = resolveCast(project);
   const extension = audioExtension(project);
   if (script.segments.length === 0) throw new WorkspaceHttpError(409, `${name}还没有可导出的片段。`);
+  assertAssignable(cast, script);
 
   const segmentTargets: FsTarget[] = [];
   for (const segment of script.segments) {
     const key = ttsCacheKey({
       baseUrl: project.tts.baseUrl,
       model: project.tts.model,
-      voice,
+      voice: requiredSegmentVoice(cast, segment),
       speed: project.tts.speed,
       responseFormat: extension,
       text: segment.text,

@@ -1,5 +1,6 @@
 import type { FsDirEntry, FsTarget, FsVersion } from "@deepseek-ai/dsh-fs";
 import { mapFsError, readVersionedFile, WorkspaceHttpError, type WorkspaceRealm } from "../workspace-route.js";
+import { assertValidCast } from "./audiobook-cast.js";
 import {
   AUDIOBOOK_ROOT,
   AUDIOBOOK_SCHEMA_VERSION,
@@ -245,7 +246,7 @@ function parseTts(value: unknown): AudiobookTtsConfig {
 }
 
 function parseCast(value: unknown): readonly AudiobookCastMember[] {
-  return asArray(value, "cast").map((item, index) => {
+  const cast = asArray(value, "cast").map((item, index) => {
     const member = asRecord(item, `cast[${index}]`);
     return {
       id: asText(member["id"], `cast[${index}].id`),
@@ -254,6 +255,8 @@ function parseCast(value: unknown): readonly AudiobookCastMember[] {
       voice: asText(member["voice"], `cast[${index}].voice`),
     };
   });
+  assertValidCast(cast);
+  return cast;
 }
 
 function parseCues(value: unknown): readonly AudiobookCue[] {

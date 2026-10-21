@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  AudiobookAssignment,
+  AudiobookCastMember,
   AudiobookChapterSummary,
   AudiobookCostEstimate,
   AudiobookJob,
@@ -8,6 +10,8 @@ import type {
   AudiobookProjectRecord,
   AudiobookProjectView,
   AudiobookScriptParseResponse,
+  AudiobookScriptRecord,
+  AudiobookScriptViewResponse,
 } from "../../services/audiobook-contract.js";
 import { endpoint } from "../workbench-ui.js";
 import { registerWorkbenchFeature, type WorkbenchFeatureProps } from "./registry.js";
@@ -68,6 +72,14 @@ function postJson<T>(url: string, body: unknown): Promise<T> {
   }).then(jsonOrThrow<T>);
 }
 
+function putJson<T>(url: string, body: unknown): Promise<T> {
+  return fetch(url, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(jsonOrThrow<T>);
+}
+
 function projectNameOf(path: string): string {
   const segments = path.split("/");
   return segments.length >= 3 ? (segments.at(-2) ?? path) : path;
@@ -115,6 +127,175 @@ export function generateConfirmText(chapter: string, estimate: AudiobookCostEsti
   return `将为「${chapter}」调用 TTS 服务：共 ${String(estimate.segments)} 段，${String(estimate.requests)} 次请求（缓存命中 ${String(estimate.cacheHits)} 段），预估 ${formatCost(estimate.estimatedCost)}。确认开始生成？`;
 }
 
+export interface AudiobookSegmentsView {
+  readonly chapter: string;
+  readonly record: AudiobookScriptRecord;
+}
+
+const CAST_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
+
+/** 客户端只做即时可判的校验；id 格式、保留值与服务端保持同一套规则。 */
+export function castDraftValid(cast: readonly AudiobookCastMember[]): boolean {
+  const narrators = cast.filter((member) => member.kind === "narrator").length;
+  const ids = new Set(cast.map((member) => member.id));
+  return narrators === 1
+    && ids.size === cast.length
+    && cast.every((member) => CAST_ID_PATTERN.test(member.id)
+      && member.id !== "unknown"
+      && member.name.trim() !== ""
+      && member.voice.trim() !== "");
+}
+
+function nextCharacterId(cast: readonly AudiobookCastMember[]): string {
+  const ids = new Set(cast.map((member) => member.id));
+  for (let index = 1; ; index += 1) {
+    const candidate = `role-${String(index)}`;
+    if (!ids.has(candidate)) return candidate;
+  }
+}
+
+interface CastEditorProps {
+  readonly cast: readonly AudiobookCastMember[];
+  readonly busy: boolean;
+  readonly onSave?: ((cast: readonly AudiobookCastMember[]) => void) | undefined;
+}
+
+/** 角色与音色编辑器：保存整份 cast，服务端按 baseVersion 做 CAS。 */
+function CastEditor({ cast, busy, onSave }: CastEditorProps): JSX.Element {
+  const [draft, setDraft] = useState<readonly AudiobookCastMember[]>(cast);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(cast);
+  const valid = castDraftValid(draft);
+  const update = (index: number, patch: Partial<AudiobookCastMember>): void => {
+    setDraft(draft.map((member, current) => current === index ? { ...member, ...patch } : member));
+  };
+  const addCharacter = (): void => {
+    setDraft([...draft, { id: nextCharacterId(draft), name: "新角色", kind: "character", voice: "" }]);
+  };
+  const removeCharacter = (index: number): void => {
+    const member = draft[index];
+    if (member === undefined || member.kind === "narrator") return;
+    if (!globalThis.confirm(`删除角色「${member.name}」会让引用它的对白变成未指派。确认删除？`)) return;
+    setDraft(draft.filter((_, current) => current !== index));
+  };
+  return <section className="oh-diag-group" aria-label="有声剧角色">
+    <h4 className="oh-diag-group-title">角色与音色</h4>
+    <table className="oh-audiobook-table oh-audiobook-cast">
+      <thead>
+        <tr><th>类型</th><th>id</th><th>显示名</th><th>音色</th><th>操作</th></tr>
+      </thead>
+      <tbody>
+        {draft.map((member, index) => <tr key={member.id}>
+          <td>{member.kind === "narrator" ? "旁白" : "角色"}</td>
+          <td className="oh-audiobook-cast-id">{member.id}</td>
+          <td><input
+            className="oh-audiobook-cast-input"
+            value={member.name}
+            disabled={busy}
+            onChange={(event) => { update(index, { name: event.target.value }); }}
+          /></td>
+          <td><input
+            className="oh-audiobook-cast-input"
+            value={member.voice}
+            placeholder="如 alloy"
+            disabled={busy}
+            onChange={(event) => { update(index, { voice: event.target.value }); }}
+          /></td>
+          <td>{member.kind === "narrator"
+            ? "—"
+            : <button
+              type="button"
+              className="oh-diag-action"
+              disabled={busy}
+              onClick={() => { removeCharacter(index); }}
+            >删除</button>}</td>
+        </tr>)}
+      </tbody>
+    </table>
+    <div className="oh-audiobook-actions">
+      <button type="button" className="oh-diag-action" disabled={busy} onClick={addCharacter}>添加角色</button>
+      <button
+        type="button"
+        className="oh-diag-action"
+        disabled={busy || !dirty || !valid || onSave === undefined}
+        onClick={() => { if (dirty && valid) onSave?.(draft); }}
+      >保存角色</button>
+    </div>
+    {valid ? null : <p className="oh-diag-error" role="alert">
+      角色 id 必须唯一且只含字母、数字、下划线或连字符；显示名与音色不能为空；必须恰好一个旁白。
+    </p>}
+  </section>;
+}
+
+interface SegmentEditorProps {
+  readonly view: AudiobookSegmentsView;
+  readonly cast: readonly AudiobookCastMember[];
+  readonly busy: boolean;
+  readonly onClose?: (() => void) | undefined;
+  readonly onSave?: ((chapter: string, assignments: readonly AudiobookAssignment[]) => void) | undefined;
+}
+
+/** 章节分段指派：只把改动过的 segmentId 发给服务端，未指派段保持可见并阻止生成。 */
+function SegmentEditor({ view, cast, busy, onClose, onSave }: SegmentEditorProps): JSX.Element {
+  const [edits, setEdits] = useState<ReadonlyMap<string, string>>(new Map());
+  const castIds = new Set(cast.map((member) => member.id));
+  const assignments = view.record.script.segments
+    .filter((segment) => edits.has(segment.id) && edits.get(segment.id) !== segment.speakerId)
+    .map((segment) => ({ segmentId: segment.id, speakerId: edits.get(segment.id) ?? segment.speakerId }));
+  const effectiveSpeaker = (segment: AudiobookScriptRecord["script"]["segments"][number]): string =>
+    edits.get(segment.id) ?? segment.speakerId;
+  const unassigned = view.record.script.segments.filter((segment) =>
+    segment.kind === "dialogue"
+    && (effectiveSpeaker(segment) === "unknown" || !castIds.has(effectiveSpeaker(segment)))).length;
+  const setSpeaker = (segmentId: string, speakerId: string): void => {
+    const next = new Map(edits);
+    next.set(segmentId, speakerId);
+    setEdits(next);
+  };
+  return <section className="oh-diag-group" aria-label="有声剧分段">
+    <h4 className="oh-diag-group-title">分段指派 · {view.chapter}</h4>
+    <table className="oh-audiobook-table oh-audiobook-segments">
+      <thead><tr><th>类型</th><th>文本</th><th>说话人</th></tr></thead>
+      <tbody>
+        {view.record.script.segments.map((segment) => {
+          const speaker = effectiveSpeaker(segment);
+          const missing = speaker !== "unknown" && !castIds.has(speaker);
+          const unassignedRow = segment.kind === "dialogue" && (speaker === "unknown" || missing);
+          return <tr key={segment.id} data-unassigned={unassignedRow ? "" : undefined}>
+            <td>{segment.kind === "narration" ? "旁白" : "对白"}</td>
+            <td className="oh-audiobook-segment-text" title={segment.text}>{segment.text}</td>
+            <td>{segment.kind === "narration"
+              ? "旁白"
+              : <select
+                className="oh-audiobook-segment-speaker"
+                value={speaker}
+                disabled={busy}
+                onChange={(event) => { setSpeaker(segment.id, event.target.value); }}
+              >
+                <option value="unknown">未指派</option>
+                {missing ? <option value={speaker}>已删除角色（{speaker}）</option> : null}
+                {cast.map((member) => <option key={member.id} value={member.id}>
+                  {member.name}{member.kind === "narrator" ? "（旁白）" : ""}
+                </option>)}
+              </select>}</td>
+          </tr>;
+        })}
+      </tbody>
+    </table>
+    <div className="oh-audiobook-actions">
+      <button
+        type="button"
+        className="oh-diag-action"
+        disabled={busy || assignments.length === 0 || onSave === undefined}
+        onClick={() => { if (assignments.length > 0) onSave?.(view.chapter, assignments); }}
+      >保存指派</button>
+      {onClose === undefined ? null : <button type="button" className="oh-diag-action" disabled={busy} onClick={onClose}>收起</button>}
+    </div>
+    {unassigned === 0
+      ? null
+      : <p className="oh-diag-error" role="alert">还有 {String(unassigned)} 段对白未指派说话人，整章不能生成或导出。</p>}
+  </section>;
+}
+
 export interface AudiobookViewProps {
   readonly overview: AudiobookOverview;
   readonly view?: AudiobookProjectView | undefined;
@@ -134,6 +315,11 @@ export interface AudiobookViewProps {
   readonly onExport: (chapter: string) => void;
   readonly onSelectProject?: ((path: string) => void) | undefined;
   readonly audioUrl?: ((path: string) => string) | undefined;
+  readonly segments?: AudiobookSegmentsView | undefined;
+  readonly onLoadSegments?: ((chapter: string) => void) | undefined;
+  readonly onCloseSegments?: (() => void) | undefined;
+  readonly onSaveCast?: ((cast: readonly AudiobookCastMember[]) => void) | undefined;
+  readonly onSaveAssignments?: ((chapter: string, assignments: readonly AudiobookAssignment[]) => void) | undefined;
 }
 
 /** 纯展示组件：只吃 props，可在 SSR/测试里直接渲染。 */
@@ -155,6 +341,11 @@ export function AudiobookView({
   onExport,
   onSelectProject,
   audioUrl,
+  segments,
+  onLoadSegments,
+  onCloseSegments,
+  onSaveCast,
+  onSaveAssignments,
 }: AudiobookViewProps): JSX.Element {
   const draft = draftProp ?? defaultDraft(overview);
   const createReady = draft.bookRoot !== "" && draft.name.trim() !== "" && draft.voice.trim() !== "";
@@ -265,21 +456,32 @@ export function AudiobookView({
           <p className="oh-diag-check-summary">
             TTS：{view.record.project.tts.model} · {view.record.project.tts.baseUrl} · 旁白音色：{narratorVoiceOf(view.record)}
           </p>
+          <CastEditor
+            key={`${view.record.path}:${view.record.version}`}
+            cast={view.record.project.cast}
+            busy={busy}
+            onSave={onSaveCast}
+          />
           {view.chapters.length === 0
             ? <p className="oh-diag-empty">项目里还没有章节。</p>
             : <table className="oh-audiobook-table">
               <thead>
                 <tr>
-                  <th>章节</th><th>脚本</th><th>段数</th><th>任务</th><th>估算成本</th><th>音频</th><th>操作</th>
+                  <th>章节</th><th>脚本</th><th>段数</th><th>未指派</th><th>任务</th><th>估算成本</th><th>音频</th><th>操作</th>
                 </tr>
               </thead>
               <tbody>
                 {view.chapters.map((chapter) => {
                   const chapterEstimate = estimateFor(chapter.chapter);
+                  const blocked = chapter.unassignedSegments > 0;
+                  const blockedTitle = blocked ? `有 ${String(chapter.unassignedSegments)} 段对白未指派说话人` : undefined;
                   return <tr key={chapter.chapter}>
                     <td className="oh-audiobook-chapter">{chapter.chapter}</td>
                     <td>{scriptStateOf(chapter)}</td>
                     <td>{String(chapter.segmentCount)}</td>
+                    <td>{chapter.unassignedSegments > 0
+                      ? <span className="oh-diag-chip" data-kind="p0">未指派 {String(chapter.unassignedSegments)}</span>
+                      : "—"}</td>
                     <td>{chapter.jobStatus === null ? "—" : JOB_LABELS[chapter.jobStatus]}</td>
                     <td>{chapterEstimate === undefined ? "—" : formatCost(chapterEstimate.estimatedCost)}</td>
                     <td>
@@ -300,19 +502,28 @@ export function AudiobookView({
                         <button
                           type="button"
                           className="oh-diag-action"
-                          disabled={busy || !chapter.hasScript}
+                          disabled={busy || !chapter.hasScript || onLoadSegments === undefined}
+                          onClick={() => { onLoadSegments?.(chapter.chapter); }}
+                        >分段</button>
+                        <button
+                          type="button"
+                          className="oh-diag-action"
+                          title={blockedTitle}
+                          disabled={busy || !chapter.hasScript || blocked}
                           onClick={() => { onDryRun(chapter.chapter); }}
                         >估算</button>
                         <button
                           type="button"
                           className="oh-diag-action"
-                          disabled={busy || !chapter.hasScript}
+                          title={blockedTitle}
+                          disabled={busy || !chapter.hasScript || blocked}
                           onClick={() => { onGenerate(chapter.chapter); }}
                         >生成</button>
                         <button
                           type="button"
                           className="oh-diag-action"
-                          disabled={busy || !chapter.hasScript}
+                          title={blockedTitle}
+                          disabled={busy || !chapter.hasScript || blocked}
                           onClick={() => { onExport(chapter.chapter); }}
                         >导出 MP3</button>
                       </div>
@@ -324,6 +535,14 @@ export function AudiobookView({
           {estimate === undefined ? null : <p className="oh-diag-check-summary">
             估算成本：{formatCost(estimate.estimatedCost)} · {String(estimate.segments)} 段 · {String(estimate.chars)} 字符 · {String(estimate.requests)} 次请求 · 缓存命中 {String(estimate.cacheHits)}
           </p>}
+          {segments === undefined ? null : <SegmentEditor
+            key={`${segments.record.path}:${segments.record.version}`}
+            view={segments}
+            cast={view.record.project.cast}
+            busy={busy}
+            onClose={onCloseSegments}
+            onSave={onSaveAssignments}
+          />}
         </section>}
     </div>
   </div>;
@@ -332,6 +551,7 @@ export function AudiobookView({
 function AudiobookPanel({ sessionId }: WorkbenchFeatureProps): JSX.Element {
   const [overview, setOverview] = useState<AudiobookOverview | undefined>(undefined);
   const [projectView, setProjectView] = useState<AudiobookProjectView | undefined>(undefined);
+  const [segmentsView, setSegmentsView] = useState<AudiobookSegmentsView | undefined>(undefined);
   const [estimate, setEstimate] = useState<{ readonly chapter: string; readonly value: AudiobookCostEstimate } | undefined>(undefined);
   const [draft, setDraft] = useState<AudiobookDraft>({ bookRoot: "", name: "", voice: NARRATOR_FALLBACK_VOICE });
   const [error, setError] = useState<string | undefined>(undefined);
@@ -352,6 +572,7 @@ function AudiobookPanel({ sessionId }: WorkbenchFeatureProps): JSX.Element {
       const target = payload.projects.find((project) => project.path === preferred) ?? payload.projects[0];
       if (target === undefined) {
         setProjectView(undefined);
+        setSegmentsView(undefined);
         setEstimate(undefined);
         setDraft(defaultDraft(payload));
         return;
@@ -400,6 +621,7 @@ function AudiobookPanel({ sessionId }: WorkbenchFeatureProps): JSX.Element {
         voice,
       });
       if (id !== requestId.current) return;
+      setSegmentsView(undefined);
       setNotice(`已创建项目 ${payload.record.path}。`);
       await load(payload.record.path);
     } catch (failure) {
@@ -409,6 +631,77 @@ function AudiobookPanel({ sessionId }: WorkbenchFeatureProps): JSX.Element {
       if (id === requestId.current) setPending(undefined);
     }
   }, [load, sessionId]);
+
+  const loadSegments = useCallback(async (chapter: string): Promise<void> => {
+    const current = projectView;
+    if (current === undefined) return;
+    const id = ++requestId.current;
+    setPending(`segments:${chapter}`);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      const url = new URL(endpoint("audiobook/script", sessionId, current.record.path));
+      url.searchParams.set("chapter", chapter);
+      const payload = await jsonOrThrow<AudiobookScriptViewResponse>(await fetch(url.toString()));
+      if (id !== requestId.current) return;
+      setSegmentsView({ chapter, record: payload.script });
+    } catch (failure) {
+      if (id !== requestId.current) return;
+      setError(failure instanceof Error ? failure.message : "读取章节脚本失败。");
+    } finally {
+      if (id === requestId.current) setPending(undefined);
+    }
+  }, [projectView, sessionId]);
+
+  const saveCast = useCallback(async (cast: readonly AudiobookCastMember[]): Promise<void> => {
+    const current = projectView;
+    if (current === undefined) return;
+    const id = ++requestId.current;
+    setPending("cast");
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      const payload = await putJson<{ readonly record: AudiobookProjectRecord }>(
+        endpoint("audiobook/project", sessionId),
+        { path: current.record.path, baseVersion: current.record.version, project: { ...current.record.project, cast } },
+      );
+      if (id !== requestId.current) return;
+      setNotice(`已保存 ${String(payload.record.project.cast.length)} 个角色。`);
+      await load(current.record.path);
+    } catch (failure) {
+      if (id !== requestId.current) return;
+      setError(failure instanceof Error ? failure.message : "保存角色失败。");
+    } finally {
+      if (id === requestId.current) setPending(undefined);
+    }
+  }, [load, projectView, sessionId]);
+
+  const saveAssignments = useCallback(async (chapter: string, assignments: readonly AudiobookAssignment[]): Promise<void> => {
+    const current = projectView;
+    const segments = segmentsView;
+    if (current === undefined || segments === undefined || segments.chapter !== chapter) return;
+    const id = ++requestId.current;
+    setPending(`assign:${chapter}`);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      const payload = await putJson<AudiobookScriptViewResponse>(endpoint("audiobook/script", sessionId), {
+        path: current.record.path,
+        chapter,
+        baseVersion: segments.record.version,
+        assignments,
+      });
+      if (id !== requestId.current) return;
+      setSegmentsView({ chapter, record: payload.script });
+      setNotice(`已保存「${chapter}」的 ${String(assignments.length)} 条说话人指派。`);
+      await load(current.record.path);
+    } catch (failure) {
+      if (id !== requestId.current) return;
+      setError(failure instanceof Error ? failure.message : "保存说话人指派失败。");
+    } finally {
+      if (id === requestId.current) setPending(undefined);
+    }
+  }, [load, projectView, segmentsView, sessionId]);
 
   const parse = useCallback(async (chapter: string): Promise<void> => {
     const current = projectView;
@@ -426,7 +719,12 @@ function AudiobookPanel({ sessionId }: WorkbenchFeatureProps): JSX.Element {
         { path: current.record.path, chapter, confirm: overwrite }
       );
       if (id !== requestId.current) return;
-      setNotice(`已解析「${chapter}」，共 ${String(parsedSegmentCount(payload))} 段。`);
+      setSegmentsView(undefined);
+      const summary = payload.assignmentSummary;
+      const kept = summary === undefined
+        ? ""
+        : `；保留 ${String(summary.preserved)} 条说话人指派${summary.dropped > 0 ? `，${String(summary.dropped)} 条因文本变化重置` : ""}`;
+      setNotice(`已解析「${chapter}」，共 ${String(parsedSegmentCount(payload))} 段${kept}。`);
       await load(current.record.path);
     } catch (failure) {
       if (id !== requestId.current) return;
@@ -543,8 +841,13 @@ function AudiobookPanel({ sessionId }: WorkbenchFeatureProps): JSX.Element {
         onDryRun={(chapter) => { void dryRun(chapter); }}
         onGenerate={(chapter) => { void generate(chapter); }}
         onExport={(chapter) => { void exportChapter(chapter); }}
-        onSelectProject={(path) => { void load(path); }}
+        onSelectProject={(path) => { setSegmentsView(undefined); void load(path); }}
         audioUrl={(path) => endpoint("media", sessionId, path)}
+        segments={segmentsView}
+        onLoadSegments={(chapter) => { void loadSegments(chapter); }}
+        onCloseSegments={() => { setSegmentsView(undefined); }}
+        onSaveCast={(cast) => { void saveCast(cast); }}
+        onSaveAssignments={(chapter, assignments) => { void saveAssignments(chapter, assignments); }}
       />}
   </div>;
 }

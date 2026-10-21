@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FsTarget } from "@deepseek-ai/dsh-fs";
 import { describe, expect, it } from "vitest";
-import { WorkspaceHttpError, type WorkspaceRealm } from "../src/workspace-route.js";
+import type { WorkspaceRealm } from "../src/workspace-route.js";
 import { hostBinaryFileStore, memoryBinaryFileStore } from "../src/services/audiobook-binary.js";
 import {
   planChapterCost,
@@ -81,10 +81,36 @@ describe("audiobook cache", () => {
   });
 
   it("成本只计算缓存未命中的字符", () => {
-    const estimate = planChapterCost(PROJECT, SCRIPT, new Set());
+    const voiceFor = (): string => "alloy";
+    const estimate = planChapterCost(PROJECT, SCRIPT, new Set(), voiceFor);
     expect(estimate).toMatchObject({ segments: 2, chars: 6, cacheHits: 0, requests: 2 });
     expect(estimate.estimatedCost).toBe(0.00009);
-    expect(planChapterCost(PROJECT, SCRIPT, new Set([CACHED_KEY])).cacheHits).toBe(1);
+    expect(planChapterCost(PROJECT, SCRIPT, new Set([CACHED_KEY]), voiceFor).cacheHits).toBe(1);
+  });
+
+  it("逐段音色参与缓存键：旁白与角色各算各的命中", () => {
+    const mixed: AudiobookScript = {
+      ...SCRIPT,
+      segments: [
+        { id: "s-1", text: "你好。", kind: "narration", speakerId: "narrator", sourceStart: 0, sourceEnd: 3 },
+        { id: "s-2", text: "世界。", kind: "dialogue", speakerId: "role-linfan", sourceStart: 3, sourceEnd: 6 },
+      ],
+    };
+    const dialogueKey = ttsCacheKey({
+      baseUrl: "https://api.example.com/v1",
+      model: "tts-1",
+      voice: "verse",
+      speed: 1,
+      responseFormat: "mp3",
+      text: "世界。",
+    });
+    const voiceFor = (segment: AudiobookScript["segments"][number]): string =>
+      segment.kind === "narration" ? "alloy" : "verse";
+
+    const estimate = planChapterCost(PROJECT, mixed, new Set([CACHED_KEY]), voiceFor);
+    expect(estimate).toMatchObject({ segments: 2, chars: 6, cacheHits: 1, requests: 1 });
+    expect(estimate.estimatedCost).toBe(0.000045);
+    expect(planChapterCost(PROJECT, mixed, new Set([CACHED_KEY, dialogueKey]), voiceFor).cacheHits).toBe(2);
   });
 
   it("meta.bytes 与音频实测长度不一致时拒绝写入", async () => {
@@ -242,22 +268,12 @@ describe("audiobook cache 路径安全", () => {
 });
 
 describe("planChapterCost 边界", () => {
-  it("缺少旁白音色时返回 422", () => {
-    try {
-      planChapterCost({ ...PROJECT, cast: [] }, SCRIPT, new Set());
-      expect.unreachable("缺少旁白时不应给出成本预估");
-    } catch (error) {
-      expect(error).toBeInstanceOf(WorkspaceHttpError);
-      expect(error).toMatchObject({ status: 422 });
-    }
-  });
-
   it("单段命中只减少请求数与计费字符", () => {
     const hit = ttsCacheKey({
       baseUrl: "https://api.example.com/v1", model: "tts-1", voice: "alloy", speed: 1, responseFormat: "mp3", text: "你好。",
     });
 
-    const estimate = planChapterCost(PROJECT, SCRIPT, new Set([hit]));
+    const estimate = planChapterCost(PROJECT, SCRIPT, new Set([hit]), () => "alloy");
 
     expect(estimate).toMatchObject({ segments: 2, chars: 6, cacheHits: 1, requests: 1 });
     expect(estimate.estimatedCost).toBe(0.000045);
@@ -273,7 +289,7 @@ describe("planChapterCost 边界", () => {
       segments: [{ id: "s-1", text: "一二三四五", kind: "narration", speakerId: "narrator", sourceStart: 0, sourceEnd: 5 }],
     };
 
-    const estimate = planChapterCost(cheapProject, fiveCharScript, new Set());
+    const estimate = planChapterCost(cheapProject, fiveCharScript, new Set(), () => "alloy");
 
     expect(estimate).toMatchObject({ segments: 1, chars: 5, cacheHits: 0, requests: 1 });
     expect(estimate.estimatedCost).toBe(0.000002);

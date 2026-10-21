@@ -20,8 +20,9 @@ import {
   runChapterJob,
   type AudiobookJobRuntime,
 } from "../src/services/audiobook-jobs.js";
-import { loadAudiobookProject } from "../src/services/audiobook-project.js";
-import { OpenAiCompatibleTtsClient, type TtsClient } from "../src/services/audiobook-tts.js";
+import { loadAudiobookProject, saveAudiobookProject } from "../src/services/audiobook-project.js";
+import { assignChapterSpeakers, loadChapterScript, segmentId } from "../src/services/audiobook-script.js";
+import { OpenAiCompatibleTtsClient, type TtsClient, type TtsFetch } from "../src/services/audiobook-tts.js";
 import { SANDBOX_POLICY, memoryRealm } from "./audiobook-fixtures.js";
 
 const PROJECT_PATH = "有声剧/长夜行/project.json";
@@ -627,4 +628,212 @@ it("空脚本不能创建任务，也不能执行", async () => {
 
   await expect(runChapterJob(realm, "empty-1", runtime)).rejects.toMatchObject({ status: 409 });
   expect((await loadAudiobookJob(realm, "empty-1")).job.status).toBe("failed");
+});
+
+function multiRoleProject(): AudiobookProject {
+  return {
+    ...projectWith(),
+    cast: [
+      { id: "narrator", name: "旁白", kind: "narrator", voice: "alloy" },
+      { id: "role-linfan", name: "林帆", kind: "character", voice: "verse" },
+      { id: "role-shen", name: "沈秋", kind: "character", voice: "echo" },
+    ],
+  };
+}
+
+function multiRoleScript(speakerId = "role-linfan"): AudiobookScript {
+  const narration = "旁白。";
+  const dialogue = "林帆来了。";
+  return {
+    schemaVersion: 1,
+    chapter: CHAPTER,
+    sourcePath: SOURCE_PATH,
+    sourceSha256: "0".repeat(64),
+    segments: [
+      { id: segmentId("narration", "narrator", narration, 0), kind: "narration", speakerId: "narrator", text: narration, sourceStart: 0, sourceEnd: 3 },
+      { id: segmentId("dialogue", speakerId, dialogue, 5), kind: "dialogue", speakerId, text: dialogue, sourceStart: 5, sourceEnd: 10 },
+    ],
+  };
+}
+
+function multiFixture(script: AudiobookScript = multiRoleScript()) {
+  return memoryRealm({
+    [SOURCE_PATH]: "旁白。\n\n“林帆来了。”\n",
+    [PROJECT_PATH]: JSON.stringify(multiRoleProject()),
+    [SCRIPT_PATH]: JSON.stringify(script),
+  });
+}
+
+function recordingTts(): { readonly fetchImpl: TtsFetch; readonly bodies: { voice?: string; input?: string }[] } {
+  const bodies: { voice?: string; input?: string }[] = [];
+  const fetchImpl: TtsFetch = vi.fn(async (_url: string, init: RequestInit): Promise<Response> => {
+    bodies.push(JSON.parse(String(init.body)) as { voice?: string; input?: string });
+    return new Response(new Uint8Array([1, 2]), { status: 200, headers: { "content-type": "audio/mpeg" } });
+  });
+  return { fetchImpl, bodies };
+}
+
+it("多角色按各自音色合成，改指派后只重生成受影响段", async () => {
+  const { realm } = multiFixture();
+  const binary = memoryBinaryFileStore();
+  const { fetchImpl, bodies } = recordingTts();
+  const runtime = runtimeFor(new OpenAiCompatibleTtsClient({ fetchImpl }), binary);
+  const record = await loadAudiobookProject(realm, PROJECT_PATH);
+
+  const first = await createChapterJob(realm, record, CHAPTER, runtime);
+  const firstDone = await runChapterJob(realm, first.job.id, runtime);
+
+  expect(firstDone.status).toBe("completed");
+  expect(bodies.map((body) => [body.voice, body.input])).toEqual([
+    ["alloy", "旁白。"],
+    ["verse", "林帆来了。"],
+  ]);
+
+  const requestsBeforeReplay = bodies.length;
+  const replay = await createChapterJob(realm, record, CHAPTER, runtime);
+  const replayDone = await runChapterJob(realm, replay.job.id, runtime);
+  expect(replayDone.status).toBe("completed");
+  expect(replayDone.actualRequests).toBe(0);
+  expect(bodies.length).toBe(requestsBeforeReplay);
+
+  const scriptRecord = await loadChapterScript(realm, PROJECT_PATH, CHAPTER);
+  await assignChapterSpeakers(realm, record, CHAPTER, scriptRecord!.version, [
+    { segmentId: scriptRecord!.script.segments[1]!.id, speakerId: "role-shen" },
+  ]);
+  const updated = await loadChapterScript(realm, PROJECT_PATH, CHAPTER);
+  const estimate = await planChapterJob(realm, record, updated!.script, runtime);
+  expect(estimate).toEqual({
+    segments: 2,
+    chars: 8,
+    cacheHits: 1,
+    requests: 1,
+    estimatedCost: 0.000075,
+  });
+
+  const nextJob = await createChapterJob(realm, record, CHAPTER, runtime);
+  const nextDone = await runChapterJob(realm, nextJob.job.id, runtime);
+  expect(nextDone.status).toBe("completed");
+  expect(nextDone.actualRequests).toBe(1);
+  expect(bodies.slice(requestsBeforeReplay).map((body) => [body.voice, body.input])).toEqual([
+    ["echo", "林帆来了。"],
+  ]);
+});
+
+it("改角色音色只失效该角色的分段", async () => {
+  const { realm } = multiFixture();
+  const binary = memoryBinaryFileStore();
+  const { fetchImpl, bodies } = recordingTts();
+  const runtime = runtimeFor(new OpenAiCompatibleTtsClient({ fetchImpl }), binary);
+  const record = await loadAudiobookProject(realm, PROJECT_PATH);
+  const first = await createChapterJob(realm, record, CHAPTER, runtime);
+  await runChapterJob(realm, first.job.id, runtime);
+  const requestsBefore = bodies.length;
+
+  const updated = await saveAudiobookProject(realm, record.path, {
+    ...record.project,
+    cast: record.project.cast.map((member) => member.id === "role-linfan" ? { ...member, voice: "verse2" } : member),
+  }, record.version);
+  const script = await loadChapterScript(realm, PROJECT_PATH, CHAPTER);
+  const estimate = await planChapterJob(realm, updated, script!.script, runtime);
+  expect(estimate).toEqual({
+    segments: 2,
+    chars: 8,
+    cacheHits: 1,
+    requests: 1,
+    estimatedCost: 0.000075,
+  });
+
+  const next = await createChapterJob(realm, updated, CHAPTER, runtime);
+  await runChapterJob(realm, next.job.id, runtime);
+  expect(bodies.slice(requestsBefore).map((body) => [body.voice, body.input])).toEqual([
+    ["verse2", "林帆来了。"],
+  ]);
+});
+
+it("未指派对白拦截预估、新建与执行，执行中的任务落 failed", async () => {
+  const { realm, writes } = multiFixture(multiRoleScript("unknown"));
+  const binary = memoryBinaryFileStore();
+  const fetchImpl = audioFetch();
+  const runtime = runtimeFor(new OpenAiCompatibleTtsClient({ fetchImpl }), binary);
+  const record = await loadAudiobookProject(realm, PROJECT_PATH);
+  const script = await loadChapterScript(realm, PROJECT_PATH, CHAPTER);
+
+  await expect(planChapterJob(realm, record, script!.script, runtime))
+    .rejects.toMatchObject({ status: 409, message: expect.stringContaining("1 段对白") });
+  await expect(createChapterJob(realm, record, CHAPTER, runtime))
+    .rejects.toMatchObject({ status: 409, message: expect.stringContaining("1 段对白") });
+  expect(writes.filter((path) => path.startsWith(`${AUDIOBOOK_JOB_ROOT}/`))).toEqual([]);
+  expect(fetchImpl).not.toHaveBeenCalled();
+
+  const jobTarget = await realm.fs.resolve(`${AUDIOBOOK_JOB_ROOT}/job-queued-1.json`, { cwd: realm.cwd });
+  await realm.fs.writeText(jobTarget, jobDocument("job-queued-1"), { kind: "createIfAbsent" });
+
+  await expect(runChapterJob(realm, "job-queued-1", runtime))
+    .rejects.toMatchObject({ status: 409, message: expect.stringContaining("1 段对白") });
+  expect((await loadAudiobookJob(realm, "job-queued-1")).job.status).toBe("failed");
+  expect(binary.files.size).toBe(0);
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+
+it("10 章 + 旁白 + 3 角色的样本按角色音色生成，整批重跑零请求", async () => {
+  const chapters = Array.from({ length: 10 }, (_, index) => `第${String(index + 1).padStart(4, "0")}章_样本`);
+  const sourcePaths = chapters.map((chapter) => `正文/${chapter}.md`);
+  const cast = [
+    { id: "narrator", name: "旁白", kind: "narrator" as const, voice: "alloy" },
+    { id: "role-linfan", name: "林帆", kind: "character" as const, voice: "verse" },
+    { id: "role-shen", name: "沈秋", kind: "character" as const, voice: "echo" },
+    { id: "role-gu", name: "顾遥", kind: "character" as const, voice: "shimmer" },
+  ];
+  const project: AudiobookProject = {
+    ...projectWith(),
+    source: { bookRoot: "正文", chapters: sourcePaths },
+    cast,
+  };
+  const seed: Record<string, string> = { [PROJECT_PATH]: JSON.stringify(project) };
+  for (const [index, chapter] of chapters.entries()) {
+    seed[sourcePaths[index]!] = "样本正文。\n";
+    const segments = [
+      { kind: "narration" as const, speakerId: "narrator", text: `第${String(index + 1)}章旁白。`, start: 0 },
+      { kind: "dialogue" as const, speakerId: "role-linfan", text: `林帆的第${String(index + 1)}句。`, start: 10 },
+      { kind: "dialogue" as const, speakerId: "role-shen", text: `沈秋的第${String(index + 1)}句。`, start: 20 },
+      { kind: "dialogue" as const, speakerId: "role-gu", text: `顾遥的第${String(index + 1)}句。`, start: 30 },
+    ].map((segment) => ({
+      id: segmentId(segment.kind, segment.speakerId, segment.text, segment.start),
+      kind: segment.kind,
+      speakerId: segment.speakerId,
+      text: segment.text,
+      sourceStart: segment.start,
+      sourceEnd: segment.start + segment.text.length,
+    }));
+    seed[`有声剧/长夜行/脚本/${chapter}.json`] = JSON.stringify({
+      schemaVersion: 1,
+      chapter,
+      sourcePath: sourcePaths[index],
+      sourceSha256: "0".repeat(64),
+      segments,
+    });
+  }
+  const { realm } = memoryRealm(seed);
+  const binary = memoryBinaryFileStore();
+  const { fetchImpl, bodies } = recordingTts();
+  const runtime = runtimeFor(new OpenAiCompatibleTtsClient({ fetchImpl }), binary);
+  const record = await loadAudiobookProject(realm, PROJECT_PATH);
+
+  for (const chapter of chapters) {
+    const created = await createChapterJob(realm, record, chapter, runtime);
+    const done = await runChapterJob(realm, created.job.id, runtime);
+    expect(done.status).toBe("completed");
+    expect(done.completedSegments).toBe(4);
+  }
+  const firstPassRequests = bodies.length;
+  expect(firstPassRequests).toBe(40);
+  expect(new Set(bodies.map((body) => body.voice))).toEqual(new Set(["alloy", "verse", "echo", "shimmer"]));
+
+  for (const chapter of chapters) {
+    const replay = await createChapterJob(realm, record, chapter, runtime);
+    const replayDone = await runChapterJob(realm, replay.job.id, runtime);
+    expect(replayDone.status).toBe("completed");
+    expect(replayDone.actualRequests).toBe(0);
+  }
+  expect(bodies.length).toBe(firstPassRequests);
 });

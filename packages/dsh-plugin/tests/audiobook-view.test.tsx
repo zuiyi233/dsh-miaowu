@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AudiobookView, generateConfirmText, parsedSegmentCount } from "../src/client/features/audiobook-feature.js";
-import type { AudiobookOverview, AudiobookProjectView } from "../src/services/audiobook-contract.js";
+import type { AudiobookOverview, AudiobookProjectView, AudiobookScriptRecord } from "../src/services/audiobook-contract.js";
 import { CREATIVE_DIRECTORIES, mediaMimeTypeForPath } from "../src/workspace-route.js";
 
 const PROJECT = {
@@ -29,6 +29,7 @@ const projectView = (): AudiobookProjectView => ({
     scriptPath: "有声剧/长夜行/脚本/第0001章_开篇.json",
     hasScript: true,
     segmentCount: 2,
+    unassignedSegments: 0,
     audioPath: "有声剧/长夜行/音频/第0001章_开篇.mp3",
     jobId: null,
     jobStatus: null,
@@ -131,9 +132,124 @@ describe("AudiobookView", () => {
           ],
         },
       },
+      assignmentSummary: { preserved: 0, dropped: 0 },
     };
 
     expect(parsedSegmentCount(payload)).toBe(2);
+  });
+
+  it("未指派对白显示计数并禁用估算/生成/导出，分段入口仍可用", () => {
+    const base = projectView();
+    const blocked: AudiobookProjectView = {
+      ...base,
+      chapters: [{ ...base.chapters[0]!, unassignedSegments: 2 }],
+    };
+    const html = renderToStaticMarkup(<AudiobookView
+      overview={overviewWithProject()}
+      view={blocked}
+      busy={false}
+      onRefresh={noop}
+      onCreate={noop}
+      onParse={noop}
+      onDryRun={noop}
+      onGenerate={noop}
+      onExport={noop}
+      onLoadSegments={noop}
+    />);
+
+    expect(html).toContain("未指派 2");
+    expect(html).toContain("有 2 段对白未指派说话人");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>估算<\/button>/u);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>生成<\/button>/u);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>导出 MP3<\/button>/u);
+    expect(html).toMatch(/<button[^>]*>分段<\/button>/u);
+  });
+
+  it("角色编辑器展示音色映射，可增删角色", () => {
+    const base = projectView();
+    const multi: AudiobookProjectView = {
+      ...base,
+      record: {
+        ...base.record,
+        project: {
+          ...base.record.project,
+          cast: [
+            ...base.record.project.cast,
+            { id: "role-linfan", name: "林帆", kind: "character", voice: "verse" },
+            { id: "role-shen", name: "沈秋", kind: "character", voice: "echo" },
+          ],
+        },
+      },
+    };
+    const html = renderToStaticMarkup(<AudiobookView
+      overview={overviewWithProject()}
+      view={multi}
+      busy={false}
+      onRefresh={noop}
+      onCreate={noop}
+      onParse={noop}
+      onDryRun={noop}
+      onGenerate={noop}
+      onExport={noop}
+      onSaveCast={noop}
+    />);
+
+    expect(html).toContain("角色与音色");
+    expect(html).toContain("林帆");
+    expect(html).toContain("沈秋");
+    expect(html).toContain("role-linfan");
+    expect(html).toContain("添加角色");
+    expect(html).toContain("保存角色");
+  });
+
+  it("分段编辑器列出旁白与对白，未指派对白高亮并给出原因", () => {
+    const record: AudiobookScriptRecord = {
+      path: "有声剧/长夜行/脚本/第0001章_开篇.json",
+      version: "v9",
+      script: {
+        schemaVersion: 1,
+        chapter: "第0001章_开篇",
+        sourcePath: "正文/第0001章_开篇.md",
+        sourceSha256: "a".repeat(64),
+        segments: [
+          { id: "s-1", kind: "narration", speakerId: "narrator", text: "旁白。", sourceStart: 0, sourceEnd: 3 },
+          { id: "s-2", kind: "dialogue", speakerId: "unknown", text: "走吧。", sourceStart: 3, sourceEnd: 6 },
+        ],
+      },
+    };
+    const base = projectView();
+    const multi: AudiobookProjectView = {
+      ...base,
+      record: {
+        ...base.record,
+        project: {
+          ...base.record.project,
+          cast: [...base.record.project.cast, { id: "role-linfan", name: "林帆", kind: "character", voice: "verse" }],
+        },
+      },
+    };
+    const html = renderToStaticMarkup(<AudiobookView
+      overview={overviewWithProject()}
+      view={multi}
+      busy={false}
+      onRefresh={noop}
+      onCreate={noop}
+      onParse={noop}
+      onDryRun={noop}
+      onGenerate={noop}
+      onExport={noop}
+      segments={{ chapter: "第0001章_开篇", record }}
+      onSaveAssignments={noop}
+      onCloseSegments={noop}
+    />);
+
+    expect(html).toContain("分段指派 · 第0001章_开篇");
+    expect(html).toContain("旁白。");
+    expect(html).toContain("走吧。");
+    expect(html).toContain("林帆");
+    expect(html).toContain("还有 1 段对白未指派说话人");
+    expect(html).toContain("data-unassigned");
+    expect(html).toContain("保存指派");
   });
 
   it("生成确认文案包含费用、请求数、缓存命中与段数", () => {

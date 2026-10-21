@@ -169,19 +169,16 @@ function roundCost(value: number): number {
 }
 
 /**
- * 章节成本预估：N4-A 所有片段（含对白）都用旁白音色合成；总字符数是整章
- * 文本量，计费只算未命中的片段，预估成本 = 未命中字符 / 100 万 * 单价，
- * 保留 6 位小数。项目没有旁白音色时无可合成音色，返回 422。
+ * 章节成本预估：调用方为每段提供解析后的音色（N4-B 起旁白与角色可能不同），
+ * 总字符数是整章文本量，计费只算未命中的片段，预估成本 = 未命中字符 / 100 万
+ * * 单价，保留 6 位小数。未指派的片段由调用方在进入本函数前拦住。
  */
 export function planChapterCost(
   project: AudiobookProject,
   script: AudiobookScript,
   cached: ReadonlySet<string>,
+  voiceFor: (segment: AudiobookScript["segments"][number]) => string,
 ): AudiobookCostEstimate {
-  const narrator = project.cast.find((member) => member.kind === "narrator");
-  if (narrator === undefined || narrator.voice.trim() === "") {
-    throw new WorkspaceHttpError(422, "有声剧项目缺少旁白音色。");
-  }
   let chars = 0;
   let billableChars = 0;
   let cacheHits = 0;
@@ -190,7 +187,7 @@ export function planChapterCost(
     const key = ttsCacheKey({
       baseUrl: project.tts.baseUrl,
       model: project.tts.model,
-      voice: narrator.voice,
+      voice: voiceFor(segment),
       speed: project.tts.speed,
       responseFormat: project.tts.responseFormat,
       text: segment.text,
