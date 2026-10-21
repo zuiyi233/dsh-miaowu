@@ -86,7 +86,7 @@ node --test scripts/perf-scale.test.mjs
 | 全文检索 < 2 s（约 10 万字符） | 无直接对应；`read+hash 1M 字符 < 500 ms` 只是检索链路的输入原语 | 检索自身的索引、路由、CJK/拼音匹配由 `packages/dsh-plugin/tests/search.test.ts` 的 ~100 KB / 2 s 冒烟覆盖。本脚本不测检索，也不宣称检索 SLO 通过。 |
 | 文件树刷新 < 500 ms | `walk-support-10k < 2000 ms`（纯遍历） | 本项不含 DSH fs 缝、权限校验、排序后的树构建、React 渲染与浏览器绘制。产品行为是会话运行期间约每 4 秒安静重列（见 `README.md` / `docs/FORK-FEATURES.md`），仓库内没有 UI 刷新耗时自动测试。 |
 | 备份 < 30 s / 100 MB | `backup-collect < 30000 ms` | 语料仅约 5 MB，且不生成备份 JSON、不算 bundle hash、不写文件；30 s 只是该语料的预算上限，**不能替代 100 MB 验收**。 |
-| 浏览器包 400 KB | 不在本脚本内 | 由现有构建门禁 `scripts/build-dsh-plugin.ts` 检查（`clientBytes > 400_000` 即失败）。`docs/VALIDATION.md` 记录的最近一次为 385,856 字节（构建期 CSS minify + UTF-8 输出）。 |
+| 浏览器包 400 KB | 不在本脚本内 | 由现有构建门禁 `scripts/build-dsh-plugin.ts` 检查（`clientBytes > 400_000` 即失败）。`docs/VALIDATION.md` 记录的最近一次为 386,196 字节（构建期 CSS minify + UTF-8 输出）。 |
 
 ### 明确缺口
 
