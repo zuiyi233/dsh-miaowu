@@ -36,10 +36,19 @@ const CONCAT_EXTENSION = ".txt";
 const PROBE_TIMEOUT_MS = 5_000;
 /** ffmpeg/ffprobe 只接受单横线参数；`--version` 会以未知选项失败。 */
 const PROBE_ARGUMENT = "-version";
+/** 整章合成的时间上限：超时终止子进程并返回 504，不把宿主卡在长任务里。 */
+const EXPORT_TIMEOUT_MS = 10 * 60_000;
+/** 时长探测的时间上限。 */
+const FFPROBE_TIMEOUT_MS = 30_000;
 /** 命令输出收集上限（stdout/stderr 各一份），避免失控进程撑爆宿主内存。 */
 const COMMAND_OUTPUT_MAX_BYTES = 64 * 1_024;
 const STDERR_TAIL_CHARS = 300;
 const MP3_BITRATE = "192k";
+/** 错误文本里的绝对路径占位符：stderr 可能带出进程路径或工作目录。 */
+const PATH_PLACEHOLDER = "[路径]";
+const WINDOWS_ABSOLUTE_PATH = /[A-Za-z]:[\\/][^\s'"<>|,;]*/gu;
+const UNC_PATH = /\\\\[^\s'"<>|,;]+/gu;
+const POSIX_ABSOLUTE_PATH = /(?<=[\s'"(=])\/(?:[^\s'"]+\/)*[^\s'"]+/gu;
 
 export interface CommandResult {
   readonly code: number;
@@ -237,11 +246,45 @@ function concatFileLine(processPath: string): string {
   return `file '${processPath.replaceAll("'", "'\\''")}'`;
 }
 
-/** 只保留单行、去重的 stderr 尾部，用于报错又不把整段日志塞给客户端。 */
+/** 去掉错误文本里的绝对路径（Windows 盘符、UNC 与 POSIX），避免回显进程路径。 */
+function redactAbsolutePaths(text: string): string {
+  return text
+    .replace(WINDOWS_ABSOLUTE_PATH, PATH_PLACEHOLDER)
+    .replace(UNC_PATH, PATH_PLACEHOLDER)
+    .replace(POSIX_ABSOLUTE_PATH, PATH_PLACEHOLDER);
+}
+
+/** 只保留单行、去重、已抹掉绝对路径的 stderr 尾部，用于报错又不把整段日志塞给客户端。 */
 function stderrTail(stderr: string): string {
-  const compact = stderr.replace(/\s+/gu, " ").trim();
+  const compact = redactAbsolutePaths(stderr.replace(/\s+/gu, " ").trim());
   if (compact === "") return "无错误输出";
   return compact.length <= STDERR_TAIL_CHARS ? compact : `…${compact.slice(compact.length - STDERR_TAIL_CHARS)}`;
+}
+
+/** 宿主命令执行器在超时后拒绝；超时与普通失败在路由层要映射成不同状态码。 */
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && /超时/u.test(error.message);
+}
+
+/**
+ * 带超时运行导出所需的外部命令：超时返回 504，其余启动/执行失败返回 500，
+ * 错误文本先抹掉绝对路径再截尾。
+ */
+async function runBounded(
+  runner: CommandRunner,
+  command: string,
+  args: readonly string[],
+  timeoutMs: number,
+): Promise<CommandResult> {
+  try {
+    return await runner.run(command, args, { timeoutMs });
+  } catch (error) {
+    if (isTimeoutError(error)) {
+      throw new WorkspaceHttpError(504, `${command} 执行超时（${String(Math.round(timeoutMs / 1000))} 秒），已终止。`);
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new WorkspaceHttpError(500, `${command} 无法执行：${stderrTail(message)}`);
+  }
 }
 
 /** 章节成品音频的唯一构造点：`有声剧/<书>/音频/<章节>.mp3`。 */
@@ -297,7 +340,7 @@ export async function exportChapterMp3(
     await runtime.binary.prepare(output);
     await runtime.binary.write(listTarget, new TextEncoder().encode(listContent));
 
-    const ffmpeg = await runtime.runner.run("ffmpeg", [
+    const ffmpeg = await runBounded(runtime.runner, "ffmpeg", [
       "-hide_banner",
       "-loglevel", "error",
       "-y",
@@ -307,7 +350,7 @@ export async function exportChapterMp3(
       "-c:a", "libmp3lame",
       "-b:a", MP3_BITRATE,
       runtime.binary.processPath(tempOutput),
-    ]);
+    ], EXPORT_TIMEOUT_MS);
     if (ffmpeg.code !== 0) {
       throw new WorkspaceHttpError(500, `ffmpeg 导出失败：${stderrTail(ffmpeg.stderr)}`);
     }
@@ -315,12 +358,12 @@ export async function exportChapterMp3(
     const stat = await runtime.binary.stat(tempOutput);
     if (stat === undefined || stat.size <= 0) throw new WorkspaceHttpError(500, "ffmpeg 没有写出有效的 MP3 文件。");
 
-    const probe = await runtime.runner.run("ffprobe", [
+    const probe = await runBounded(runtime.runner, "ffprobe", [
       "-v", "error",
       "-show_entries", "format=duration",
       "-of", "default=noprint_wrappers=1:nokey=1",
       runtime.binary.processPath(tempOutput),
-    ]);
+    ], FFPROBE_TIMEOUT_MS);
     const seconds = Number.parseFloat(probe.stdout.trim());
     if (probe.code !== 0 || !Number.isFinite(seconds) || seconds < 0) {
       throw new WorkspaceHttpError(500, "ffprobe 无法读取导出时长。");

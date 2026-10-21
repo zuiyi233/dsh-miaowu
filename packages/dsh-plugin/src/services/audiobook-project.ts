@@ -87,6 +87,8 @@ function projectName(raw: string): string {
   if (name === "" || name === "." || name === "..") throw new WorkspaceHttpError(400, "有声剧名称不能为空。");
   if (name.length > PROJECT_NAME_MAX_LENGTH) throw new WorkspaceHttpError(400, "有声剧名称过长。");
   if (/[\\/:*?"<>|]/u.test(name) || hasControlCharacter(name)) throw new WorkspaceHttpError(400, "有声剧名称不能包含路径分隔符或文件系统保留字符。");
+  // 以点开头的目录不会出现在项目列举里（childDirectoryNames 过滤隐藏目录），直接拒绝创建。
+  if (name.startsWith(".")) throw new WorkspaceHttpError(400, "有声剧名称不能以点开头。");
   if (/[. ]$/u.test(name)) throw new WorkspaceHttpError(400, "有声剧名称不能以点或空格结尾。");
   return name;
 }

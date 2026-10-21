@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { createHash } from "node:crypto";
 import type { Context } from "@deepseek-ai/cordis";
 import { describe, expect, it, vi } from "vitest";
 import type { WorkspaceRealm } from "../src/workspace-route.js";
@@ -66,11 +67,12 @@ const PROJECT: AudiobookProject = {
   rights: { voiceCloning: false },
 };
 
+const SCRIPT_SOURCE = CHAPTERS[SOURCE_PATH] ?? "";
 const SCRIPT: AudiobookScript = {
   schemaVersion: 1,
   chapter: CHAPTER,
   sourcePath: SOURCE_PATH,
-  sourceSha256: "0".repeat(64),
+  sourceSha256: createHash("sha256").update(SCRIPT_SOURCE, "utf8").digest("hex"),
   segments: [
     { id: "s-1", kind: "narration", speakerId: "narrator", text: "你好。", sourceStart: 0, sourceEnd: 3 },
     { id: "s-2", kind: "narration", speakerId: "narrator", text: "世界。", sourceStart: 3, sourceEnd: 6 },
@@ -272,12 +274,23 @@ describe("GET /oh-story/audiobook", () => {
     expect(overview.errors).toEqual([]);
     expect(overview.preflight).toEqual({
       ttsKey: "present",
-      ttsHost: TTS.baseUrl,
+      ttsHost: "api.example.com",
       ffmpeg: true,
       ffprobe: true,
     });
     expect(result.bytes.toString("utf8")).not.toContain(SECRET);
     expect(harness.writes).toHaveLength(0);
+  });
+
+  it("预检只回显主机名（含回环端口），不回显完整端点路径", async () => {
+    const harness = fixture({
+      env: { OH_STORY_TTS_API_KEY: SECRET, OH_STORY_TTS_BASE_URL: "http://127.0.0.1:8080/v1" },
+    });
+    const result = await callRoute(harness, "GET", "/oh-story/audiobook");
+    expect(result.status).toBe(200);
+    const preflight = (result.json as AudiobookOverview).preflight;
+    expect(preflight.ttsHost).toBe("127.0.0.1:8080");
+    expect(result.bytes.toString("utf8")).not.toContain("/v1");
   });
 
   it("缺少密钥与非法端点时预检降级为 missing/null", async () => {
@@ -559,6 +572,28 @@ describe("POST /oh-story/audiobook/jobs", () => {
     expect(harness.writes).toContain(`${AUDIOBOOK_JOB_ROOT}/${String(job["id"])}.json`);
     expect(harness.runCalls.map((call) => call.jobId)).toEqual([job["id"]]);
   });
+
+  it("源文件在解析后变化时 dryRun 与真实启动都返回 409", async () => {
+    const harness = fixture({ seed: { [SOURCE_PATH]: "正文已经改写。" } });
+
+    const estimate = await callRoute(harness, "POST", "/oh-story/audiobook/jobs", {
+      path: PROJECT_PATH,
+      chapter: CHAPTER,
+      dryRun: true,
+    });
+    expect(estimate.status).toBe(409);
+    expect(String(asRecord(estimate.json)["error"])).toContain("源文件已变化");
+
+    const started = await callRoute(harness, "POST", "/oh-story/audiobook/jobs", {
+      path: PROJECT_PATH,
+      chapter: CHAPTER,
+      confirm: true,
+    });
+    expect(started.status).toBe(409);
+    expect(String(asRecord(started.json)["error"])).toContain("源文件已变化");
+    expect(harness.writes.filter((path) => path.startsWith(`${AUDIOBOOK_JOB_ROOT}/`))).toEqual([]);
+    expect(harness.runCalls).toHaveLength(0);
+  });
 });
 
 describe("GET /oh-story/audiobook/jobs/:id", () => {
@@ -656,6 +691,56 @@ describe("POST /oh-story/audiobook/jobs/:id/run", () => {
     const result = await callRoute(harness, "POST", `/oh-story/audiobook/jobs/${JOB_ID}/run`, { confirm: true });
 
     expect(result.status).toBe(409);
+    expect(String(asRecord(result.json)["error"])).toContain("已完成");
+    expect(harness.runCalls).toHaveLength(0);
+  });
+
+  it("排队中的任务可以显式恢复（202）", async () => {
+    const harness = fixture({ seed: { [`${AUDIOBOOK_JOB_ROOT}/${JOB_ID}.json`]: jobDocument(JOB_ID, "queued") } });
+    const result = await callRoute(harness, "POST", `/oh-story/audiobook/jobs/${JOB_ID}/run`, { confirm: true });
+
+    expect(result.status).toBe(202);
+    expect(harness.runCalls.map((call) => call.jobId)).toEqual([JOB_ID]);
+  });
+
+  it("重启后残留的 running 任务可以显式恢复（202）", async () => {
+    const harness = fixture({
+      seed: {
+        [`${AUDIOBOOK_JOB_ROOT}/${JOB_ID}.json`]: jobDocument(JOB_ID, "running", { completedSegments: 1 }),
+      },
+    });
+    const result = await callRoute(harness, "POST", `/oh-story/audiobook/jobs/${JOB_ID}/run`, { confirm: true });
+
+    expect(result.status).toBe(202);
+    expect(harness.runCalls.map((call) => call.jobId)).toEqual([JOB_ID]);
+  });
+
+  it("同一章节还有其他活动任务时拒绝恢复（409）", async () => {
+    const otherId = "job-queued-2";
+    const harness = fixture({
+      seed: {
+        [`${AUDIOBOOK_JOB_ROOT}/${JOB_ID}.json`]: jobDocument(JOB_ID, "paused"),
+        [`${AUDIOBOOK_JOB_ROOT}/${otherId}.json`]: jobDocument(otherId, "queued"),
+      },
+    });
+    const result = await callRoute(harness, "POST", `/oh-story/audiobook/jobs/${JOB_ID}/run`, { confirm: true });
+
+    expect(result.status).toBe(409);
+    expect(String(asRecord(result.json)["error"])).toContain("其他");
+    expect(harness.runCalls).toHaveLength(0);
+  });
+
+  it("源文件变化后拒绝恢复（409）", async () => {
+    const harness = fixture({
+      seed: {
+        [SOURCE_PATH]: "正文已经改写。",
+        [`${AUDIOBOOK_JOB_ROOT}/${JOB_ID}.json`]: jobDocument(JOB_ID, "paused"),
+      },
+    });
+    const result = await callRoute(harness, "POST", `/oh-story/audiobook/jobs/${JOB_ID}/run`, { confirm: true });
+
+    expect(result.status).toBe(409);
+    expect(String(asRecord(result.json)["error"])).toContain("源文件已变化");
     expect(harness.runCalls).toHaveLength(0);
   });
 });
@@ -686,6 +771,25 @@ describe("POST /oh-story/audiobook/export", () => {
     expect(result.status).toBe(503);
     expect(String(asRecord(result.json)["error"])).toContain("ffmpeg");
     expect(harness.writes).toHaveLength(0);
+  });
+
+  it("源文件在解析后变化时拒绝导出（409）", async () => {
+    const binary = memoryBinaryFileStore();
+    for (const segment of SCRIPT.segments) {
+      binary.files.set(segmentAudioPath(cacheKeyFor(segment.text), "mp3"), new Uint8Array([1, 2, 3]));
+    }
+    const harness = fixture({ binary, seed: { [SOURCE_PATH]: "正文已经改写。" } });
+    const result = await callRoute(harness, "POST", "/oh-story/audiobook/export", {
+      path: PROJECT_PATH,
+      chapter: CHAPTER,
+      confirm: true,
+    });
+
+    expect(result.status).toBe(409);
+    expect(String(asRecord(result.json)["error"])).toContain("源文件已变化");
+    // 只跑了预检的 -version 探测，没有进入 concat 合成。
+    expect(harness.runner.calls.some((call) => call.includes("concat"))).toBe(false);
+    expect(binary.files.has(AUDIO_PATH)).toBe(false);
   });
 
   it("预检通过后导出整章 MP3 并复用章节音频布局", async () => {

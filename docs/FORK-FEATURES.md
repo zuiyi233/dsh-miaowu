@@ -53,8 +53,8 @@
 - TTS 走 OpenAI-compatible 语音端点，每次只发送 `model` / `input` / `voice` / `response_format` / `speed` 五个标准字段。端点与模型在创建项目时确定：请求体优先，缺省回退 `OH_STORY_TTS_BASE_URL` 与 `OH_STORY_TTS_MODEL`（没有内置默认值，两处都缺时创建返回 400）；端点只接受 https 或回环 http，拒绝内嵌凭证、query 与 hash。`OH_STORY_TTS_API_KEY` 只从宿主环境读取，生成音频时必需；请求体里出现密钥字段直接 400，密钥永不落盘。
 - 缓存按内容寻址：`.oh-story/audiobook/cache/<sha256>/{audio.mp3|wav,meta.json}`，键只取端点（去尾斜杠）、模型、音色、语速、格式与文本，不含密钥、时间戳或本机路径；同段重跑命中缓存时不发 TTS 请求，`meta.json` 只记录请求参数、字节数、字符数、文本哈希与创建时间。章节任务进度在 `.oh-story/audiobook/jobs/`，每段结束后用 CAS 持久化，暂停或失败重跑不会重复累计已完成段。
 - 导出需要宿主机上的 `ffmpeg` 与 `ffprobe`：预检逐项报告是否就绪；导出把缓存片段用 concat 拼接、以 libmp3lame 编码为 192 kbps MP3，再用 ffprobe 校验时长。ffmpeg/ffprobe 缺失时导出返回明确 503，不写半成品。
-- 付费调用一律显式确认：启动任务、恢复暂停/失败任务、导出 MP3 都要求 `confirm: true`，面板在调用 TTS 或 ffmpeg 前弹出确认框；`dryRun` 只返回预估成本，不发请求。
-- 明确限制（N4-A）：只支持单旁白，不做多角色配音；没有 BGM/音效、M4B、章节封面与 SRT/LRC 字幕，也不做完整响度归一化（`project.json` 预留了 `export` 与 `cues` 字段，本切片不消费）；DSH 重启后不会自动续跑，需要人在面板或显式请求里恢复；N4-B 多角色、N4-C 完整有声剧、N4-D 批量化与质量仍待交付。
+- 付费调用一律显式确认：启动任务、恢复任务与导出 MP3 都要求 `confirm: true`；面板「生成」先发一次 `dryRun` 取预估，再在确认框里列出预估费用、请求数、缓存命中与段数，用户确认后才真正建任务。恢复走显式 `POST /jobs/<id>/run`，排队、进行中、暂停与失败的任务都可以恢复（面板暂无恢复按钮）；同一项目+章节同时只允许一个活动任务，新建与恢复都会拦。新建/恢复/导出前还会重算正文 sha256，正文在解析后改过则返回 409「源文件已变化，请重新解析」。
+- 明确限制（N4-A）：只支持单旁白，不做多角色配音；没有 BGM/音效、M4B、章节封面与 SRT/LRC 字幕，也不做完整响度归一化（`project.json` 预留了 `export` 与 `cues` 字段，本切片不消费）；DSH 重启后不会自动续跑，残留的排队/运行中任务需要 `POST /jobs/<id>/run` 显式恢复，面板暂无恢复入口；N4-B 多角色、N4-C 完整有声剧、N4-D 批量化与质量仍待交付。
 - 状态归属：项目、脚本与音频写在工作区 `有声剧/`，缓存与任务写在 `.oh-story/audiobook/`；不写 DSH 会话、`workspace.json` 或 `~/.dsh` 状态。
 
 ## 上游同步

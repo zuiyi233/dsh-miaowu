@@ -22,6 +22,9 @@ export const AUDIOBOOK_ROUTES = {
 export type AudiobookProjectKind = "novel";
 export type AudiobookJobStatus = "queued" | "running" | "paused" | "failed" | "completed";
 
+/** 仍占用章节的状态：新建与恢复都据此拦截重复计费。 */
+export const AUDIOBOOK_ACTIVE_JOB_STATUSES: readonly AudiobookJobStatus[] = ["queued", "running", "paused"];
+
 export interface AudiobookTtsConfig {
   readonly baseUrl: string;
   readonly model: string;
@@ -89,6 +92,11 @@ export interface AudiobookScriptRecord {
   readonly script: AudiobookScript;
   readonly path: string;
   readonly version: string;
+}
+
+/** `POST /oh-story/audiobook/script` 的成功响应；面板与路由共用同一形状。 */
+export interface AudiobookScriptParseResponse {
+  readonly script: AudiobookScriptRecord;
 }
 
 export interface AudiobookJob {

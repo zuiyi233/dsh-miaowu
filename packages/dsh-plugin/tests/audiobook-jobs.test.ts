@@ -447,3 +447,122 @@ it("缺失章节脚本时 createChapterJob 返回 409", async () => {
   await expect(createChapterJob(realm, record, "第0002章_回声", runtimeFor(unusedTts, binary)))
     .rejects.toMatchObject({ status: 409 });
 });
+
+it("重启后残留的 running 任务可显式恢复，已缓存段不重复请求", async () => {
+  const { realm } = memoryRealm({
+    [SOURCE_PATH]: "你好。世界。",
+    [PROJECT_PATH]: JSON.stringify(projectWith()),
+    [SCRIPT_PATH]: JSON.stringify(SCRIPT),
+    [`${AUDIOBOOK_JOB_ROOT}/running-1.json`]: jobDocument("running-1", {
+      status: "running",
+      completedSegments: 1,
+      actualRequests: 1,
+    }),
+  });
+  const binary = memoryBinaryFileStore();
+  binary.files.set(segmentAudioPath(FIRST_KEY, "mp3"), new Uint8Array([1, 2]));
+  const fetchImpl = audioFetch();
+  const runtime = runtimeFor(new OpenAiCompatibleTtsClient({ fetchImpl }), binary);
+
+  const done = await runChapterJob(realm, "running-1", runtime);
+
+  expect(done.status).toBe("completed");
+  expect(done.completedSegments).toBe(2);
+  // 第一段走缓存，只为第二段发一次请求；实际请求数在原值上累加。
+  expect(fetchImpl.mock.calls.length).toBe(1);
+  expect(done.actualRequests).toBe(2);
+});
+
+it("执行前的门禁失败会把任务落成 failed，不留在 queued", async () => {
+  const { realm } = memoryRealm({
+    [SOURCE_PATH]: "你好。世界。",
+    [PROJECT_PATH]: JSON.stringify(projectWith()),
+    [`${AUDIOBOOK_JOB_ROOT}/orphan-1.json`]: jobDocument("orphan-1", {
+      chapter: "第0002章_回声",
+      sourcePath: "正文/第0002章_回声.md",
+    }),
+  });
+  const runtime = runtimeFor(unusedTts, memoryBinaryFileStore());
+
+  await expect(runChapterJob(realm, "orphan-1", runtime))
+    .rejects.toMatchObject({ status: 409, message: expect.stringContaining("脚本不存在") });
+
+  expect((await loadAudiobookJob(realm, "orphan-1")).job.status).toBe("failed");
+});
+
+it("同一任务并发执行只允许一个，第二个返回 409", async () => {
+  const { realm } = fixtureWithScript();
+  const binary = memoryBinaryFileStore();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let notifyStarted!: () => void;
+  const firstStarted = new Promise<void>((resolve) => {
+    notifyStarted = resolve;
+  });
+  const synthesize = vi.fn(async () => {
+    notifyStarted();
+    await gate;
+    return new Uint8Array([9]);
+  });
+  const runtime = runtimeFor({ synthesize }, binary);
+  const record = await loadAudiobookProject(realm, PROJECT_PATH);
+  const created = await createChapterJob(realm, record, CHAPTER, runtime);
+
+  const running = runChapterJob(realm, created.job.id, runtime);
+  await firstStarted;
+  await expect(runChapterJob(realm, created.job.id, runtime)).rejects.toMatchObject({ status: 409 });
+  release();
+  const done = await running;
+  expect(done.status).toBe("completed");
+  expect(synthesize).toHaveBeenCalledTimes(2);
+
+  // 执行结束后 in-flight 标记释放，同一任务可以再次执行且只走缓存。
+  const again = await runChapterJob(realm, created.job.id, runtime);
+  expect(again.status).toBe("completed");
+  expect(synthesize).toHaveBeenCalledTimes(2);
+});
+
+it("零字节缓存不算命中，plan 与 run 都会重新合成", async () => {
+  const { realm } = fixtureWithScript();
+  const binary = memoryBinaryFileStore();
+  binary.files.set(segmentAudioPath(FIRST_KEY, "mp3"), new Uint8Array());
+  const fetchImpl = audioFetch();
+  const runtime = runtimeFor(new OpenAiCompatibleTtsClient({ fetchImpl }), binary);
+  const record = await loadAudiobookProject(realm, PROJECT_PATH);
+
+  const estimate = await planChapterJob(realm, record, SCRIPT, runtime);
+  expect(estimate).toEqual({
+    segments: 2,
+    chars: 6,
+    cacheHits: 0,
+    requests: 2,
+    estimatedCost: 0.00009,
+  });
+
+  const created = await createChapterJob(realm, record, CHAPTER, runtime);
+  const done = await runChapterJob(realm, created.job.id, runtime);
+  expect(done.status).toBe("completed");
+  expect(fetchImpl.mock.calls.length).toBe(2);
+  expect(binary.files.get(segmentAudioPath(FIRST_KEY, "mp3"))?.byteLength).toBeGreaterThan(0);
+});
+
+it("空脚本不能创建任务，也不能执行", async () => {
+  const emptyScript = { ...SCRIPT, segments: [] };
+  const { realm, writes } = memoryRealm({
+    [SOURCE_PATH]: "你好。世界。",
+    [PROJECT_PATH]: JSON.stringify(projectWith()),
+    [SCRIPT_PATH]: JSON.stringify(emptyScript),
+    [`${AUDIOBOOK_JOB_ROOT}/empty-1.json`]: jobDocument("empty-1", { totalSegments: 0 }),
+  });
+  const binary = memoryBinaryFileStore();
+  const runtime = runtimeFor(unusedTts, binary);
+  const record = await loadAudiobookProject(realm, PROJECT_PATH);
+
+  await expect(createChapterJob(realm, record, CHAPTER, runtime)).rejects.toMatchObject({ status: 409 });
+  expect(writes.filter((path) => path.startsWith(`${AUDIOBOOK_JOB_ROOT}/`))).toEqual([]);
+
+  await expect(runChapterJob(realm, "empty-1", runtime)).rejects.toMatchObject({ status: 409 });
+  expect((await loadAudiobookJob(realm, "empty-1")).job.status).toBe("failed");
+});

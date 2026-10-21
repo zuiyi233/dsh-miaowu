@@ -34,7 +34,8 @@ const MAX_SEGMENT_CHARS = 2000;
 const SCRIPT_DIRECTORY = "脚本";
 const SCRIPT_EXTENSION = ".json";
 const SOURCE_EXTENSION = ".md";
-const SOURCE_MAX_BYTES = 4 * 1_024 * 1_024;
+/** 正文读取上限：解析与陈旧校验共用同一个 4 MiB 上限。 */
+export const SOURCE_MAX_BYTES = 4 * 1_024 * 1_024;
 const SCRIPT_MAX_BYTES = 4 * 1_024 * 1_024;
 
 const NARRATOR = "narrator";
@@ -320,6 +321,24 @@ export async function loadChapterScript(
   });
   if (file === undefined) return undefined;
   return { script: parseScriptDocument(file.content, name), path, version: String(file.version) };
+}
+
+/**
+ * 陈旧源校验：按解析脚本时的同一 4 MiB 上限重读正文并重算 sha256，与脚本里的
+ * `sourceSha256` 不一致（或正文已不可读）时返回 409，提示重新解析。调用方在
+ * 新建/恢复任务与导出之前执行它，避免用旧脚本继续计费或导出旧文本。
+ */
+export async function assertScriptSourceFresh(realm: WorkspaceRealm, script: AudiobookScript): Promise<void> {
+  const stale = new WorkspaceHttpError(409, "源文件已变化，请重新解析。");
+  const target = await resolveInside(realm, script.sourcePath);
+  let file: Awaited<ReturnType<typeof readVersionedFile>>;
+  try {
+    file = await readVersionedFile(realm.fs, target, SOURCE_MAX_BYTES);
+  } catch (error) {
+    if (error instanceof WorkspaceHttpError && error.status === 404) throw stale;
+    throw mapFsError(error) ?? error;
+  }
+  if (sha256(file.content) !== script.sourceSha256) throw stale;
 }
 
 /**

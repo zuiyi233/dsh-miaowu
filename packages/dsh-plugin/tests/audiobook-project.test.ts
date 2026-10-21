@@ -102,6 +102,15 @@ describe("audiobook project", () => {
     expect(() => validateTtsBaseUrl("http://127.0.0.1:8080/v1?#")).toThrow(/query/u);
   });
 
+  it("拒绝以点开头的项目名，避免创建后从项目列举里消失", async () => {
+    const { realm, writes } = memoryRealm(CHAPTERS);
+
+    await expect(createAudiobookProject(realm, {
+      bookRoot: "正文", name: ".hidden", voice: "alloy", baseUrl: "https://api.example.com/v1", model: "tts-1",
+    })).rejects.toMatchObject({ status: 400, message: expect.stringContaining("以点开头") });
+    expect(writes).toEqual([]);
+  });
+
   it("保存超过 512 KiB 的项目在写盘前返回 413", async () => {
     const { realm, writes } = memoryRealm(CHAPTERS);
     const created = await createAudiobookProject(realm, {

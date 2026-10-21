@@ -11,6 +11,7 @@ import {
 } from "../workspace-route.js";
 import { hostBinaryFileStore } from "./audiobook-binary.js";
 import {
+  AUDIOBOOK_ACTIVE_JOB_STATUSES,
   AUDIOBOOK_CACHE_ROOT,
   AUDIOBOOK_ROUTES,
   type AudiobookChapterSummary,
@@ -47,7 +48,7 @@ import {
   validateTtsBaseUrl,
 } from "./audiobook-project.js";
 import { registerWorkspaceExtension } from "./registry.js";
-import { loadChapterScript, parseChapterScript, scriptPathFor } from "./audiobook-script.js";
+import { loadChapterScript, parseChapterScript, scriptPathFor, assertScriptSourceFresh } from "./audiobook-script.js";
 import { OpenAiCompatibleTtsClient } from "./audiobook-tts.js";
 
 /**
@@ -96,12 +97,12 @@ function runtimeOf(realm: WorkspaceRealm, deps: AudiobookRouteDeps): AudiobookRu
   return (deps.runtime ?? createAudiobookRuntime)(realm);
 }
 
-/** 环境变量里的 `OH_STORY_TTS_BASE_URL` 只在预检里展示；非法或缺失都为 null。 */
+/** 环境变量里的 `OH_STORY_TTS_BASE_URL` 只在预检里展示主机名；非法或缺失都为 null。 */
 function hostFromEnv(env: Readonly<Record<string, string | undefined>>): string | null {
   const raw = (env[TTS_BASE_URL_ENV] ?? "").trim();
   if (raw === "") return null;
   try {
-    return validateTtsBaseUrl(raw);
+    return new URL(validateTtsBaseUrl(raw)).host;
   } catch {
     return null;
   }
@@ -182,6 +183,14 @@ function latestJob(
   return jobs
     .filter((job) => job.projectPath === projectPath && job.chapter === chapter)
     .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))[0];
+}
+
+/** 同一项目+章节上除当前任务外的排队/运行/暂停任务；恢复前用它拦住重复计费。 */
+function otherActiveJob(jobs: readonly AudiobookJob[], current: AudiobookJob): AudiobookJob | undefined {
+  return jobs.find((job) => job.id !== current.id
+    && job.projectPath === current.projectPath
+    && job.chapter === current.chapter
+    && AUDIOBOOK_ACTIVE_JOB_STATUSES.includes(job.status));
 }
 
 async function chapterSummaries(realm: WorkspaceRealm, record: AudiobookProjectRecord): Promise<AudiobookChapterSummary[]> {
@@ -379,6 +388,8 @@ export async function handleAudiobookRequest(
       const record = await loadAudiobookProject(realm, requiredString(body, "path"));
       const scriptRecord = await loadChapterScript(realm, record.path, chapter);
       if (scriptRecord === undefined) throw new WorkspaceHttpError(409, "章节脚本不存在，请先生成脚本。");
+      // 预估与实际生成都基于脚本里的 sha256：源文件在解析后改过就要求先重新解析。
+      await assertScriptSourceFresh(realm, scriptRecord.script);
       const estimate = await planChapterJob(realm, record, scriptRecord.script, runtime);
       if (body["dryRun"] === true) {
         send(response, 200, { estimate });
@@ -415,14 +426,19 @@ export async function handleAudiobookRequest(
         }
         const realm = await workspaceRealm(context, url);
         const loaded = await loadAudiobookJob(realm, jobId);
-        if (loaded.job.status !== "paused" && loaded.job.status !== "failed") {
-          throw new WorkspaceHttpError(409, "只有已暂停或失败的任务可以恢复。");
+        if (loaded.job.status === "completed") {
+          throw new WorkspaceHttpError(409, "已完成的有声剧任务不能再次执行。");
         }
-        // 恢复同样是付费入口：启动前先过与新建任务相同的门禁（密钥、旁白、脚本、单章上限）。
+        // 恢复同样是付费入口：同一章节还有其他活动任务时先拒绝，避免双份合成。
+        if (otherActiveJob(await listAudiobookJobs(realm), loaded.job) !== undefined) {
+          throw new WorkspaceHttpError(409, "该章节已有其他排队、进行中或暂停的有声剧任务。");
+        }
+        // 恢复前先过与新建任务相同的门禁（密钥、旁白、脚本、源文件、单章上限）。
         const runtime = runtimeOf(realm, deps);
         const record = await loadAudiobookProject(realm, loaded.job.projectPath);
         const scriptRecord = await loadChapterScript(realm, record.path, loaded.job.chapter);
         if (scriptRecord === undefined) throw new WorkspaceHttpError(409, "章节脚本不存在，请先生成脚本。");
+        await assertScriptSourceFresh(realm, scriptRecord.script);
         const estimate = await planChapterJob(realm, record, scriptRecord.script, runtime);
         if (estimate.chars > record.project.tts.maxCharsPerChapter) {
           throw new WorkspaceHttpError(409, `章节字符数超过单章上限（${String(record.project.tts.maxCharsPerChapter)}）。`);
@@ -450,6 +466,7 @@ export async function handleAudiobookRequest(
       const record = await loadAudiobookProject(realm, requiredString(body, "path"));
       const script = await loadChapterScript(realm, record.path, chapter);
       if (script === undefined) throw new WorkspaceHttpError(409, "章节脚本不存在，请先生成脚本。");
+      await assertScriptSourceFresh(realm, script.script);
       send(response, 200, await exportChapterMp3(realm, record, chapter, script.script, runtime));
       return true;
     }

@@ -7,6 +7,7 @@ import type {
   AudiobookOverview,
   AudiobookProjectRecord,
   AudiobookProjectView,
+  AudiobookScriptParseResponse,
 } from "../../services/audiobook-contract.js";
 import { endpoint } from "../workbench-ui.js";
 import { registerWorkbenchFeature, type WorkbenchFeatureProps } from "./registry.js";
@@ -98,6 +99,20 @@ function formatBytes(bytes: number): string {
 function scriptStateOf(chapter: AudiobookChapterSummary): string {
   if (chapter.scriptError !== undefined) return "脚本损坏";
   return chapter.hasScript ? "已解析" : "未解析";
+}
+
+/**
+ * 解析响应 → 段数。路由返回 `{ script: AudiobookScriptRecord }`，脚本本体在
+ * 记录的 `script` 字段里再嵌一层；面板曾按 `payload.script.segments` 读取，
+ * 永远得到 undefined。这个纯函数把真实形状钉在测试里。
+ */
+export function parsedSegmentCount(payload: AudiobookScriptParseResponse): number {
+  return payload.script.script.segments.length;
+}
+
+/** 生成前的确认文案：费用、请求数、缓存命中与段数都要在付费前让用户看到。 */
+export function generateConfirmText(chapter: string, estimate: AudiobookCostEstimate): string {
+  return `将为「${chapter}」调用 TTS 服务：共 ${String(estimate.segments)} 段，${String(estimate.requests)} 次请求（缓存命中 ${String(estimate.cacheHits)} 段），预估 ${formatCost(estimate.estimatedCost)}。确认开始生成？`;
 }
 
 export interface AudiobookViewProps {
@@ -406,12 +421,12 @@ function AudiobookPanel({ sessionId }: WorkbenchFeatureProps): JSX.Element {
     setError(undefined);
     setNotice(undefined);
     try {
-      const payload = await postJson<{ readonly script: { readonly segments: readonly unknown[] } }>(
+      const payload = await postJson<AudiobookScriptParseResponse>(
         endpoint("audiobook/script", sessionId),
         { path: current.record.path, chapter, confirm: overwrite }
       );
       if (id !== requestId.current) return;
-      setNotice(`已解析「${chapter}」，共 ${String(payload.script.segments.length)} 段。`);
+      setNotice(`已解析「${chapter}」，共 ${String(parsedSegmentCount(payload))} 段。`);
       await load(current.record.path);
     } catch (failure) {
       if (id !== requestId.current) return;
@@ -447,12 +462,19 @@ function AudiobookPanel({ sessionId }: WorkbenchFeatureProps): JSX.Element {
   const generate = useCallback(async (chapter: string): Promise<void> => {
     const current = projectView;
     if (current === undefined) return;
-    if (!globalThis.confirm(`将为「${chapter}」调用 TTS 服务并产生费用。确认开始生成？`)) return;
     const id = ++requestId.current;
     setPending(`generate:${chapter}`);
     setError(undefined);
     setNotice(undefined);
     try {
+      // 付费前先干跑一次：确认框里带上预估费用、请求数与缓存命中，再真正启动任务。
+      const preview = await postJson<{ readonly estimate: AudiobookCostEstimate }>(
+        endpoint("audiobook/jobs", sessionId),
+        { path: current.record.path, chapter, dryRun: true }
+      );
+      if (id !== requestId.current) return;
+      setEstimate({ chapter, value: preview.estimate });
+      if (!globalThis.confirm(generateConfirmText(chapter, preview.estimate))) return;
       const payload = await postJson<JobStartResponse>(endpoint("audiobook/jobs", sessionId), {
         path: current.record.path,
         chapter,

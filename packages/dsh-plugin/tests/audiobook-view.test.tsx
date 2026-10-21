@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { AudiobookView } from "../src/client/features/audiobook-feature.js";
+import { AudiobookView, generateConfirmText, parsedSegmentCount } from "../src/client/features/audiobook-feature.js";
 import type { AudiobookOverview, AudiobookProjectView } from "../src/services/audiobook-contract.js";
 import { CREATIVE_DIRECTORIES, mediaMimeTypeForPath } from "../src/workspace-route.js";
 
@@ -113,5 +113,43 @@ describe("AudiobookView", () => {
       expect(CREATIVE_DIRECTORIES.indexOf(prose)).toBeGreaterThan(-1);
       expect(CREATIVE_DIRECTORIES.indexOf(prose)).toBeLessThan(audiobook);
     }
+  });
+
+  it("解析脚本响应按路由的真实嵌套形状取段数", () => {
+    const payload = {
+      script: {
+        path: "有声剧/长夜行/脚本/第0001章_开篇.json",
+        version: "v5",
+        script: {
+          schemaVersion: 1 as const,
+          chapter: "第0001章_开篇",
+          sourcePath: "正文/第0001章_开篇.md",
+          sourceSha256: "a".repeat(64),
+          segments: [
+            { id: "s-1", kind: "narration" as const, speakerId: "narrator", text: "你好。", sourceStart: 0, sourceEnd: 3 },
+            { id: "s-2", kind: "dialogue" as const, speakerId: "unknown", text: "走吧。", sourceStart: 3, sourceEnd: 6 },
+          ],
+        },
+      },
+    };
+
+    expect(parsedSegmentCount(payload)).toBe(2);
+  });
+
+  it("生成确认文案包含费用、请求数、缓存命中与段数", () => {
+    const text = generateConfirmText("第0001章_开篇", {
+      segments: 12,
+      chars: 2_400,
+      cacheHits: 3,
+      requests: 9,
+      estimatedCost: 0.00123,
+    });
+
+    expect(text).toContain("第0001章_开篇");
+    expect(text).toContain("12 段");
+    expect(text).toContain("9 次请求");
+    expect(text).toContain("缓存命中 3 段");
+    expect(text).toContain("¥0.001230");
+    expect(text).toContain("确认开始生成");
   });
 });

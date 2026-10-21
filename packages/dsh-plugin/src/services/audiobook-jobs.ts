@@ -10,6 +10,7 @@ import {
   type CachedAudioExtension,
 } from "./audiobook-cache.js";
 import {
+  AUDIOBOOK_ACTIVE_JOB_STATUSES,
   AUDIOBOOK_CACHE_ROOT,
   AUDIOBOOK_JOB_ROOT,
   AUDIOBOOK_ROOT,
@@ -32,8 +33,9 @@ import type { TtsClient } from "./audiobook-tts.js";
  * 任务文档固定落 `.oh-story/audiobook/jobs/<id>.json`（schemaVersion 1），只在
  * 创建时 `createIfAbsent`，之后每次状态/计数变化都用读取到的版本做 CAS；写入
  * 一律带当前会话解析出的沙箱策略。任务里只有路径、计数与成本，没有正文全文、
- * 没有密钥。N4-A 不做重启自动恢复：进程重启后已存的状态原样保留，由 N4-D 再
- * 引入运行中任务的恢复转换；取消只阻止后续片段，已完成的缓存永远保留。
+ * 没有密钥。N4-A 不做重启自动恢复：进程重启后已存的状态原样保留，排队/运行中
+ * 的残留任务可由显式请求恢复；同一任务在同一进程内只允许一个执行者，顶层失败
+ * 会尽力把任务标成 failed，不让它永远停在 running。
  */
 
 const TTS_KEY_ENV = "OH_STORY_TTS_API_KEY";
@@ -41,7 +43,7 @@ const JOB_ID_PATTERN = /^[a-zA-Z0-9-]{1,64}$/u;
 const JOB_FILE_SUFFIX = ".json";
 const JOB_MAX_BYTES = 1 * 1_024 * 1_024;
 const JOB_STATUSES: readonly AudiobookJobStatus[] = ["queued", "running", "paused", "failed", "completed"];
-const ACTIVE_STATUSES: ReadonlySet<AudiobookJobStatus> = new Set<AudiobookJobStatus>(["queued", "running", "paused"]);
+const ACTIVE_STATUSES: ReadonlySet<AudiobookJobStatus> = new Set<AudiobookJobStatus>(AUDIOBOOK_ACTIVE_JOB_STATUSES);
 
 /** 章节任务只需 TTS、二进制缓存、时钟与宿主环境；Task 7 的运行时会再加 runner。 */
 export interface AudiobookJobRuntime {
@@ -54,8 +56,17 @@ export interface AudiobookJobRuntime {
 /** 模块级取消标记：只有当前进程内的执行者能看到，消费后即删除。 */
 const cancellations = new Map<string, boolean>();
 
+/** 进程内正在执行的任务 ID：同一任务并发 run 直接 409，结束后删键。 */
+const inFlightJobs = new Set<string>();
+
 /** 创建任务的进程内串行队列，键为 `项目路径\0章节`；结算后删键，长驻进程不累积。 */
 const createQueues = new Map<string, Promise<void>>();
+
+/**
+ * 任务文件 CAS 冲突：另一个执行者已经推进了任务，本执行者不再尝试把状态改成
+ * failed，避免覆盖别人的进度。
+ */
+class JobConflictError extends WorkspaceHttpError {}
 
 /**
  * 在同一“项目+章节”上串行执行创建：并发调用排在上一笔结算之后，使“列出活动
@@ -152,7 +163,7 @@ async function persistJob(realm: WorkspaceRealm, job: AudiobookJob, version: str
     return { job, version: String(outcome.version) };
   } catch (error) {
     const mapped = mapFsError(error);
-    if (mapped?.status === 412) throw new WorkspaceHttpError(409, "有声剧任务已被其他执行修改，请刷新后重试。");
+    if (mapped?.status === 412) throw new JobConflictError(409, "有声剧任务已被其他执行修改，请刷新后重试。");
     throw mapped ?? new WorkspaceHttpError(500, "有声剧任务写入失败。");
   }
 }
@@ -218,7 +229,8 @@ export async function planChapterJob(
   const keys = await Promise.all(script.segments.map(async (segment) => {
     const key = cacheKeyFor(project, voice, segment.text);
     const cached = await runtime.binary.stat(await cachedAudioTarget(realm, key, extension));
-    return cached === undefined ? undefined : key;
+    // 零字节缓存文件（写入中断）不算命中，与导出「size <= 0 即未生成」保持一致。
+    return cached === undefined || cached.size <= 0 ? undefined : key;
   }));
   const cached = new Set(keys.filter((key): key is string => key !== undefined));
   return planChapterCost(project, script, cached);
@@ -240,6 +252,7 @@ export async function createChapterJob(
     const scriptRecord = await loadChapterScript(realm, record.path, chapter);
     if (scriptRecord === undefined) throw new WorkspaceHttpError(409, "章节脚本不存在，请先生成脚本。");
     const script = scriptRecord.script;
+    if (script.segments.length === 0) throw new WorkspaceHttpError(409, "章节脚本没有可生成的片段。");
     const estimate = await planChapterJob(realm, record, script, runtime);
     if (estimate.chars > record.project.tts.maxCharsPerChapter) {
       throw new WorkspaceHttpError(409, `章节字符数超过单章上限（${String(record.project.tts.maxCharsPerChapter)}）。`);
@@ -275,14 +288,60 @@ export async function createChapterJob(
  * 检查取消标记、命中缓存则跳过请求、未命中才合成并写缓存；单段失败只记录到
  * failedSegments 并继续后续段。每段结束后用 CAS 持久化，冲突返回 409；最终
  * 有任何失败段则 failed，否则 completed。
+ *
+ * 同一任务在同一进程内只允许一个执行者，第二次调用直接 409。任务加载成功后的
+ * 任何顶层失败都会尽力把 queued/running 的任务标成 failed（CAS 冲突除外），
+ * 不让任务永远停在 running；任务文件已被其他执行者推进时保留对方状态。
  */
 export async function runChapterJob(
   realm: WorkspaceRealm,
   jobId: string,
   runtime: AudiobookJobRuntime,
 ): Promise<AudiobookJob> {
-  const loaded = await loadAudiobookJob(realm, jobId);
-  const apiKey = requireTtsKey(runtime);
+  const id = jobIdOrThrow(jobId);
+  if (inFlightJobs.has(id)) throw new WorkspaceHttpError(409, "该有声剧任务正在执行，请等待当前执行结束。");
+  inFlightJobs.add(id);
+  try {
+    const loaded = await loadAudiobookJob(realm, id);
+    const apiKey = requireTtsKey(runtime);
+    try {
+      return await executeChapterJob(realm, loaded, apiKey, runtime);
+    } catch (error) {
+      await markJobFailed(realm, loaded.job.id, runtime, error);
+      throw error;
+    }
+  } finally {
+    inFlightJobs.delete(id);
+  }
+}
+
+/** 尽力把失败的任务落成 failed；不覆盖已完成/暂停状态，也不与 CAS 冲突对抗。 */
+async function markJobFailed(
+  realm: WorkspaceRealm,
+  jobId: string,
+  runtime: AudiobookJobRuntime,
+  error: unknown,
+): Promise<void> {
+  if (error instanceof JobConflictError) return;
+  try {
+    const current = await loadAudiobookJob(realm, jobId);
+    if (current.job.status !== "queued" && current.job.status !== "running") return;
+    await persistJob(realm, {
+      ...current.job,
+      status: "failed",
+      updatedAt: runtime.now(),
+    }, current.version);
+  } catch {
+    // 任务文件已被其他执行者推进或不可写：保留原状态，让调用方看到原始错误。
+  }
+}
+
+async function executeChapterJob(
+  realm: WorkspaceRealm,
+  loaded: AudiobookJobRecord,
+  apiKey: string,
+  runtime: AudiobookJobRuntime,
+): Promise<AudiobookJob> {
   const projectRecord = await loadAudiobookProject(realm, loaded.job.projectPath);
   const scriptRecord = await loadChapterScript(realm, loaded.job.projectPath, loaded.job.chapter);
   if (scriptRecord === undefined) throw new WorkspaceHttpError(409, "章节脚本不存在，无法执行有声剧任务。");
@@ -290,6 +349,7 @@ export async function runChapterJob(
   const voice = narratorVoice(project);
   const extension = audioExtension(project);
   const script = scriptRecord.script;
+  if (script.segments.length === 0) throw new WorkspaceHttpError(409, "章节脚本没有可生成的片段。");
 
   let record = await persistJob(realm, {
     ...loaded.job,
@@ -321,7 +381,7 @@ export async function runChapterJob(
 
     const key = cacheKeyFor(project, voice, segment.text);
     const cached = await runtime.binary.stat(await cachedAudioTarget(realm, key, extension));
-    if (cached === undefined) {
+    if (cached === undefined || cached.size <= 0) {
       try {
         const bytes = await runtime.tts.synthesize({
           baseUrl: project.tts.baseUrl,

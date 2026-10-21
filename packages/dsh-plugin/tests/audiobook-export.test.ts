@@ -264,6 +264,79 @@ describe("exportChapterMp3", () => {
     expect(tempFiles(binary)).toEqual([]);
   });
 
+  it("ffmpeg 超时返回 504，并带 10 分钟超时", async () => {
+    const { realm, binary, record, script } = fixture();
+    const seen: { command: string; timeoutMs: number | undefined }[] = [];
+    const runtime: AudiobookExportRuntime = {
+      binary,
+      runner: {
+        run: async (command, _args, options) => {
+          seen.push({ command, timeoutMs: options?.timeoutMs });
+          throw new Error("命令超时（600s）：ffmpeg");
+        },
+      },
+    };
+
+    const error = await failureOf(exportChapterMp3(realm, record, CHAPTER, script, runtime));
+
+    expect(error.status).toBe(504);
+    expect(error.message).toContain("ffmpeg 执行超时");
+    expect(seen).toEqual([{ command: "ffmpeg", timeoutMs: 600_000 }]);
+    expect(binary.files.has(FINAL_PATH)).toBe(false);
+    expect(tempFiles(binary)).toEqual([]);
+  });
+
+  it("ffprobe 超时返回 504，且探测使用 30 秒超时", async () => {
+    const { realm, binary, record, script } = fixture();
+    const seen: { command: string; timeoutMs: number | undefined }[] = [];
+    const runtime: AudiobookExportRuntime = {
+      binary,
+      runner: {
+        run: async (command, args, options) => {
+          seen.push({ command, timeoutMs: options?.timeoutMs });
+          if (command === "ffmpeg") {
+            const output = args.at(-1);
+            if (output !== undefined) binary.files.set(output, new Uint8Array([0x49, 0x44, 0x33]));
+            return { code: 0, stdout: "", stderr: "" };
+          }
+          throw new Error("命令超时（30s）：ffprobe");
+        },
+      },
+    };
+
+    const error = await failureOf(exportChapterMp3(realm, record, CHAPTER, script, runtime));
+
+    expect(error.status).toBe(504);
+    expect(error.message).toContain("ffprobe 执行超时");
+    expect(seen).toEqual([
+      { command: "ffmpeg", timeoutMs: 600_000 },
+      { command: "ffprobe", timeoutMs: 30_000 },
+    ]);
+    expect(binary.files.has(FINAL_PATH)).toBe(false);
+    expect(tempFiles(binary)).toEqual([]);
+  });
+
+  it("ffmpeg 报错里的绝对路径被抹成占位符", async () => {
+    const { realm, binary, record, script } = fixture();
+    const runtime: AudiobookExportRuntime = {
+      binary,
+      runner: {
+        run: async (command) => (command === "ffmpeg"
+          ? { code: 1, stdout: "", stderr: "cannot open C:\\Users\\alice\\books\\a.mp3 and /home/alice/audio/a.mp3" }
+          : { code: 0, stdout: "1", stderr: "" }),
+      },
+    };
+
+    const error = await failureOf(exportChapterMp3(realm, record, CHAPTER, script, runtime));
+
+    expect(error.status).toBe(500);
+    expect(error.message).toContain("ffmpeg 导出失败");
+    expect(error.message).toContain("[路径]");
+    expect(error.message).not.toContain("alice");
+    expect(error.message).not.toContain("Users");
+    expect(error.message).not.toContain("/home");
+  });
+
   it("拒绝不安全的章节名", async () => {
     const { realm, runtime, calls, record, script } = fixture();
 
