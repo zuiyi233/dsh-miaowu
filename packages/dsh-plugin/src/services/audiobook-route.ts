@@ -33,8 +33,10 @@ import {
 import {
   cancelAudiobookJob,
   createChapterJob,
+  isAudiobookJobInFlight,
   listAudiobookJobs,
   loadAudiobookJob,
+  markAudiobookJobFailed,
   planChapterJob,
   runChapterJob,
   type AudiobookJobRuntime,
@@ -429,21 +431,31 @@ export async function handleAudiobookRequest(
         if (loaded.job.status === "completed") {
           throw new WorkspaceHttpError(409, "已完成的有声剧任务不能再次执行。");
         }
+        // 已在执行的任务不再回 202，否则异步的 409 只会进日志。
+        if (isAudiobookJobInFlight(jobId)) {
+          throw new WorkspaceHttpError(409, "该有声剧任务正在执行，请等待当前执行结束。");
+        }
         // 恢复同样是付费入口：同一章节还有其他活动任务时先拒绝，避免双份合成。
         if (otherActiveJob(await listAudiobookJobs(realm), loaded.job) !== undefined) {
           throw new WorkspaceHttpError(409, "该章节已有其他排队、进行中或暂停的有声剧任务。");
         }
         // 恢复前先过与新建任务相同的门禁（密钥、旁白、脚本、源文件、单章上限）。
         const runtime = runtimeOf(realm, deps);
-        const record = await loadAudiobookProject(realm, loaded.job.projectPath);
-        const scriptRecord = await loadChapterScript(realm, record.path, loaded.job.chapter);
-        if (scriptRecord === undefined) throw new WorkspaceHttpError(409, "章节脚本不存在，请先生成脚本。");
-        await assertScriptSourceFresh(realm, scriptRecord.script);
-        const estimate = await planChapterJob(realm, record, scriptRecord.script, runtime);
-        if (estimate.chars > record.project.tts.maxCharsPerChapter) {
-          throw new WorkspaceHttpError(409, `章节字符数超过单章上限（${String(record.project.tts.maxCharsPerChapter)}）。`);
+        try {
+          const record = await loadAudiobookProject(realm, loaded.job.projectPath);
+          const scriptRecord = await loadChapterScript(realm, record.path, loaded.job.chapter);
+          if (scriptRecord === undefined) throw new WorkspaceHttpError(409, "章节脚本不存在，请先生成脚本。");
+          await assertScriptSourceFresh(realm, scriptRecord.script);
+          const estimate = await planChapterJob(realm, record, scriptRecord.script, runtime);
+          if (estimate.chars > record.project.tts.maxCharsPerChapter) {
+            throw new WorkspaceHttpError(409, `章节字符数超过单章上限（${String(record.project.tts.maxCharsPerChapter)}）。`);
+          }
+          launchJob(context, realm, jobId, runtime, deps);
+        } catch (error) {
+          // queued/running 的残留任务被门禁挡住时落成 failed，否则它会永远占着章节。
+          await markAudiobookJobFailed(realm, jobId, runtime, error);
+          throw error;
         }
-        launchJob(context, realm, jobId, runtime, deps);
         send(response, 202, { job: loaded.job });
         return true;
       }

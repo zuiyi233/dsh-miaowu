@@ -46,9 +46,11 @@ const STDERR_TAIL_CHARS = 300;
 const MP3_BITRATE = "192k";
 /** 错误文本里的绝对路径占位符：stderr 可能带出进程路径或工作目录。 */
 const PATH_PLACEHOLDER = "[路径]";
-const WINDOWS_ABSOLUTE_PATH = /[A-Za-z]:[\\/][^\s'"<>|,;]*/gu;
-const UNC_PATH = /\\\\[^\s'"<>|,;]+/gu;
-const POSIX_ABSOLUTE_PATH = /(?<=[\s'"(=])\/(?:[^\s'"]+\/)*[^\s'"]+/gu;
+/** 盘符路径按反斜杠分段，允许段内空格；遇到冒号/引号等报错分隔符即停。 */
+const WINDOWS_ABSOLUTE_PATH = /[A-Za-z]:[\\/](?!\/)(?:[^\\:*?"<>|\r\n]+\\)*(?:[^*?"<>|\r\n]|:(?!\s))*/gu;
+const UNC_PATH = /\\\\[^:*?"<>|\r\n]+/gu;
+/** POSIX 绝对路径可出现在行首或空白/引号/括号之后，遇到冒号即停。 */
+const POSIX_ABSOLUTE_PATH = /(^|[\s'"(=])(\/(?:[^\s'":]+\/)*[^\s'":]+)/gu;
 
 export interface CommandResult {
   readonly code: number;
@@ -251,7 +253,7 @@ function redactAbsolutePaths(text: string): string {
   return text
     .replace(WINDOWS_ABSOLUTE_PATH, PATH_PLACEHOLDER)
     .replace(UNC_PATH, PATH_PLACEHOLDER)
-    .replace(POSIX_ABSOLUTE_PATH, PATH_PLACEHOLDER);
+    .replace(POSIX_ABSOLUTE_PATH, `$1${PATH_PLACEHOLDER}`);
 }
 
 /** 只保留单行、去重、已抹掉绝对路径的 stderr 尾部，用于报错又不把整段日志塞给客户端。 */

@@ -59,6 +59,11 @@ const cancellations = new Map<string, boolean>();
 /** 进程内正在执行的任务 ID：同一任务并发 run 直接 409，结束后删键。 */
 const inFlightJobs = new Set<string>();
 
+/** 路由在返回 202 前用它拦住已在执行的任务，避免先答应再异步 409。 */
+export function isAudiobookJobInFlight(jobId: string): boolean {
+  return inFlightJobs.has(jobId);
+}
+
 /** 创建任务的进程内串行队列，键为 `项目路径\0章节`；结算后删键，长驻进程不累积。 */
 const createQueues = new Map<string, Promise<void>>();
 
@@ -303,11 +308,12 @@ export async function runChapterJob(
   inFlightJobs.add(id);
   try {
     const loaded = await loadAudiobookJob(realm, id);
-    const apiKey = requireTtsKey(runtime);
     try {
+      // 密钥检查也放在这里：queued/running 的任务缺密钥时要落成 failed，不能卡住章节。
+      const apiKey = requireTtsKey(runtime);
       return await executeChapterJob(realm, loaded, apiKey, runtime);
     } catch (error) {
-      await markJobFailed(realm, loaded.job.id, runtime, error);
+      await markAudiobookJobFailed(realm, loaded.job.id, runtime, error);
       throw error;
     }
   } finally {
@@ -316,7 +322,7 @@ export async function runChapterJob(
 }
 
 /** 尽力把失败的任务落成 failed；不覆盖已完成/暂停状态，也不与 CAS 冲突对抗。 */
-async function markJobFailed(
+export async function markAudiobookJobFailed(
   realm: WorkspaceRealm,
   jobId: string,
   runtime: AudiobookJobRuntime,

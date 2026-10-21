@@ -220,7 +220,7 @@ it("缺少密钥时 plan/create 返回 503 且不写任务文件", async () => {
   expect(writes.filter((path) => path.startsWith(`${AUDIOBOOK_JOB_ROOT}/`))).toEqual([]);
 });
 
-it("runChapterJob 缺少密钥时 503 且任务状态不变", async () => {
+it("runChapterJob 缺少密钥时 503，queued 任务落成 failed", async () => {
   const { realm, writes } = fixtureWithScript();
   const binary = memoryBinaryFileStore();
   const record = await loadAudiobookProject(realm, PROJECT_PATH);
@@ -230,8 +230,8 @@ it("runChapterJob 缺少密钥时 503 且任务状态不变", async () => {
   await expect(runChapterJob(realm, created.job.id, runtimeFor(unusedTts, binary, {})))
     .rejects.toMatchObject({ status: 503 });
 
-  expect(writes.length).toBe(writesBefore);
-  expect((await loadAudiobookJob(realm, created.job.id)).job.status).toBe("queued");
+  expect(writes.length).toBe(writesBefore + 1);
+  expect((await loadAudiobookJob(realm, created.job.id)).job.status).toBe("failed");
 });
 
 it("超过单章字符上限时 createChapterJob 返回 409", async () => {
@@ -488,6 +488,20 @@ it("执行前的门禁失败会把任务落成 failed，不留在 queued", async
     .rejects.toMatchObject({ status: 409, message: expect.stringContaining("脚本不存在") });
 
   expect((await loadAudiobookJob(realm, "orphan-1")).job.status).toBe("failed");
+});
+
+it("缺少密钥时 queued 任务落成 failed，不留在 queued", async () => {
+  const { realm } = memoryRealm({
+    [SOURCE_PATH]: "你好。世界。",
+    [PROJECT_PATH]: JSON.stringify(projectWith()),
+    [`${AUDIOBOOK_JOB_ROOT}/nokey-1.json`]: jobDocument("nokey-1"),
+  });
+  const runtime = runtimeFor(unusedTts, memoryBinaryFileStore(), {});
+
+  await expect(runChapterJob(realm, "nokey-1", runtime))
+    .rejects.toMatchObject({ status: 503, message: expect.stringContaining("OH_STORY_TTS_API_KEY") });
+
+  expect((await loadAudiobookJob(realm, "nokey-1")).job.status).toBe("failed");
 });
 
 it("同一任务并发执行只允许一个，第二个返回 409", async () => {

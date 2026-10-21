@@ -322,7 +322,11 @@ describe("exportChapterMp3", () => {
       binary,
       runner: {
         run: async (command) => (command === "ffmpeg"
-          ? { code: 1, stdout: "", stderr: "cannot open C:\\Users\\alice\\books\\a.mp3 and /home/alice/audio/a.mp3" }
+          ? {
+            code: 1,
+            stdout: "",
+            stderr: "/home/alice/audio/a.mp3: No such file; cannot open C:\\Program Files\\Git\\bin\\ffmpeg.exe and D:\\media\\books\\a b.mp3",
+          }
           : { code: 0, stdout: "1", stderr: "" }),
       },
     };
@@ -332,9 +336,12 @@ describe("exportChapterMp3", () => {
     expect(error.status).toBe(500);
     expect(error.message).toContain("ffmpeg 导出失败");
     expect(error.message).toContain("[路径]");
+    expect(error.message).toContain("No such file");
     expect(error.message).not.toContain("alice");
-    expect(error.message).not.toContain("Users");
     expect(error.message).not.toContain("/home");
+    expect(error.message).not.toContain("Program Files");
+    expect(error.message).not.toContain("Git");
+    expect(error.message).not.toContain("media");
   });
 
   it("拒绝不安全的章节名", async () => {

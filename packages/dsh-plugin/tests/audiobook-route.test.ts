@@ -26,6 +26,8 @@ import {
   type AudiobookRouteDeps,
   type AudiobookRuntime,
 } from "../src/services/audiobook-route.js";
+import { runChapterJob } from "../src/services/audiobook-jobs.js";
+import { loadAudiobookProject } from "../src/services/audiobook-project.js";
 import type { TtsClient } from "../src/services/audiobook-tts.js";
 import { CHAPTERS, memoryRealm, type MemoryRealm } from "./audiobook-fixtures.js";
 
@@ -742,6 +744,72 @@ describe("POST /oh-story/audiobook/jobs/:id/run", () => {
     expect(result.status).toBe(409);
     expect(String(asRecord(result.json)["error"])).toContain("源文件已变化");
     expect(harness.runCalls).toHaveLength(0);
+    // paused 任务保持可恢复，不应因为一次门禁失败被改成 failed。
+    expect((JSON.parse(harness.read(`${AUDIOBOOK_JOB_ROOT}/${JOB_ID}.json`) ?? "{}") as { status?: string }).status)
+      .toBe("paused");
+  });
+
+  it("running 残留任务被恢复门禁挡住时落成 failed，不再占用章节", async () => {
+    const harness = fixture({
+      seed: {
+        [SOURCE_PATH]: "正文已经改写。",
+        [`${AUDIOBOOK_JOB_ROOT}/${JOB_ID}.json`]: jobDocument(JOB_ID, "running", { completedSegments: 1 }),
+      },
+    });
+    const result = await callRoute(harness, "POST", `/oh-story/audiobook/jobs/${JOB_ID}/run`, { confirm: true });
+
+    expect(result.status).toBe(409);
+    expect(String(asRecord(result.json)["error"])).toContain("源文件已变化");
+    expect((JSON.parse(harness.read(`${AUDIOBOOK_JOB_ROOT}/${JOB_ID}.json`) ?? "{}") as { status?: string }).status)
+      .toBe("failed");
+    expect(harness.runCalls).toHaveLength(0);
+  });
+
+  it("queued 残留任务缺少密钥时落成 failed", async () => {
+    const harness = fixture({
+      env: {},
+      seed: { [`${AUDIOBOOK_JOB_ROOT}/${JOB_ID}.json`]: jobDocument(JOB_ID, "queued") },
+    });
+    const result = await callRoute(harness, "POST", `/oh-story/audiobook/jobs/${JOB_ID}/run`, { confirm: true });
+
+    expect(result.status).toBe(503);
+    expect((JSON.parse(harness.read(`${AUDIOBOOK_JOB_ROOT}/${JOB_ID}.json`) ?? "{}") as { status?: string }).status)
+      .toBe("failed");
+    expect(harness.runCalls).toHaveLength(0);
+  });
+
+  it("执行中的任务再次恢复立即返回 409，而不是先回 202", async () => {
+    // 用独立 ID，避免同文件里 cancel 测试留下的取消标记影响这次真实执行。
+    const jobId = "job-inflight-1";
+    const harness = fixture({
+      seed: { [`${AUDIOBOOK_JOB_ROOT}/${jobId}.json`]: jobDocument(jobId, "running") },
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let notifyStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      notifyStarted = resolve;
+    });
+    const tts: TtsClient = {
+      synthesize: async () => {
+        notifyStarted();
+        await gate;
+        return new Uint8Array([1, 2, 3]);
+      },
+    };
+    const record = await loadAudiobookProject(harness.realm, PROJECT_PATH);
+    expect(record.path).toBe(PROJECT_PATH);
+    const running = runChapterJob(harness.realm, jobId, { ...harness.runtime, tts });
+    await started;
+
+    const result = await callRoute(harness, "POST", `/oh-story/audiobook/jobs/${jobId}/run`, { confirm: true });
+
+    expect(result.status).toBe(409);
+    expect(String(asRecord(result.json)["error"])).toContain("正在执行");
+    release();
+    await running;
   });
 });
 
