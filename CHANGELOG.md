@@ -21,6 +21,7 @@
 - 新增 P2-A 结构评测骨架：固定语料 + 确定性 rubric + 双版本对比 + badcase 清单（`pnpm eval:quality`、`pnpm test:eval`）。它不调用模型、不产生质量结论、不是发布门禁。
 - 新增 P2-B 原始原语基准：合成 1000 章 / 1M 字符 / 10k 文件工作区，测量遍历、章节枚举、读取与 hash、状态 JSON、备份式收集（`pnpm perf:scale`、`pnpm test:perf`）。完整基准不进入门禁，且明确不是插件级 UI SLO；本机复核中 `read-hash-1m` 曾以 537 ms 超过 500 ms 预算，已如实记录。
 - 小说工作台新增「有声剧」面板（N4-A 纵向切片）：从 `正文/` 发现书籍与章节，确定性切分为旁白片段，按内容寻址缓存（`.oh-story/audiobook/cache/<sha256>/`）调用 OpenAI-compatible TTS，按章预估成本、生成音频，并用 ffmpeg 拼接导出 192 kbps MP3。启动任务、恢复暂停/失败任务与导出都需要显式确认；`OH_STORY_TTS_API_KEY` 只从宿主环境读取，端点与模型可由 `OH_STORY_TTS_BASE_URL` / `OH_STORY_TTS_MODEL` 回退，密钥不写入项目、缓存、响应或日志。项目、脚本与音频写在工作区 `有声剧/`，缓存与任务写在 `.oh-story/audiobook/`，不写 DSH 会话、`workspace.json` 或 `~/.dsh`。当前只支持单章单旁白，没有 BGM、M4B、字幕、多角色与重启自动续跑；N4-B/C/D 仍待交付。
+- 有声剧 N4-B 多角色：`cast` 成为唯一音色表（恰好一个旁白 + 若干角色，id 唯一且不能占用 `unknown`），项目保存/加载恢复音色映射；新增 `GET|PUT /oh-story/audiobook/script` 读取单章脚本与逐段指派说话人，PUT 按 `baseVersion` 做 CAS 并在改说话人后重算片段 id；重新解析覆盖时按 `(kind, text, sourceStart)` 保留文本未变片段的指派，并返回 `preserved` / `dropped` 计数。成本预估、任务执行与导出改为按每段角色音色查内容寻址缓存，改一段指派或改单个角色音色只失效相关段。未指派、或指向已删除角色的对白会在章节摘要显示计数，并让预估、新建、恢复与导出返回 409，阻止整章完成。工作台新增角色编辑器与「分段」指派面板。
 
 ### Changed
 

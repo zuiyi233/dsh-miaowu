@@ -25,7 +25,7 @@
 | 可选凭据保险库 | HTTP 路由，无独立面板 | **默认关闭** | `.oh-story/vault/`；需 `DSH_MIAOWU_VAULT_ENABLED=1` |
 | 自诊断 | 小说 / 短剧工作台「自诊断」面板 + `/oh-story/diagnostics` | 随插件可用 | 六组只读检查、支持包、显式修复；状态盘点见 `.oh-story/` |
 | 连续性驾驶舱 | 小说 / 短剧工作台「驾驶舱」面板 + `/oh-story/continuity` | 随插件可用 | 今天视图、P0/P1/P2 风险、显式快照、可复制交接清单（manifest + SHA-256） |
-| 有声剧（N4-A） | 小说工作台「有声剧」面板 + `/oh-story/audiobook/*` | 需 TTS 服务；导出需 ffmpeg/ffprobe | `有声剧/` 项目、脚本与音频；`.oh-story/audiobook/` 缓存与任务；单章单旁白 |
+| 有声剧（N4-B） | 小说工作台「有声剧」面板 + `/oh-story/audiobook/*` | 需 TTS 服务；导出需 ffmpeg/ffprobe | `有声剧/` 项目、脚本与音频；`.oh-story/audiobook/` 缓存与任务；旁白 + 多角色、逐段说话人指派 |
 | `worldbuilding` / `publishing` / `finalize` | 三个自有 Skills | 随插件可用 | 通过 Skills 目录发现，`/worldbuilding` 等入口 |
 | ComfyUI 本地接入 | 短剧生产适配器 + `oh_story_comfyui` 工具 | 需外部配置 | 本机或局域网 ComfyUI 服务 + API-format 工作流 |
 | 喵呜小说工坊 | DSH Agent 预设 | 需手动安装 | 源码 checkout 运行 `pnpm --filter @dsh-miaowu/dsh preset:install` |
@@ -47,14 +47,15 @@
 - `POST /oh-story/continuity/snapshot` 是面板唯一写入动作，必须 `confirm: true`，只写 `.oh-story/backup/`：按当前书根补收 `书名/正文/` 布局，包含 `.oh-story` 状态、不含 vault 主密钥；超过单文件上限或达到 2000 文件截断时拒绝写入。`GET /oh-story/continuity/handoff` 生成项目交接清单（文本资产 + 选定 `.oh-story` 状态 + 排序后的 SHA-256 校验和），不可读 / 超限的状态文件列入 `skipped`，达到 2000 个文件上限时拒绝而不是静默截断。多书歧义时两者都返回 409，要求先写 `.active-book`。面板可复制该清单。
 - P2-A 结构评测骨架见 [EVALUATION.md](EVALUATION.md)：固定语料 + 确定性 rubric + 双版本对比 + badcase 清单，**不调用模型、不是发布门禁**。P2-B 原始原语基准见 [PERFORMANCE.md](PERFORMANCE.md)，明确不是插件级 UI SLO。
 
-## 有声剧（N4-A）
+## 有声剧（N4-B）
 
-- 入口是小说工作台的「有声剧」面板与 `/oh-story/audiobook/*` 路由。N4-A 只做**单章、单旁白音色**的纵向切片：从 `正文/` 发现书籍与章节，确定性切分成旁白片段，按章生成脚本、预估成本、生成音频，并用 ffmpeg 导出 MP3。
+- 入口是小说工作台的「有声剧」面板与 `/oh-story/audiobook/*` 路由。N4-A 先做单章单旁白的纵向切片；N4-B 在其上加入多角色：`cast` 恰好一个旁白加若干角色（id 唯一、保留值 `unknown` 不可用），项目保存/加载恢复音色映射；旁白片段固定旁白音色，对白按 `speakerId` 查角色。
 - TTS 走 OpenAI-compatible 语音端点，每次只发送 `model` / `input` / `voice` / `response_format` / `speed` 五个标准字段。端点与模型在创建项目时确定：请求体优先，缺省回退 `OH_STORY_TTS_BASE_URL` 与 `OH_STORY_TTS_MODEL`（没有内置默认值，两处都缺时创建返回 400）；端点只接受 https 或回环 http，拒绝内嵌凭证、query 与 hash。`OH_STORY_TTS_API_KEY` 只从宿主环境读取，生成音频时必需；请求体里出现密钥字段直接 400，密钥永不落盘。
-- 缓存按内容寻址：`.oh-story/audiobook/cache/<sha256>/{audio.mp3|wav,meta.json}`，键只取端点（去尾斜杠）、模型、音色、语速、格式与文本，不含密钥、时间戳或本机路径；同段重跑命中缓存时不发 TTS 请求，`meta.json` 只记录请求参数、字节数、字符数、文本哈希与创建时间。章节任务进度在 `.oh-story/audiobook/jobs/`，每段结束后用 CAS 持久化，暂停或失败重跑不会重复累计已完成段。
+- 缓存按内容寻址：`.oh-story/audiobook/cache/<sha256>/{audio.mp3|wav,meta.json}`，键只取端点（去尾斜杠）、模型、音色、语速、格式与文本，不含密钥、时间戳或本机路径；同段重跑命中缓存时不发 TTS 请求，`meta.json` 只记录请求参数、字节数、字符数、文本哈希与创建时间。N4-B 起每段按解析出的角色音色组键，改一段指派或改单个角色音色只失效相关段，其余段继续命中。章节任务进度在 `.oh-story/audiobook/jobs/`，每段结束后用 CAS 持久化，暂停或失败重跑不会重复累计已完成段。
+- 说话人指派：`GET /oh-story/audiobook/script` 只读返回单章脚本，`PUT` 按 `segmentId` 打补丁并用客户端 `baseVersion` 做 CAS，写入后按设计文档重算片段 id；`unknown` 表示清空，角色必须存在于当前 cast，旁白段只能保持旁白。重新解析（`confirm: true` 覆盖）按 `(kind, text, sourceStart)` 保留文本未变片段的指派，响应返回 `preserved` / `dropped` 计数，不让手工指派被静默清空。工作台新增角色编辑器与「分段」指派面板。
 - 导出需要宿主机上的 `ffmpeg` 与 `ffprobe`：预检逐项报告是否就绪；导出把缓存片段用 concat 拼接、以 libmp3lame 编码为 192 kbps MP3，再用 ffprobe 校验时长。ffmpeg/ffprobe 缺失时导出返回明确 503，不写半成品。
-- 付费调用一律显式确认：启动任务、恢复任务与导出 MP3 都要求 `confirm: true`；面板「生成」先发一次 `dryRun` 取预估，再在确认框里列出预估费用、请求数、缓存命中与段数，用户确认后才真正建任务。恢复走显式 `POST /jobs/<id>/run`，排队、进行中、暂停与失败的任务都可以恢复（面板暂无恢复按钮）；同一项目+章节同时只允许一个活动任务，新建与恢复都会拦。新建/恢复/导出前还会重算正文 sha256，正文在解析后改过则返回 409「源文件已变化，请重新解析」。
-- 明确限制（N4-A）：只支持单旁白，不做多角色配音；没有 BGM/音效、M4B、章节封面与 SRT/LRC 字幕，也不做完整响度归一化（`project.json` 预留了 `export` 与 `cues` 字段，本切片不消费）；DSH 重启后不会自动续跑，残留的排队/运行中任务需要 `POST /jobs/<id>/run` 显式恢复，面板暂无恢复入口；N4-B 多角色、N4-C 完整有声剧、N4-D 批量化与质量仍待交付。
+- 付费调用一律显式确认：启动任务、恢复任务与导出 MP3 都要求 `confirm: true`；面板「生成」先发一次 `dryRun` 取预估，再在确认框里列出预估费用、请求数、缓存命中与段数，用户确认后才真正建任务。恢复走显式 `POST /jobs/<id>/run`，排队、进行中、暂停与失败的任务都可以恢复（面板暂无恢复按钮）；同一项目+章节同时只允许一个活动任务，新建与恢复都会拦。新建/恢复/导出前还会重算正文 sha256，正文在解析后改过则返回 409「源文件已变化，请重新解析」。未指派、或指向已删除角色的对白会在章节摘要显示计数，并让 `dryRun`、新建、恢复与导出返回 409，阻止整章完成；不做「回退旁白」的静默降级。
+- 明确限制（N4-B）：仍没有 BGM/音效、cue 时间轴、M4B、章节封面、SRT/LRC 字幕与完整响度归一化（`project.json` 预留了 `export` 与 `cues` 字段，本阶段不消费）；不做整书批量、成本报告与 DSH 重启后的自动续跑（N4-D）；本机没有 ffmpeg/ffprobe，真实 MP3 编码、拼接与时长探测未验证，也没有发起真实付费 TTS，特定 provider 的音色、延迟与价格仍未验证。N4-C 完整有声剧、N4-D 批量化与质量仍待交付。
 - 状态归属：项目、脚本与音频写在工作区 `有声剧/`，缓存与任务写在 `.oh-story/audiobook/`；不写 DSH 会话、`workspace.json` 或 `~/.dsh` 状态。
 
 ## 上游同步

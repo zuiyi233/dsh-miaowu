@@ -33,10 +33,16 @@
 
 - **N4-A 已交付（单章单旁白纵向切片）**：`audiobook-*` 服务（项目发现/持久化、确定性切分、内容寻址缓存、OpenAI-compatible TTS、章节 job、ffmpeg 导出、二进制存储）、`/oh-story/audiobook/*` 路由、小说工作台「有声剧」面板；项目/脚本/音频写 `有声剧/`，缓存与任务写 `.oh-story/audiobook/`，不写 DSH 会话、`workspace.json` 或 `~/.dsh`。启动任务、恢复任务与导出都必须 `confirm: true`；`OH_STORY_TTS_API_KEY` 只从宿主环境读取，密钥不入项目、缓存、响应或日志。
 - **N4-A 验证**：`pnpm verify` 退出 0（lint、typecheck、五项资产 parity、DSH boundary、release 25/25、upstream-update 3/3、sync-factory 16/16、eval 7/7、perf 6/6、72 个测试文件 / 834 通过 + 1 跳过、build），浏览器包 386,196 字节（预算 400,000）；`pnpm test:dsh` 与 `pnpm test:dsh:rc` 在 DSH `0.2.1-rc.2` / `0.2.0-rc.2` 上均 `"ok": true`。打包冒烟新增只读 overview 探测（`ttsKey` 必须为 `present`、`sources` 非空且至少一个来源有章节、密钥与绝对路径不泄漏）和「有声剧」面板探测（`TTS 密钥已配置` 文案、无错误、不建项目、不调 TTS）。本机没有 ffmpeg/ffprobe，真实 MP3 编码未验证。详见 [VALIDATION.md](VALIDATION.md) 的 2026-10-21 有声剧审计。
-- **N4-B 待交付（多角色）**：旁白 + 至少 3 个角色、音色映射保存/恢复、手工修正说话人后只重生成受影响段、未指派对白阻塞整章完成。
+- **N4-B 已交付（多角色）**：`cast` 恰好一个旁白 + 若干角色，音色映射随项目保存/加载恢复；新增 `GET|PUT /oh-story/audiobook/script` 读取脚本与逐段指派，PUT 用 `baseVersion` CAS 并在改说话人后重算片段 id；重新解析覆盖时按 `(kind, text, sourceStart)` 保留手工指派并返回 `preserved`/`dropped`；成本预估、任务执行与导出按每段角色音色组缓存键，改一段或改单个角色音色只失效相关段；未指派/指向已删除角色的对白会显示计数，并让预估、新建、恢复与导出返回 409。工作台新增角色编辑器与「分段」指派面板。验证与限制见 `docs/VALIDATION.md` 的 2026-10-22 有声剧 N4-B 审计。
 - **N4-C 待交付（完整有声剧）**：本地 BGM/音效与可编辑 cue 时间轴、响度 -16 LUFS ±1 与 true peak ≤ -1.5 dBTP、SRT/LRC、M4B 章节与封面、发布包与授权清单校验。
-- **N4-D 待交付（批量化与质量）**：≥20 章整书批量、成本报告可审计、无孤儿文件、两周实盘或等效样本。**DSH 重启后的自动续跑也延后到 N4-D**（N4-A 只支持显式恢复排队/进行中/暂停/失败任务，不会在启动时自动继续计费）。
+- **N4-D 待交付（批量化与质量）**：≥20 章整书批量、成本报告可审计、无孤儿文件、两周实盘或等效样本。**DSH 重启后的自动续跑也延后到 N4-D**（N4-B 只支持显式恢复排队/进行中/暂停/失败任务，不会在启动时自动继续计费）。
 - **P3**：仍按路线图条件触发（漫画/翻译/版权签约等改编能力不随 N4-A 解锁；有声由 N4 承接）。
+
+## 2026-10-22 有声剧 N4-B 交付
+
+- **N4-B 已交付（多角色）**：`audiobook-cast.ts` 统一解析旁白/角色并判定未指派；项目保存/加载校验 `cast`（恰好一个旁白、id 唯一、保留值 `unknown` 不可用）；脚本服务新增 CAS 说话人指派与按文本/源偏移迁移的重新解析保留；成本预估、任务执行、恢复与导出统一按每段音色组缓存键；项目视图新增 `unassignedSegments`，四道付费/导出入口对未指派对白返回 409。工作台新增角色编辑器、分段指派面板、未指派高亮与按钮禁用。
+- **N4-B 验证**：`pnpm verify` 退出 0（73 个测试文件 / 855 通过 + 1 跳过；lint、typecheck、五项资产 parity、DSH boundary、release 25/25、upstream-update 3/3、sync-factory 16/16、eval 7/7、perf 6/6、build），浏览器包 394,416 字节（预算 400,000）；有声剧 9 个测试文件 168 通过 + 1 跳过（新增 cast 校验、指派 CAS、重解析保留、逐段音色缓存键、只重生成受影响段、未指派四道门禁与 10 章 + 旁白 + 3 角色样本）。`pnpm test:dsh` 与 `pnpm test:dsh:rc` 在 DSH `0.2.1-rc.2` / `0.2.0-rc.2` 上均 `"ok": true`。
+- **限制**：本机仍无 ffmpeg/ffprobe，真实 MP3 编码/拼接/时长未验证；未发起真实付费 TTS。N4-C（BGM/音效、cue 时间轴、响度、SRT/LRC、M4B、封面、发布包）与 N4-D（整书批量、成本审计、重启自动续跑）仍待交付。
 
 ## 第一优先（高价值，直接对应现有差距）
 
