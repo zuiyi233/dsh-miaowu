@@ -325,7 +325,7 @@ describe("exportChapterMp3", () => {
           ? {
             code: 1,
             stdout: "",
-            stderr: "/home/alice/audio/a.mp3: No such file; cannot open C:\\Program Files\\Git\\bin\\ffmpeg.exe and D:\\media\\books\\a b.mp3",
+            stderr: "cannot open C:\\Program Files\\Git\\bin\\ffmpeg.exe: No such file; /home/alice/audio/a.mp3: Invalid data; D:\\media\\books\\a b.mp3: not found; \\\\srv\\share\\a.mp3: denied",
           }
           : { code: 0, stdout: "1", stderr: "" }),
       },
@@ -336,12 +336,17 @@ describe("exportChapterMp3", () => {
     expect(error.status).toBe(500);
     expect(error.message).toContain("ffmpeg 导出失败");
     expect(error.message).toContain("[路径]");
+    // 路径后面的诊断信息必须保留，否则 500 只剩一个占位符。
     expect(error.message).toContain("No such file");
+    expect(error.message).toContain("Invalid data");
+    expect(error.message).toContain("not found");
+    expect(error.message).toContain("denied");
     expect(error.message).not.toContain("alice");
     expect(error.message).not.toContain("/home");
     expect(error.message).not.toContain("Program Files");
     expect(error.message).not.toContain("Git");
     expect(error.message).not.toContain("media");
+    expect(error.message).not.toContain("b.mp3");
   });
 
   it("拒绝不安全的章节名", async () => {

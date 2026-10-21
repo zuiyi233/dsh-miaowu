@@ -60,8 +60,13 @@ const cancellations = new Map<string, boolean>();
 const inFlightJobs = new Set<string>();
 
 /** 路由在返回 202 前用它拦住已在执行的任务，避免先答应再异步 409。 */
-export function isAudiobookJobInFlight(jobId: string): boolean {
-  return inFlightJobs.has(jobId);
+export function isAudiobookJobInFlight(realm: WorkspaceRealm, jobId: string): boolean {
+  return inFlightJobs.has(inFlightKey(realm, jobId));
+}
+
+/** 同一进程内两个工作区可能各有同名任务文件，键里必须带工作区根。 */
+function inFlightKey(realm: WorkspaceRealm, jobId: string): string {
+  return `${realm.root.displayPath}\0${jobId}`;
 }
 
 /** 创建任务的进程内串行队列，键为 `项目路径\0章节`；结算后删键，长驻进程不累积。 */
@@ -304,8 +309,9 @@ export async function runChapterJob(
   runtime: AudiobookJobRuntime,
 ): Promise<AudiobookJob> {
   const id = jobIdOrThrow(jobId);
-  if (inFlightJobs.has(id)) throw new WorkspaceHttpError(409, "该有声剧任务正在执行，请等待当前执行结束。");
-  inFlightJobs.add(id);
+  const flightKey = inFlightKey(realm, id);
+  if (inFlightJobs.has(flightKey)) throw new WorkspaceHttpError(409, "该有声剧任务正在执行，请等待当前执行结束。");
+  inFlightJobs.add(flightKey);
   try {
     const loaded = await loadAudiobookJob(realm, id);
     try {
@@ -317,7 +323,7 @@ export async function runChapterJob(
       throw error;
     }
   } finally {
-    inFlightJobs.delete(id);
+    inFlightJobs.delete(flightKey);
   }
 }
 

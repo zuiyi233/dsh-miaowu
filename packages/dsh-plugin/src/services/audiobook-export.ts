@@ -46,11 +46,14 @@ const STDERR_TAIL_CHARS = 300;
 const MP3_BITRATE = "192k";
 /** 错误文本里的绝对路径占位符：stderr 可能带出进程路径或工作目录。 */
 const PATH_PLACEHOLDER = "[路径]";
-/** 盘符路径按反斜杠分段，允许段内空格；遇到冒号/引号等报错分隔符即停。 */
-const WINDOWS_ABSOLUTE_PATH = /[A-Za-z]:[\\/](?!\/)(?:[^\\:*?"<>|\r\n]+\\)*(?:[^*?"<>|\r\n]|:(?!\s))*/gu;
-const UNC_PATH = /\\\\[^:*?"<>|\r\n]+/gu;
-/** POSIX 绝对路径可出现在行首或空白/引号/括号之后，遇到冒号即停。 */
+/** 盘符路径按反斜杠分段，允许段内空格；在 `: `、分隔符、引号、行尾或另一个盘符路径前停。 */
+const WINDOWS_ABSOLUTE_PATH = /[A-Za-z]:[\\/](?!\/)(?:[^\\:*?"<>|\r\n]+\\)*[^\\:*?"<>|\r\n]*?(?=:\s|[,;]|["<>|\r\n]|$|\s+[A-Za-z]:[\\/])/gu;
+/** UNC 路径按空白/冒号断开，避免把后面的报错文本一起吃掉。 */
+const UNC_PATH = /\\\\[^\s:*?"<>|\r\n]+/gu;
+/** POSIX 绝对路径可出现在行首或空白/引号/括号之后，遇到空白或冒号即停。 */
 const POSIX_ABSOLUTE_PATH = /(^|[\s'"(=])(\/(?:[^\s'":]+\/)*[^\s'":]+)/gu;
+/** 脱敏前先截取尾部，给正则一个固定上限，避免超长 stderr 拖慢错误路径。 */
+const STDERR_SCAN_CHARS = 2_000;
 
 export interface CommandResult {
   readonly code: number;
@@ -258,9 +261,11 @@ function redactAbsolutePaths(text: string): string {
 
 /** 只保留单行、去重、已抹掉绝对路径的 stderr 尾部，用于报错又不把整段日志塞给客户端。 */
 function stderrTail(stderr: string): string {
-  const compact = redactAbsolutePaths(stderr.replace(/\s+/gu, " ").trim());
+  const compact = stderr.replace(/\s+/gu, " ").trim();
   if (compact === "") return "无错误输出";
-  return compact.length <= STDERR_TAIL_CHARS ? compact : `…${compact.slice(compact.length - STDERR_TAIL_CHARS)}`;
+  const bounded = compact.length <= STDERR_SCAN_CHARS ? compact : compact.slice(-STDERR_SCAN_CHARS);
+  const redacted = redactAbsolutePaths(bounded);
+  return redacted.length <= STDERR_TAIL_CHARS ? redacted : `…${redacted.slice(redacted.length - STDERR_TAIL_CHARS)}`;
 }
 
 /** 宿主命令执行器在超时后拒绝；超时与普通失败在路由层要映射成不同状态码。 */
