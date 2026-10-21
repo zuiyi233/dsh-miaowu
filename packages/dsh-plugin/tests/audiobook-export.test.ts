@@ -325,7 +325,7 @@ describe("exportChapterMp3", () => {
           ? {
             code: 1,
             stdout: "",
-            stderr: "cannot open C:\\Program Files\\Git\\bin\\ffmpeg.exe: No such file; /home/alice/audio/a.mp3: Invalid data; D:\\media\\books\\a b.mp3: not found; \\\\srv\\share\\a.mp3: denied",
+            stderr: "cannot open C:\\Program Files\\Git\\bin\\ffmpeg.exe: No such file; /home/alice/audio/a.mp3: Invalid data; D:\\media\\books\\a b.mp3: not found; C:\\cache\\a.mp3:Missing input; \\\\srv\\Team Share\\a.mp3: access denied",
           }
           : { code: 0, stdout: "1", stderr: "" }),
       },
@@ -340,12 +340,15 @@ describe("exportChapterMp3", () => {
     expect(error.message).toContain("No such file");
     expect(error.message).toContain("Invalid data");
     expect(error.message).toContain("not found");
-    expect(error.message).toContain("denied");
+    expect(error.message).toContain("Missing input");
+    expect(error.message).toContain("access denied");
     expect(error.message).not.toContain("alice");
     expect(error.message).not.toContain("/home");
     expect(error.message).not.toContain("Program Files");
     expect(error.message).not.toContain("Git");
     expect(error.message).not.toContain("media");
+    expect(error.message).not.toContain("cache");
+    expect(error.message).not.toContain("Team Share");
     expect(error.message).not.toContain("b.mp3");
   });
 

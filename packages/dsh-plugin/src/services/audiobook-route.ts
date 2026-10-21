@@ -454,7 +454,7 @@ export async function handleAudiobookRequest(
           // queued/running 的残留任务被门禁挡住时落成 failed，否则它会永远占着章节。
           // 另一个执行者已经在跑这个任务时不要改它的状态。
           if (!isAudiobookJobInFlight(realm, jobId)) {
-            await markAudiobookJobFailed(realm, jobId, runtime, error);
+            await markAudiobookJobFailed(realm, jobId, runtime, error, loaded.version);
           }
           throw error;
         }

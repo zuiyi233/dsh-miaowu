@@ -12,8 +12,10 @@ import {
 import {
   cancelAudiobookJob,
   createChapterJob,
+  isAudiobookJobInFlight,
   listAudiobookJobs,
   loadAudiobookJob,
+  markAudiobookJobFailed,
   planChapterJob,
   runChapterJob,
   type AudiobookJobRuntime,
@@ -502,6 +504,52 @@ it("缺少密钥时 queued 任务落成 failed，不留在 queued", async () => 
     .rejects.toMatchObject({ status: 503, message: expect.stringContaining("OH_STORY_TTS_API_KEY") });
 
   expect((await loadAudiobookJob(realm, "nokey-1")).job.status).toBe("failed");
+});
+
+it("路由带过期版本落 failed 时跳过，不覆盖另一个执行者的进度", async () => {
+  const { realm, writes } = fixtureWithScript();
+  const binary = memoryBinaryFileStore();
+  const record = await loadAudiobookProject(realm, PROJECT_PATH);
+  const created = await createChapterJob(realm, record, CHAPTER, runtimeFor(unusedTts, binary));
+  const writesBefore = writes.length;
+
+  await markAudiobookJobFailed(realm, created.job.id, runtimeFor(unusedTts, binary), new Error("precheck"), "v-stale");
+  expect(writes.length).toBe(writesBefore);
+  expect((await loadAudiobookJob(realm, created.job.id)).job.status).toBe("queued");
+
+  await markAudiobookJobFailed(realm, created.job.id, runtimeFor(unusedTts, binary), new Error("precheck"), created.version);
+  expect((await loadAudiobookJob(realm, created.job.id)).job.status).toBe("failed");
+});
+
+it("in-flight 标记按工作区隔离", async () => {
+  const { realm } = fixtureWithScript();
+  const binary = memoryBinaryFileStore();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let notifyStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    notifyStarted = resolve;
+  });
+  const runtime = runtimeFor({
+    synthesize: async () => {
+      notifyStarted();
+      await gate;
+      return new Uint8Array([9]);
+    },
+  }, binary);
+  const record = await loadAudiobookProject(realm, PROJECT_PATH);
+  const created = await createChapterJob(realm, record, CHAPTER, runtime);
+
+  const running = runChapterJob(realm, created.job.id, runtime);
+  await started;
+  const otherRealm = { ...realm, root: { targetKey: "/other", displayPath: "/other" } } as typeof realm;
+  expect(isAudiobookJobInFlight(realm, created.job.id)).toBe(true);
+  expect(isAudiobookJobInFlight(otherRealm, created.job.id)).toBe(false);
+  release();
+  await running;
+  expect(isAudiobookJobInFlight(realm, created.job.id)).toBe(false);
 });
 
 it("同一任务并发执行只允许一个，第二个返回 409", async () => {

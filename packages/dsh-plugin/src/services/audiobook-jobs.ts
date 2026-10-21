@@ -327,17 +327,20 @@ export async function runChapterJob(
   }
 }
 
-/** 尽力把失败的任务落成 failed；不覆盖已完成/暂停状态，也不与 CAS 冲突对抗。 */
+/** 尽力把失败的任务落成 failed；不覆盖已完成/暂停状态，也不与 CAS 冲突对抗。
+ * 传入 `expectedVersion` 时只在任务版本未变时落盘，避免路由门禁失败误改另一个执行者刚认领的任务。 */
 export async function markAudiobookJobFailed(
   realm: WorkspaceRealm,
   jobId: string,
   runtime: AudiobookJobRuntime,
   error: unknown,
+  expectedVersion?: string,
 ): Promise<void> {
   if (error instanceof JobConflictError) return;
   try {
     const current = await loadAudiobookJob(realm, jobId);
     if (current.job.status !== "queued" && current.job.status !== "running") return;
+    if (expectedVersion !== undefined && current.version !== expectedVersion) return;
     await persistJob(realm, {
       ...current.job,
       status: "failed",
