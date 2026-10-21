@@ -1311,7 +1311,7 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
       readonly projects?: unknown;
       readonly errors?: unknown;
     };
-    if (!audiobookOverviewResponse.ok
+    if (audiobookOverviewResponse.status !== 200
       || (audiobookOverviewPayload.preflight?.ttsKey !== "missing" && audiobookOverviewPayload.preflight?.ttsKey !== "present")
       || typeof audiobookOverviewPayload.preflight?.ffmpeg !== "boolean"
       || typeof audiobookOverviewPayload.preflight?.ffprobe !== "boolean"
