@@ -201,3 +201,55 @@ export interface AudiobookOverview {
   readonly errors: readonly { readonly path: string; readonly message: string }[];
   readonly preflight: AudiobookPreflight;
 }
+
+/**
+ * 素材与授权（N4-C）：音乐/音效目录、`素材/授权.json` 与素材视图。
+ *
+ * 所有 `path` 都是**工作区相对路径**（`有声剧/<book>/素材/...`），与 N4-B 的
+ * `AudiobookCue.asset` 同一形态。`authorized` 已汇总“有条目 + license 有效
+ * （非空且非 `unverified`）+ allowedUse 含 audiobook”，视图不另暴露 allowedUse。
+ */
+export type AudiobookAssetKind = "music" | "effect";
+export type AudiobookAssetUse = "audiobook" | "commercial";
+
+export interface AudiobookAssetProviderReceipt {
+  readonly id: string;
+  readonly model: string;
+  readonly promptSha256: string;
+  readonly receiptId: string | null;
+  readonly generatedAt: number;
+}
+
+export interface AudiobookAssetAuthorization {
+  readonly path: string;
+  readonly source: string;
+  readonly license: string;
+  readonly allowedUse: readonly AudiobookAssetUse[];
+  readonly attribution: string;
+  readonly provider?: AudiobookAssetProviderReceipt;
+}
+
+export interface AudiobookAssetAuthorizationDocument {
+  readonly schemaVersion: 1;
+  readonly assets: readonly AudiobookAssetAuthorization[];
+}
+
+export interface AudiobookAuthorizationRecord {
+  readonly document: AudiobookAssetAuthorizationDocument;
+  readonly path: string;
+  readonly version: string;
+}
+
+export interface AudiobookAsset {
+  readonly path: string;
+  readonly kind: AudiobookAssetKind;
+  readonly bytes: number;
+  readonly authorized: boolean;
+  readonly license: string | null;
+}
+
+export interface AudiobookAssetView {
+  readonly assets: readonly AudiobookAsset[];
+  readonly authorizationVersion: string | null;
+  readonly providers: readonly { readonly id: string; readonly label: string; readonly configured: boolean }[];
+}
