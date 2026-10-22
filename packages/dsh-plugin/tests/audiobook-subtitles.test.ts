@@ -38,6 +38,12 @@ describe("audiobook subtitles", () => {
     expect(formatLrc(cues)).toBe("[00:00.00]第一段。\n[00:01.12]第二段。\n");
   });
 
+  it("短句不按标点拆成多条：贪心合并后仍是一条整句字幕", () => {
+    const short = { ...script, segments: [{ id: "s-1", kind: "narration" as const, speakerId: "narrator", text: "他走了，她没有回头。", sourceStart: 0, sourceEnd: 9 }] };
+    const cues = buildSubtitleCues([{ segmentId: "s-1", startMs: 0, endMs: 1_000, durationMs: 1_000 }], short);
+    expect(cues).toEqual([{ startMs: 0, endMs: 1_000, text: "他走了，她没有回头。" }]);
+  });
+
   it("长句按标点与 42 字上限拆分，时间按字符比例分配", () => {
     const long = { ...script, segments: [{ id: "s-1", kind: "narration" as const, speakerId: "narrator", text: "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十，后半句。", sourceStart: 0, sourceEnd: 50 }] };
     const cues = buildSubtitleCues([{ segmentId: "s-1", startMs: 0, endMs: 5_000, durationMs: 5_000 }], long);
@@ -46,6 +52,27 @@ describe("audiobook subtitles", () => {
     expect(cues[0]?.startMs).toBe(0);
     expect(cues.at(-1)?.endMs).toBe(5_000);
     expect(cues.map((cue) => cue.text).join("")).toBe(long.segments[0]!.text);
+    // 41 + 4 字：41/45 与 4/45 分配 5,000ms，最后一块吸收舍入误差。
+    expect(cues).toEqual([
+      { startMs: 0, endMs: 4_556, text: "一二三四五六七八九十".repeat(4) + "，" },
+      { startMs: 4_556, endMs: 5_000, text: "后半句。" },
+    ]);
+  });
+
+  it("无标点的超长文本按 42 字硬切，时间按字符比例分配", () => {
+    const plain = { ...script, segments: [{ id: "s-1", kind: "narration" as const, speakerId: "narrator", text: "字".repeat(100), sourceStart: 0, sourceEnd: 100 }] };
+    const cues = buildSubtitleCues([{ segmentId: "s-1", startMs: 0, endMs: 5_000, durationMs: 5_000 }], plain);
+    expect(cues).toEqual([
+      { startMs: 0, endMs: 2_100, text: "字".repeat(42) },
+      { startMs: 2_100, endMs: 4_200, text: "字".repeat(42) },
+      { startMs: 4_200, endMs: 5_000, text: "字".repeat(16) },
+    ]);
+  });
+
+  it("LRC 分钟不折回、厘秒截断", () => {
+    expect(formatLrc([{ startMs: 3_600_000, endMs: 3_601_000, text: "第一段。" }])).toBe("[60:00.00]第一段。\n");
+    // 3,600,019ms = 60:00.019s：厘秒向下截断为 01（四舍五入会得到 02）。
+    expect(formatLrc([{ startMs: 3_600_019, endMs: 3_601_000, text: "第二段。" }])).toBe("[60:00.01]第二段。\n");
   });
 
   it("时间轴引用脚本外的片段时直接失败，不静默丢字幕", () => {

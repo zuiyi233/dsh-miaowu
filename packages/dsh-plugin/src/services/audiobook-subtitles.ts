@@ -7,9 +7,10 @@ import type { TimedSegment } from "./audiobook-timeline.js";
  *
  * 纯函数模块：只返回 cue、文本与工作区相对路径，不碰文件系统；Task 8 负责把
  * `formatSrt`/`formatLrc` 的输出写到 `subtitlePathsFor` 给出的位置。时间轴来自
- * ffprobe 实测（`audiobook-timeline`），长句按标点与每行 `MAX_SUBTITLE_CHARS`
- * 字上限拆行，每行时长按字符数占比分配，最后一行吸收舍入误差——字幕总和与
- * 片段实测时长严格相等，不会越到下一个片段。
+ * ffprobe 实测（`audiobook-timeline`）：只有单条太长时才拆——按标点切出的碎句
+ * 贪心合并到每行 `MAX_SUBTITLE_CHARS` 字上限（单个碎句自身超限才硬切），每行
+ * 时长按字符数占比分配，最后一行吸收舍入误差——字幕总和与片段实测时长严格
+ * 相等，不会越到下一个片段。
  */
 
 /** 单条字幕的字符上限（UTF-16 长度）：超过就拆行，避免一屏字幕挤满播放器。 */
@@ -99,19 +100,39 @@ function hardSplit(piece: string): string[] {
   return chunks;
 }
 
-/** 先按标点切句（标点留在前一块），超长块再硬切；空文本不产生字幕。 */
-function splitText(text: string): string[] {
-  const lines: string[] = [];
+/** 先按标点切出碎句（标点留在前一块），空文本不产生碎句。 */
+function fragmentsOf(text: string): string[] {
+  const fragments: string[] = [];
   let piece = "";
-  const flush = (): void => {
-    if (piece !== "") lines.push(...hardSplit(piece));
-    piece = "";
-  };
   for (const character of text) {
     piece += character;
-    if (BREAK_PUNCTUATION.has(character)) flush();
+    if (BREAK_PUNCTUATION.has(character)) {
+      fragments.push(piece);
+      piece = "";
+    }
   }
-  flush();
+  if (piece !== "") fragments.push(piece);
+  return fragments;
+}
+
+/**
+ * 碎句贪心合并到 42 字上限：只有“再加上下一碎句就超限”时才收行，短句因此保持
+ * 整句；单个碎句自身超过上限时才硬切（42/42/余），余块继续参与贪心合并。
+ */
+function splitText(text: string): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const fragment of fragmentsOf(text)) {
+    if (line.length + fragment.length <= MAX_SUBTITLE_CHARS) {
+      line += fragment;
+      continue;
+    }
+    if (line !== "") lines.push(line);
+    const chunks = hardSplit(fragment);
+    lines.push(...chunks.slice(0, -1));
+    line = chunks.at(-1) ?? "";
+  }
+  if (line !== "") lines.push(line);
   return lines;
 }
 
