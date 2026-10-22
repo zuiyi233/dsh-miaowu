@@ -5,6 +5,7 @@ import {
   LocalAssetProvider,
   bookDirectoryForProject,
   defaultAssetProviders,
+  workspaceRelativeGeneratedPath,
   type AudioAssetGenerationRequest,
   type AudioAssetProvider,
   type ComfyuiAudioPort,
@@ -104,8 +105,29 @@ describe("ComfyUiMusicProvider", () => {
     expect(port.calls.map((call) => call.outputDir)).toEqual([MUSIC_DIR, MUSIC_DIR]);
     expect(port.calls[0]?.durationSeconds).toBe(REQUEST.durationSeconds);
     expect(port.calls[0]?.timeoutSeconds).toBeGreaterThan(0);
-    expect(port.calls[0]?.filenamePrefix).toBe(`asset-music-${result.promptSha256.slice(0, 8)}`);
+    expect(port.calls[0]?.filenamePrefix).toBe(`asset-music-${result.promptSha256.slice(0, 8)}-1`);
     expect(result.receiptId).toBe("prompt-1");
+  });
+
+  it("count > 1 时前缀逐次加序号，生成的文件互不覆盖", async () => {
+    const { realm } = memoryRealm();
+    const written = new Map<string, number>();
+    const port = fakePort((input) => {
+      const path = `${input.outputDir}/${input.filenamePrefix}.mp3`;
+      written.set(path, (written.get(path) ?? 0) + 1);
+      return [{ path, bytes: 64 }];
+    });
+    const provider = new ComfyUiMusicProvider({ port, configured: true });
+
+    const result = await provider.generate(realm, projectRecord(), { ...REQUEST, count: 2 });
+
+    const prefix = `asset-music-${sha256(REQUEST.prompt).slice(0, 8)}`;
+    expect(result.files.map((file) => file.path)).toEqual([
+      `${MUSIC_DIR}/${prefix}-1.mp3`,
+      `${MUSIC_DIR}/${prefix}-2.mp3`,
+    ]);
+    expect(new Set(result.files.map((file) => file.path)).size).toBe(2);
+    expect([...written.values()]).toEqual([1, 1]);
   });
 
   it("音效输出到素材/音效目录", async () => {
@@ -121,7 +143,7 @@ describe("ComfyUiMusicProvider", () => {
     });
 
     expect(result.files).toEqual([{ path: `${EFFECT_DIR}/whoosh.ogg`, bytes: 64 }]);
-    expect(port.calls[0]?.filenamePrefix).toBe(`asset-effect-${result.promptSha256.slice(0, 8)}`);
+    expect(port.calls[0]?.filenamePrefix).toBe(`asset-effect-${result.promptSha256.slice(0, 8)}-1`);
   });
 
   it("port 返回目录外、错误扩展名或绝对路径的文件一律 403", async () => {
@@ -149,6 +171,41 @@ describe("ComfyUiMusicProvider", () => {
       configured: true,
     });
     await expect(absolute.generate(realm, projectRecord(), REQUEST)).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe("workspaceRelativeGeneratedPath", () => {
+  it("工作区内的绝对路径转换成正斜杠相对路径", () => {
+    expect(workspaceRelativeGeneratedPath(
+      "E:\\books\\demo",
+      "E:\\books\\demo\\有声剧\\长夜行\\素材\\音乐\\asset-music-abc-1.mp3",
+    )).toBe("有声剧/长夜行/素材/音乐/asset-music-abc-1.mp3");
+    expect(workspaceRelativeGeneratedPath("/books/demo/", "/books/demo/有声剧/x.mp3")).toBe("有声剧/x.mp3");
+    // Windows 路径大小写不敏感：盘符与目录大小写不同也算同一个根。
+    expect(workspaceRelativeGeneratedPath("E:/books/demo", "e:/Books/Demo/y.mp3")).toBe("y.mp3");
+  });
+
+  it("工作区根之外的绝对路径一律 403", async () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ["E:\\books\\demo", "E:\\books\\other\\a.mp3"],
+      ["E:\\books\\demo", "D:\\books\\demo\\a.mp3"],
+      ["/books/demo", "/books/demo2/a.mp3"],
+      ["/books/demo", "/books/other/a.mp3"],
+      ["/books/demo", "/books/demo/../secret/a.mp3"],
+      ["/books/demo", "/books/demo"],
+      ["", "/books/demo/a.mp3"],
+    ];
+    for (const [root, path] of cases) {
+      await expect(
+        Promise.resolve().then(() => workspaceRelativeGeneratedPath(root, path)),
+        `${root} -> ${path}`,
+      ).rejects.toMatchObject({ status: 403 });
+    }
+  });
+
+  it("已是工作区相对路径的原样返回", () => {
+    const relative = `${MUSIC_DIR}/asset-music-abc-1.mp3`;
+    expect(workspaceRelativeGeneratedPath("E:\\books\\demo", relative)).toBe(relative);
   });
 });
 

@@ -33,6 +33,7 @@ import {
   type AudiobookAssetGenerationPreview,
   type AudiobookAssetGenerationResponse,
   type AudiobookAssetAuthorizationDocument,
+  type AudiobookAuthorizationRecord,
   type AudiobookAssetKind,
   type AudiobookAssetProviderReceipt,
   type AudiobookAssetProviderSummary,
@@ -86,6 +87,8 @@ import { OpenAiCompatibleTtsClient } from "./audiobook-tts.js";
  */
 
 const BODY_LIMIT = 64 * 1_024;
+/** PUT assets 直接提交整份授权文档：512 KiB 上限（与 audiobook-assets 一致）+ 64 KiB JSON 外壳余量。 */
+const ASSET_DOCUMENT_BODY_LIMIT = 512 * 1_024 + 64 * 1_024;
 /** 与缓存模块一致的读取上限（50 MiB）；超出按不存在处理。 */
 const SEGMENT_AUDIO_MAX_BYTES = 50 * 1_024 * 1_024;
 const TTS_KEY_ENV = "OH_STORY_TTS_API_KEY";
@@ -401,14 +404,15 @@ async function assetProviderFor(
  * 生成成功后补齐授权：已有条目保留 source/license/allowedUse/attribution，只补/替换
  * provider 回执；新条目写 `license: "unverified"`（导出预检据此阻断，等待用户补授权）。
  * 走 `saveAssetAuthorizations` 的 CAS：文档存在用其版本，缺失时按新建处理。
+ * `existing` 必须由调用方在生成前读好，坏文档才不会等到文件落盘后才发现。
  */
 async function upsertGeneratedAuthorizations(
   realm: WorkspaceRealm,
   project: AudiobookProjectRecord,
+  existing: AudiobookAuthorizationRecord | undefined,
   files: readonly AudioAssetGenerationFile[],
   provider: AudiobookAssetProviderReceipt,
 ): Promise<void> {
-  const existing = await loadAssetAuthorizations(realm, project.path);
   const assets = [...(existing?.document.assets ?? [])];
   const indexes = new Map(assets.map((asset, index) => [asset.path, index] as const));
   for (const file of files) {
@@ -429,6 +433,27 @@ async function upsertGeneratedAuthorizations(
     }
   }
   await saveAssetAuthorizations(realm, project, { schemaVersion: 1, assets }, existing?.version ?? null);
+}
+
+/**
+ * 授权落盘失败时回滚本请求生成的文件：逐条解析到工作区内再交给宿主二进制通道删除。
+ * 尽力而为——单个文件解析失败或删除失败只记日志，不覆盖原始错误；工作区外的路径跳过。
+ */
+async function rollbackGeneratedAssets(
+  context: Context,
+  realm: WorkspaceRealm,
+  runtime: AudiobookRuntime,
+  files: readonly AudioAssetGenerationFile[],
+): Promise<void> {
+  for (const file of files) {
+    try {
+      const target = await realm.fs.resolve(file.path, { cwd: realm.cwd });
+      if (!realm.fs.contains(realm.root, target)) continue;
+      await runtime.binary.remove(target);
+    } catch (error) {
+      context.logger("oh-story").warn(`audiobook asset rollback failed: ${file.path}`, error);
+    }
+  }
 }
 
 /** 供宿主路由扩展缝调用；命中返回 true，其余交回 `workspace-route.ts`。 */
@@ -641,7 +666,7 @@ export async function handleAudiobookRequest(
         return true;
       }
       if (method === "PUT") {
-        const body = await jsonBody(request, BODY_LIMIT);
+        const body = await jsonBody(request, ASSET_DOCUMENT_BODY_LIMIT);
         assertNoSecretKeys(body, "body");
         const path = requiredString(body, "path");
         bookDirectoryForProject(path);
@@ -696,9 +721,12 @@ export async function handleAudiobookRequest(
       }
       if (!provider.configured) throw new WorkspaceHttpError(503, "ComfyUI 未配置工作流，无法生成素材。");
       const record = await loadAudiobookProject(realm, path);
+      // 授权文档必须在生成前读取并校验：坏文档在这里就 422，不会等到音频落盘后才失败。
+      const authorization = await loadAssetAuthorizations(realm, record.path);
       const result = await provider.generate(realm, record, generation);
       // 注入的 provider 可能绕过 ComfyUI 适配器，路由必须再校验一次落点。
       validateGeneratedAssets(record.path, generation.kind, result.files);
+      if (result.files.length === 0) throw new WorkspaceHttpError(502, "ComfyUI 素材生成没有返回文件。");
       const generatedAt = runtime.now();
       const providerReceipt: AudiobookAssetProviderReceipt = {
         id: result.provider,
@@ -707,8 +735,12 @@ export async function handleAudiobookRequest(
         receiptId: result.receiptId,
         generatedAt,
       };
-      if (result.files.length > 0) {
-        await upsertGeneratedAuthorizations(realm, record, result.files, providerReceipt);
+      try {
+        await upsertGeneratedAuthorizations(realm, record, authorization, result.files, providerReceipt);
+      } catch (error) {
+        // 授权没写成就删掉本请求生成的文件，避免留下没有授权记录的无主音频。
+        await rollbackGeneratedAssets(context, realm, runtime, result.files);
+        throw error;
       }
       const payload: AudiobookAssetGenerationResponse = {
         files: result.files.map((file) => ({ path: file.path, bytes: file.bytes })),

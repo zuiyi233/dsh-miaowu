@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { posix, win32 } from "node:path";
 import { readWorkspaceComfyuiConfigFile, resolveComfyuiConfig, type WorkspaceComfyuiConfig } from "../comfyui-status.js";
 import { createOhStoryComfyuiTool } from "../comfyui-tool.js";
 import { WorkspaceHttpError, type WorkspaceRealm } from "../workspace-route.js";
@@ -122,6 +123,40 @@ export function assetDirectoryFor(projectPath: string, kind: AudiobookAssetKind)
   return `${bookDirectoryForProject(projectPath)}/${AUDIOBOOK_ASSET_DIRECTORIES[kind]}`;
 }
 
+const WINDOWS_ABSOLUTE_PATH = /^[A-Za-z]:\//u;
+
+function normalizeProcessSlashes(value: string): string {
+  return value.replace(/\\/gu, "/");
+}
+
+function isProcessAbsolutePath(value: string): boolean {
+  return value.startsWith("/") || WINDOWS_ABSOLUTE_PATH.test(value);
+}
+
+/**
+ * 把 ComfyUI runner 返回的路径收敛为工作区相对路径。
+ *
+ * runner 回传的是执行世界绝对路径（`str(out_dir / name)`，Windows 下是反斜杠），
+ * 直接进 `validateGeneratedAssets` 必然被判成越界。这里统一反斜杠、按
+ * `realm.fs.processPath(realm.root)` 做相对化；已是相对路径的原样返回（是否越界
+ * 由 `validateGeneratedAssets` 判断），绝对路径不在工作区根内或根不是绝对路径时 403。
+ */
+export function workspaceRelativeGeneratedPath(root: string, path: string): string {
+  const text = typeof path === "string" ? path : "";
+  const normalizedPath = normalizeProcessSlashes(text);
+  if (!isProcessAbsolutePath(normalizedPath)) return text;
+  const normalizedRoot = normalizeProcessSlashes(typeof root === "string" ? root : "");
+  if (!isProcessAbsolutePath(normalizedRoot)) {
+    throw new WorkspaceHttpError(403, `无法确认生成文件位于工作区内：${text}`);
+  }
+  const impl = WINDOWS_ABSOLUTE_PATH.test(normalizedPath) || WINDOWS_ABSOLUTE_PATH.test(normalizedRoot) ? win32 : posix;
+  const relativePath = impl.relative(normalizedRoot, normalizedPath).replace(/\\/gu, "/");
+  if (relativePath === "" || relativePath === ".." || relativePath.startsWith("../") || impl.isAbsolute(relativePath)) {
+    throw new WorkspaceHttpError(403, `生成文件不在工作区内：${text}`);
+  }
+  return relativePath;
+}
+
 function isWorkspaceRelative(path: string): boolean {
   if (path === "" || path.startsWith("/") || path.includes("\\") || /^[A-Za-z]:/u.test(path)) return false;
   return path
@@ -188,7 +223,8 @@ export class LocalAssetProvider implements AudioAssetProvider {
 
 /**
  * ComfyUI 音效/音乐生成：每次按 `count` 调一次 port（ComfyUI 单次生成 count 固定 1），
- * 文件名前缀只用 `asset-<kind>-<promptSha256 前 8 位>`，符合工具的字母/数字/._- 约束。
+ * 文件名前缀为 `asset-<kind>-<promptSha256 前 8 位>-<序号>`，符合工具的字母/数字/._-
+ * 约束；序号必须逐次递增，因为 runner 每次调用都从 1 重新编号，同前缀会互相覆盖。
  */
 export class ComfyUiMusicProvider implements AudioAssetProvider {
   readonly id = COMFYUI_ASSET_PROVIDER_ID;
@@ -224,7 +260,8 @@ export class ComfyUiMusicProvider implements AudioAssetProvider {
         prompt: request.prompt,
         durationSeconds: request.durationSeconds,
         outputDir,
-        filenamePrefix,
+        // runner 每次调用都从 `<prefix>-1` 重新编号；逐次加序号避免 count>1 时覆盖前一次产物。
+        filenamePrefix: `${filenamePrefix}-${String(index + 1)}`,
         timeoutSeconds: this.timeoutSeconds,
       });
       files.push(...outcome.files.map((file) => ({ path: file.path, bytes: file.bytes })));
@@ -249,9 +286,13 @@ interface ComfyuiToolOutput {
   readonly duration_ms: number;
 }
 
-/** 生产 port：复用现有 ComfyUI 工具，工具内部负责 Python 启动与工作区配置注入。 */
+/**
+ * 生产 port：复用现有 ComfyUI 工具，工具内部负责 Python 启动与工作区配置注入。
+ * 工具回传的是执行世界绝对路径，这里按工作区根转换成工作区相对路径后再交给 provider。
+ */
 export function createComfyuiAudioPort(realm: WorkspaceRealm): ComfyuiAudioPort {
   const tool = createOhStoryComfyuiTool();
+  const workspaceRoot = realm.fs.processPath(realm.root);
   return {
     async generate(input) {
       const exec = {
@@ -273,7 +314,10 @@ export function createComfyuiAudioPort(realm: WorkspaceRealm): ComfyuiAudioPort 
       }
       const files = output.files as readonly { readonly path: string; readonly bytes: number }[];
       return {
-        files: files.map((file) => ({ path: file.path, bytes: file.bytes })),
+        files: files.map((file) => ({
+          path: workspaceRelativeGeneratedPath(workspaceRoot, file.path),
+          bytes: file.bytes,
+        })),
         promptIds: Array.isArray(output.prompt_ids) ? (output.prompt_ids as readonly unknown[]) : [],
         durationMs: typeof output.duration_ms === "number" ? output.duration_ms : 0,
       };

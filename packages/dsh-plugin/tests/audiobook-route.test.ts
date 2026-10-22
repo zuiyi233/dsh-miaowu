@@ -980,7 +980,11 @@ describe("GET/PUT /oh-story/audiobook/assets 与素材生成", () => {
 
   function fakeAssetProvider(
     files: readonly { readonly path: string; readonly bytes: number }[],
-    options: { readonly configured?: boolean } = {},
+    options: {
+      readonly configured?: boolean;
+      /** 模拟生成期间别人改动了工作区（例如抢写授权文档），用于制造保存冲突。 */
+      readonly onGenerate?: (realm: WorkspaceRealm) => Promise<void>;
+    } = {},
   ): FakeAssetProvider {
     const generateCalls: AudioAssetGenerationRequest[] = [];
     return {
@@ -995,6 +999,7 @@ describe("GET/PUT /oh-story/audiobook/assets 与素材生成", () => {
           const target = await realm.fs.resolve(file.path, { cwd: realm.cwd });
           await realm.fs.writeText(target, "ID3");
         }
+        await options.onGenerate?.(realm);
         return {
           files: [...files],
           provider: "comfyui",
@@ -1220,6 +1225,70 @@ describe("GET/PUT /oh-story/audiobook/assets 与素材生成", () => {
     expect(String(asRecord(result.json)["error"])).toContain("素材");
     expect(harness.writes).not.toContain(AUTHORIZATION_PATH);
     expect(provider.generateCalls).toHaveLength(1);
+  });
+
+  it("生成没有返回文件时 502，且不写授权", async () => {
+    const provider = fakeAssetProvider([]);
+    const harness = fixture({ provider });
+    const result = await callRoute(harness, "POST", "/oh-story/audiobook/assets/generate", GENERATE_BODY);
+
+    expect(result.status).toBe(502);
+    expect(harness.writes).not.toContain(AUTHORIZATION_PATH);
+  });
+
+  it("授权文档损坏时在生成前返回 422，不调用 provider", async () => {
+    const provider = fakeAssetProvider([{ path: ASSET_MUSIC_PATH, bytes: 3 }]);
+    const harness = fixture({ provider, seed: { [AUTHORIZATION_PATH]: "{broken" } });
+    const result = await callRoute(harness, "POST", "/oh-story/audiobook/assets/generate", GENERATE_BODY);
+
+    expect(result.status).toBe(422);
+    expect(provider.generateCalls).toHaveLength(0);
+    expect(harness.writes).toHaveLength(0);
+  });
+
+  it("授权保存冲突（412）时回滚本次生成的文件", async () => {
+    const binary = memoryBinaryFileStore();
+    binary.files.set(ASSET_MUSIC_PATH, new Uint8Array([0x49, 0x44, 0x33]));
+    const provider = fakeAssetProvider([{ path: ASSET_MUSIC_PATH, bytes: 3 }], {
+      onGenerate: async (realm) => {
+        // 生成期间授权文档被别人改写：路由手里还是旧版本，保存必然 412。
+        const target = await realm.fs.resolve(AUTHORIZATION_PATH, { cwd: realm.cwd });
+        await realm.fs.writeText(target, JSON.stringify(AUTHORIZATION_DOCUMENT));
+      },
+    });
+    const harness = fixture({
+      provider,
+      binary,
+      seed: { [AUTHORIZATION_PATH]: JSON.stringify(AUTHORIZATION_DOCUMENT) },
+    });
+    const result = await callRoute(harness, "POST", "/oh-story/audiobook/assets/generate", GENERATE_BODY);
+
+    expect(result.status).toBe(412);
+    expect(binary.files.has(ASSET_MUSIC_PATH)).toBe(false);
+  });
+
+  it("PUT 授权接受 512 KiB 级文档（独立请求体上限），超出外壳上限 413", async () => {
+    const harness = fixture({ seed: { [ASSET_MUSIC_PATH]: "ID3" } });
+    const accepted = await callRoute(harness, "PUT", "/oh-story/audiobook/assets", {
+      path: PROJECT_PATH,
+      baseVersion: null,
+      document: {
+        schemaVersion: 1,
+        assets: [{ ...AUTHORIZATION_DOCUMENT.assets[0], attribution: "x".repeat(80 * 1_024) }],
+      },
+    });
+    expect(accepted.status).toBe(200);
+    expect((harness.read(AUTHORIZATION_PATH) ?? "").length).toBeGreaterThan(64 * 1_024);
+
+    const oversized = await callRoute(harness, "PUT", "/oh-story/audiobook/assets", {
+      path: PROJECT_PATH,
+      baseVersion: null,
+      document: {
+        schemaVersion: 1,
+        assets: [{ ...AUTHORIZATION_DOCUMENT.assets[0], attribution: "x".repeat(600 * 1_024) }],
+      },
+    });
+    expect(oversized.status).toBe(413);
   });
 });
 
