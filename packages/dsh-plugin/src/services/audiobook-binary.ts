@@ -1,5 +1,8 @@
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { pipeline } from "node:stream/promises";
 import type { FsTarget } from "@deepseek-ai/dsh-fs";
 import type { WorkspaceRealm } from "../workspace-route.js";
 
@@ -25,6 +28,10 @@ export interface BinaryFileStore {
   rename(from: FsTarget, to: FsTarget): Promise<void>;
   /** 删除目标；目标缺失不算错误。 */
   remove(target: FsTarget): Promise<void>;
+  /** 目标内容的 sha256 十六进制；目标缺失或不是普通文件时返回 undefined。 */
+  hash(target: FsTarget): Promise<string | undefined>;
+  /** 复制字节到目标；目标父目录不存在时自动创建。 */
+  copy(from: FsTarget, to: FsTarget): Promise<void>;
 }
 
 /** 宿主文件系统实现：路径来自当前 realm 的执行世界。 */
@@ -53,6 +60,18 @@ export function hostBinaryFileStore(realm: WorkspaceRealm): BinaryFileStore {
     },
     remove: async (target) => {
       await rm(realm.fs.processPath(target), { force: true });
+    },
+    hash: async (target) => {
+      const path = realm.fs.processPath(target);
+      const info = await stat(path).catch(() => undefined);
+      if (info === undefined || !info.isFile()) return undefined;
+      const digest = createHash("sha256");
+      await pipeline(createReadStream(path), digest);
+      return digest.digest("hex");
+    },
+    copy: async (from, to) => {
+      await mkdir(dirname(realm.fs.processPath(to)), { recursive: true });
+      await copyFile(realm.fs.processPath(from), realm.fs.processPath(to));
     },
   };
 }
@@ -90,6 +109,17 @@ export function memoryBinaryFileStore(): MemoryBinaryFileStore {
     },
     remove: (target) => {
       files.delete(target.displayPath);
+      return Promise.resolve();
+    },
+    hash: (target) => {
+      const bytes = files.get(target.displayPath);
+      if (bytes === undefined) return Promise.resolve(undefined);
+      return Promise.resolve(createHash("sha256").update(bytes).digest("hex"));
+    },
+    copy: (from, to) => {
+      const bytes = files.get(from.displayPath);
+      if (bytes === undefined) return Promise.reject(new Error("二进制文件不存在。"));
+      files.set(to.displayPath, bytes.slice());
       return Promise.resolve();
     },
   };
