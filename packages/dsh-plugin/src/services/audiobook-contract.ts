@@ -253,3 +253,51 @@ export interface AudiobookAssetView {
   readonly authorizationVersion: string | null;
   readonly providers: readonly { readonly id: string; readonly label: string; readonly configured: boolean }[];
 }
+
+/**
+ * 发布清单（N4-C）：`有声剧/<book>/发布/发布清单.json` 的结构。
+ *
+ * `files[].path` 是**包内相对路径**（`发布/...`），不是工作区相对路径；清单本身
+ * 落在 `发布/发布清单.json`，所以包内路径与工作区路径只差 `有声剧/<book>/` 前缀。
+ * `checksum` 是按路径排序后对 `path\0sha256` 逐行拼接再取 sha256 的结果，可本地
+ * 复算；`cast` 只保留 id/name/voice，`providerReceipts` 不含密钥与完整 URL。
+ */
+export interface AudiobookManifestFile {
+  readonly path: string;
+  readonly bytes: number;
+  readonly sha256: string;
+  readonly durationMs: number | null;
+}
+
+export interface AudiobookManifestChapter {
+  readonly index: number;
+  readonly title: string;
+  readonly audio: string | null;
+  readonly subtitles: readonly string[];
+}
+
+export interface AudiobookManifestCastMember {
+  readonly id: string;
+  readonly name: string;
+  readonly voice: string;
+}
+
+export interface AudiobookManifestLicense {
+  readonly path: string;
+  readonly license: string;
+  readonly attribution: string;
+}
+
+export interface AudiobookManifest {
+  readonly schemaVersion: 1;
+  readonly generatedAt: number;
+  readonly book: string;
+  readonly projectVersion: string;
+  readonly files: readonly AudiobookManifestFile[];
+  readonly chapters: readonly AudiobookManifestChapter[];
+  readonly cast: readonly AudiobookManifestCastMember[];
+  readonly licenses: readonly AudiobookManifestLicense[];
+  readonly providerReceipts: readonly AudiobookAssetProviderReceipt[];
+  readonly cost: { readonly chars: number; readonly requests: number; readonly estimatedCost: number };
+  readonly checksum: string;
+}
