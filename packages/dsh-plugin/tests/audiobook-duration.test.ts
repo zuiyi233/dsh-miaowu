@@ -36,6 +36,20 @@ describe("duration cache", () => {
       .rejects.toMatchObject({ status: 500 });
   });
 
+  it("时长缓存命中但音频缺失或为空仍返回 409，且不调用 ffprobe", async () => {
+    const path = `${AUDIOBOOK_DURATION_ROOT}/${KEY}.json`;
+    const document = JSON.stringify({ schemaVersion: 1, cacheKey: KEY, durationMs: 12_500, probedAt: 1_700_000_000_000 });
+    const { realm } = memoryRealm({ [path]: document });
+    const binary = memoryBinaryFileStore();
+    const calls: string[] = [];
+    await expect(measureCachedSegmentDuration(realm, { ...runtime([], calls), binary }, KEY, "mp3"))
+      .rejects.toMatchObject({ status: 409 });
+    binary.files.set(segmentAudioPath(KEY, "mp3"), new Uint8Array(0));
+    await expect(measureCachedSegmentDuration(realm, { ...runtime([], calls), binary }, KEY, "mp3"))
+      .rejects.toMatchObject({ status: 409 });
+    expect(calls).toHaveLength(0);
+  });
+
   it("ffprobe 参数固定，缓存文档写入固定路径并带沙箱策略", async () => {
     const { realm, writeCalls, read } = memoryRealm();
     const binary = memoryBinaryFileStore();

@@ -159,9 +159,10 @@ async function probeDuration(runtime: AudiobookDurationRuntime, target: FsTarget
 }
 
 /**
- * 片段实测时长：优先读 `.oh-story/audiobook/durations/<cacheKey>.json`，未命中才
- * 探测缓存音频并写回。缓存音频缺失或为空返回 409（还没有生成完整），探测失败
- * 返回 500 且不落盘。返回值是四舍五入后的毫秒。
+ * 片段实测时长：先确认缓存音频仍在且非空，再读 `.oh-story/audiobook/durations/<cacheKey>.json`，
+ * 未命中才探测并写回。缓存音频缺失或为空返回 409——命中与未命中同一口径，避免
+ * 残留时长文档把已删除/零字节音频当成可用片段；探测失败返回 500 且不落盘。
+ * 返回值是四舍五入后的毫秒。
  */
 export async function measureCachedSegmentDuration(
   realm: WorkspaceRealm,
@@ -171,11 +172,11 @@ export async function measureCachedSegmentDuration(
 ): Promise<number> {
   const key = cacheKeyOrThrow(cacheKey);
   const extension = extensionOrThrow(ext);
-  const cached = await readCachedDuration(realm, key);
-  if (cached !== undefined) return cached;
   const target = await segmentTarget(realm, key, extension);
   const info = await runtime.binary.stat(target);
   if (info === undefined || info.size <= 0) throw new WorkspaceHttpError(409, "片段音频还没有生成完整。");
+  const cached = await readCachedDuration(realm, key);
+  if (cached !== undefined) return cached;
   const durationMs = await probeDuration(runtime, target);
   return await writeCachedDuration(realm, key, durationMs);
 }
