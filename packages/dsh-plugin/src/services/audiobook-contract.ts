@@ -285,6 +285,39 @@ export interface AudiobookAssetGenerationResponse {
 }
 
 /**
+ * 完整导出（N4-C）：请求的格式开关、预检问题与导出结果。
+ *
+ * `AudiobookExportPreflight` 只读懂工作区（脚本、素材授权、封面、缓存音频与
+ * ffmpeg 能力），不写任何文件；`ready` 为假时 `issues` 至少一条，真正的导出会
+ * 以第一条 issue 的状态码拒绝。`AudiobookExportFullResult.files` 全部是工作区
+ * 相对路径，含发布目录里的副本。
+ */
+export interface AudiobookExportFormats {
+  readonly mp3: boolean;
+  readonly m4b: boolean;
+  readonly subtitles: readonly ("srt" | "lrc")[];
+  readonly package: boolean;
+}
+
+export interface AudiobookExportIssue {
+  readonly code: string;
+  readonly message: string;
+  readonly path?: string;
+}
+
+export interface AudiobookExportPreflight {
+  readonly ready: boolean;
+  readonly issues: readonly AudiobookExportIssue[];
+  readonly chapters: number;
+  readonly cost: { readonly chars: number; readonly requests: number; readonly estimatedCost: number };
+}
+
+export interface AudiobookExportFullResult {
+  readonly files: readonly { readonly path: string; readonly bytes: number }[];
+  readonly manifestPath?: string;
+}
+
+/**
  * 发布清单（N4-C）：`有声剧/<book>/发布/发布清单.json` 的结构。
  *
  * `files[].path` 是**包内相对路径**（`发布/...`），不是工作区相对路径；清单本身

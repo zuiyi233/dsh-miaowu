@@ -1453,3 +1453,60 @@ describe("GET/PUT /oh-story/audiobook/script", () => {
     expect(harness.writes).toHaveLength(0);
   });
 });
+
+describe("POST /oh-story/audiobook/export 完整导出", () => {
+  const CUE = {
+    id: "cue-1",
+    chapter: CHAPTER,
+    asset: "有声剧/长夜行/素材/音乐/theme.mp3",
+    startSegment: SCRIPT.segments[0]!.id,
+    offsetMs: 0,
+    fadeInMs: 0,
+    fadeOutMs: 0,
+    gainDb: -6,
+    duckDb: -12,
+  };
+  const CUE_PROJECT: AudiobookProject = { ...PROJECT, cues: [CUE] };
+  const ASSET_PATH = "有声剧/长夜行/素材/音乐/theme.mp3";
+  const AUTHORIZATION_PATH = "有声剧/长夜行/素材/授权.json";
+
+  function cueFixture(authorized: boolean): Fixture {
+    return fixture({
+      seed: {
+        [PROJECT_PATH]: JSON.stringify(CUE_PROJECT),
+        [ASSET_PATH]: "ID3",
+        ...(authorized ? {
+          [AUTHORIZATION_PATH]: JSON.stringify({
+            schemaVersion: 1,
+            assets: [{ path: ASSET_PATH, source: "测试", license: "CC-BY-4.0", allowedUse: ["audiobook"], attribution: "测试" }],
+          }),
+          "有声剧/长夜行/封面/cover.jpg": "JPEG",
+        } : {}),
+      },
+    });
+  }
+
+  it("导出预检零写入；未授权素材/缺封面时 ready=false 并列出 issue", async () => {
+    const harness = cueFixture(false);
+    const preview = await callRoute(harness, "POST", "/oh-story/audiobook/export", {
+      path: PROJECT_PATH, chapters: [CHAPTER], preview: true,
+      formats: { mp3: true, m4b: true, subtitles: ["srt", "lrc"], package: true },
+    });
+    expect(preview.status).toBe(200);
+    expect(harness.writes).toHaveLength(0);
+    const preflight = asRecord(asRecord(preview.json)["preflight"]);
+    expect(preflight["ready"]).toBe(false);
+    expect(JSON.stringify(preflight["issues"])).toContain("未授权");
+    expect(JSON.stringify(preflight["issues"])).toContain("封面");
+  });
+
+  it("未确认完整导出返回 400 且不写发布目录", async () => {
+    const harness = cueFixture(true);
+    const denied = await callRoute(harness, "POST", "/oh-story/audiobook/export", {
+      path: PROJECT_PATH, chapters: [CHAPTER],
+      formats: { mp3: true, m4b: false, subtitles: [], package: false },
+    });
+    expect(denied.status).toBe(400);
+    expect(harness.writes).toHaveLength(0);
+  });
+});

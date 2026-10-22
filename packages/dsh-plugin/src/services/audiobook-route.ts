@@ -39,6 +39,7 @@ import {
   type AudiobookAssetProviderSummary,
   type AudiobookAssignment,
   type AudiobookChapterSummary,
+  type AudiobookExportFormats,
   type AudiobookJob,
   type AudiobookOverview,
   type AudiobookPreflight,
@@ -49,8 +50,10 @@ import {
 } from "./audiobook-contract.js";
 import {
   chapterAudioPathFor,
+  exportAudiobook,
   exportChapterMp3,
   hostCommandRunner,
+  preflightAudiobookExport,
   probeTool,
   type CommandRunner,
 } from "./audiobook-export.js";
@@ -382,6 +385,52 @@ function assertGeneratableProvider(value: unknown): void {
   if (value !== undefined && value !== COMFYUI_ASSET_PROVIDER_ID) {
     throw new WorkspaceHttpError(400, "provider 只支持 comfyui。");
   }
+}
+
+/**
+ * 完整导出格式：三个布尔开关与字幕数组必须显式给出；字幕只接受 srt/lrc，
+ * 重复值去重，全空视为没有可导出的内容（400）。预检与导出共用这份解析结果。
+ */
+function exportFormatsOf(value: unknown): AudiobookExportFormats {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new WorkspaceHttpError(400, "formats 必须是对象。");
+  }
+  const record = value as Readonly<Record<string, unknown>>;
+  const flag = (key: string): boolean => {
+    const raw = record[key];
+    if (typeof raw !== "boolean") throw new WorkspaceHttpError(400, `formats.${key} 必须是布尔值。`);
+    return raw;
+  };
+  const mp3 = flag("mp3");
+  const m4b = flag("m4b");
+  const packageRequested = flag("package");
+  const rawSubtitles = record["subtitles"];
+  if (!Array.isArray(rawSubtitles)) throw new WorkspaceHttpError(400, "formats.subtitles 必须是数组。");
+  const items: readonly unknown[] = rawSubtitles;
+  const subtitles: ("srt" | "lrc")[] = [];
+  for (const [index, item] of items.entries()) {
+    if (item !== "srt" && item !== "lrc") {
+      throw new WorkspaceHttpError(400, `formats.subtitles[${String(index)}] 只支持 srt 或 lrc。`);
+    }
+    if (!subtitles.includes(item)) subtitles.push(item);
+  }
+  if (!mp3 && !m4b && !packageRequested && subtitles.length === 0) {
+    throw new WorkspaceHttpError(400, "formats 至少要选择一种输出格式。");
+  }
+  return { mp3, m4b, subtitles, package: packageRequested };
+}
+
+/** 可选章节过滤：省略或空数组表示全部章节；每个元素必须是非空章节名。 */
+function chapterSelection(value: unknown): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new WorkspaceHttpError(400, "chapters 必须是章节名数组。");
+  const items: readonly unknown[] = value;
+  return items.map((item, index) => {
+    if (typeof item !== "string" || item.trim() === "") {
+      throw new WorkspaceHttpError(400, `chapters[${String(index)}] 必须是非空章节名。`);
+    }
+    return item.trim();
+  });
 }
 
 function providerSummary(provider: AudioAssetProvider): AudiobookAssetProviderSummary {
@@ -759,6 +808,29 @@ export async function handleAudiobookRequest(
     if (url.pathname === AUDIOBOOK_ROUTES.export && method === "POST") {
       const body = await jsonBody(request, BODY_LIMIT);
       assertNoSecretKeys(body, "body");
+      if (body["formats"] !== undefined) {
+        const formats = exportFormatsOf(body["formats"]);
+        const chapters = chapterSelection(body["chapters"]);
+        const path = requiredString(body, "path");
+        const realm = await workspaceRealm(context, url);
+        const runtime = runtimeOf(realm, deps);
+        if (body["preview"] === true) {
+          // 预览只读：返回 issues 与成本预估，不要求 confirm，也不写任何文件。
+          const record = await loadAudiobookProject(realm, path);
+          const preflight = await preflightAudiobookExport(realm, record, runtime, formats, chapters);
+          send(response, 200, { preflight });
+          return true;
+        }
+        if (body["confirm"] !== true) {
+          throw new WorkspaceHttpError(400, "完整导出会调用 ffmpeg 写音频与发布文件，需要显式确认（confirm: true）。");
+        }
+        const record = await loadAudiobookProject(realm, path);
+        const result = await exportAudiobook(realm, record, runtime, formats, chapters);
+        send(response, 200, result.manifestPath === undefined
+          ? { files: result.files }
+          : { files: result.files, manifestPath: result.manifestPath });
+        return true;
+      }
       if (body["confirm"] !== true) {
         throw new WorkspaceHttpError(400, "导出会调用 ffmpeg 写音频文件，需要显式确认（confirm: true）。");
       }
