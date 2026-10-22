@@ -17,6 +17,8 @@ export const AUDIOBOOK_ROUTES = {
   jobs: "/oh-story/audiobook/jobs",
   export: "/oh-story/audiobook/export",
   segmentAudio: "/oh-story/audiobook/segment-audio",
+  assets: "/oh-story/audiobook/assets",
+  assetsGenerate: "/oh-story/audiobook/assets/generate",
 } as const;
 
 export type AudiobookProjectKind = "novel";
@@ -248,10 +250,38 @@ export interface AudiobookAsset {
   readonly license: string | null;
 }
 
+/** 素材生成 provider 的能力摘要；`configured` 为假时只能预览、不能生成（503）。 */
+export interface AudiobookAssetProviderSummary {
+  readonly id: string;
+  readonly label: string;
+  readonly configured: boolean;
+}
+
 export interface AudiobookAssetView {
   readonly assets: readonly AudiobookAsset[];
   readonly authorizationVersion: string | null;
-  readonly providers: readonly { readonly id: string; readonly label: string; readonly configured: boolean }[];
+  readonly providers: readonly AudiobookAssetProviderSummary[];
+}
+
+/** `POST /oh-story/audiobook/assets/generate` 的预览响应：零写入、不调用 provider。 */
+export interface AudiobookAssetGenerationPreview {
+  readonly estimate: number;
+  readonly provider: { readonly id: string; readonly label: string };
+}
+
+/** 生成回执：与 `AudiobookAssetProviderReceipt` 同源，但对外用 `provider` 标识来源。 */
+export interface AudiobookAssetGenerationReceipt {
+  readonly provider: string;
+  readonly model: string;
+  readonly promptSha256: string;
+  readonly receiptId: string | null;
+  readonly generatedAt: number;
+}
+
+/** `POST /oh-story/audiobook/assets/generate` 的成功响应；`files` 都是工作区相对路径。 */
+export interface AudiobookAssetGenerationResponse {
+  readonly files: readonly { readonly path: string; readonly bytes: number }[];
+  readonly receipt: AudiobookAssetGenerationReceipt;
 }
 
 /**

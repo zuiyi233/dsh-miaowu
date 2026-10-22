@@ -4,6 +4,10 @@ import type { Context } from "@deepseek-ai/cordis";
 import { describe, expect, it, vi } from "vitest";
 import type { WorkspaceRealm } from "../src/workspace-route.js";
 import {
+  type AudioAssetGenerationRequest,
+  type AudioAssetProvider,
+} from "../src/services/audiobook-asset-provider.js";
+import {
   memoryBinaryFileStore,
   type MemoryBinaryFileStore,
 } from "../src/services/audiobook-binary.js";
@@ -152,6 +156,7 @@ interface Fixture extends MemoryRealm {
   readonly runCalls: readonly { readonly realm: WorkspaceRealm; readonly jobId: string; readonly runtime: AudiobookRuntime }[];
   readonly context: Context;
   readonly logged: unknown[];
+  readonly provider: AudioAssetProvider | undefined;
 }
 
 interface FixtureOptions {
@@ -159,6 +164,7 @@ interface FixtureOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly run?: RunHandler;
   readonly binary?: MemoryBinaryFileStore;
+  readonly provider?: AudioAssetProvider;
 }
 
 function fixture(options: FixtureOptions = {}): Fixture {
@@ -200,7 +206,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
       warn: (): void => undefined,
     }),
   } as unknown as Context;
-  return { ...state, binary, runner, runtime, runJob, runCalls, context, logged };
+  return { ...state, binary, runner, runtime, runJob, runCalls, context, logged, provider: options.provider };
 }
 
 interface RouteResult {
@@ -239,7 +245,13 @@ async function callRoute(
       bytes = raw === undefined ? Buffer.alloc(0) : Buffer.from(raw);
     },
   } as unknown as ServerResponse;
-  const deps: AudiobookRouteDeps = { runtime: () => harness.runtime, runJob: harness.runJob };
+  const deps: AudiobookRouteDeps = {
+    runtime: () => harness.runtime,
+    runJob: harness.runJob,
+    ...(harness.provider === undefined
+      ? {}
+      : { assetProvider: async (): Promise<AudioAssetProvider> => harness.provider as AudioAssetProvider }),
+  };
   const handled = await handleAudiobookRequest(
     harness.context,
     request,
@@ -936,6 +948,278 @@ describe("GET /oh-story/audiobook/segment-audio", () => {
       `/oh-story/audiobook/segment-audio?path=${encodeURIComponent(missing)}`,
     );
     expect(result.status).toBe(404);
+  });
+});
+
+describe("GET/PUT /oh-story/audiobook/assets 与素材生成", () => {
+  const ASSET_MUSIC_PATH = "有声剧/长夜行/素材/音乐/theme.mp3";
+  const ASSET_RAIN_PATH = "有声剧/长夜行/素材/音乐/rain.ogg";
+  const AUTHORIZATION_PATH = "有声剧/长夜行/素材/授权.json";
+  const AUTHORIZATION_DOCUMENT = {
+    schemaVersion: 1,
+    assets: [{
+      path: ASSET_MUSIC_PATH,
+      source: "采购",
+      license: "CC-BY-4.0",
+      allowedUse: ["audiobook"],
+      attribution: "作曲",
+    }],
+  };
+  const GENERATE_REQUEST = {
+    path: PROJECT_PATH,
+    kind: "music",
+    prompt: "雨夜的城市",
+    durationSeconds: 12,
+    count: 2,
+  };
+  const GENERATE_BODY = { ...GENERATE_REQUEST, confirm: true };
+
+  interface FakeAssetProvider extends AudioAssetProvider {
+    readonly generateCalls: AudioAssetGenerationRequest[];
+  }
+
+  function fakeAssetProvider(
+    files: readonly { readonly path: string; readonly bytes: number }[],
+    options: { readonly configured?: boolean } = {},
+  ): FakeAssetProvider {
+    const generateCalls: AudioAssetGenerationRequest[] = [];
+    return {
+      id: "comfyui",
+      label: "ComfyUI",
+      configured: options.configured ?? true,
+      estimate: () => 0,
+      generateCalls,
+      async generate(realm, _project, request) {
+        generateCalls.push(request);
+        for (const file of files) {
+          const target = await realm.fs.resolve(file.path, { cwd: realm.cwd });
+          await realm.fs.writeText(target, "ID3");
+        }
+        return {
+          files: [...files],
+          provider: "comfyui",
+          model: "test-model",
+          promptSha256: createHash("sha256").update(request.prompt, "utf8").digest("hex"),
+          receiptId: `receipt-${String(generateCalls.length)}`,
+          cost: 0,
+        };
+      },
+    };
+  }
+
+  it("GET 素材视图零写入，providers 含 local 与 comfyui", async () => {
+    const harness = fixture({ provider: fakeAssetProvider([]), seed: { [ASSET_MUSIC_PATH]: "ID3" } });
+    const result = await callRoute(
+      harness,
+      "GET",
+      `/oh-story/audiobook/assets?path=${encodeURIComponent(PROJECT_PATH)}`,
+    );
+
+    expect(result.status).toBe(200);
+    const view = asRecord(asRecord(result.json)["view"]);
+    expect(view["providers"]).toEqual([
+      { id: "local", label: "本地素材库", configured: true },
+      { id: "comfyui", label: "ComfyUI", configured: true },
+    ]);
+    expect(view["assets"]).toEqual([
+      { path: ASSET_MUSIC_PATH, kind: "music", bytes: 3, authorized: false, license: null },
+    ]);
+    expect(view["authorizationVersion"]).toBeNull();
+    expect(harness.writes).toHaveLength(0);
+  });
+
+  it("GET 非规范项目路径返回 400", async () => {
+    const harness = fixture({ provider: fakeAssetProvider([]) });
+    const result = await callRoute(
+      harness,
+      "GET",
+      `/oh-story/audiobook/assets?path=${encodeURIComponent("有声剧/长夜行/子目录/project.json")}`,
+    );
+    expect(result.status).toBe(400);
+    expect(harness.writes).toHaveLength(0);
+  });
+
+  it("PUT 授权按 baseVersion 做 CAS，过期版本 412，密钥字段 400", async () => {
+    const harness = fixture({ provider: fakeAssetProvider([]), seed: { [ASSET_MUSIC_PATH]: "ID3" } });
+    const created = await callRoute(harness, "PUT", "/oh-story/audiobook/assets", {
+      path: PROJECT_PATH,
+      baseVersion: null,
+      document: AUTHORIZATION_DOCUMENT,
+    });
+
+    expect(created.status).toBe(200);
+    const createdRecord = asRecord(asRecord(created.json)["record"]);
+    expect(createdRecord["path"]).toBe(AUTHORIZATION_PATH);
+    const version = String(createdRecord["version"]);
+    expect(harness.read(AUTHORIZATION_PATH)).toContain("CC-BY-4.0");
+
+    const updated = await callRoute(harness, "PUT", "/oh-story/audiobook/assets", {
+      path: PROJECT_PATH,
+      baseVersion: version,
+      document: AUTHORIZATION_DOCUMENT,
+    });
+    expect(updated.status).toBe(200);
+    const updatedVersion = String(asRecord(asRecord(updated.json)["record"])["version"]);
+
+    const stale = await callRoute(harness, "PUT", "/oh-story/audiobook/assets", {
+      path: PROJECT_PATH,
+      baseVersion: version,
+      document: AUTHORIZATION_DOCUMENT,
+    });
+    expect(stale.status).toBe(412);
+
+    const writes = harness.writes.length;
+    const secret = await callRoute(harness, "PUT", "/oh-story/audiobook/assets", {
+      path: PROJECT_PATH,
+      baseVersion: updatedVersion,
+      document: {
+        ...AUTHORIZATION_DOCUMENT,
+        assets: [{ ...AUTHORIZATION_DOCUMENT.assets[0], token: SECRET }],
+      },
+    });
+    expect(secret.status).toBe(400);
+    expect(String(asRecord(secret.json)["error"])).toContain("密钥");
+    expect(harness.writes).toHaveLength(writes);
+  });
+
+  it("生成未确认返回 400；preview 零写入且不调用生成", async () => {
+    const provider = fakeAssetProvider([]);
+    const harness = fixture({ provider });
+
+    const denied = await callRoute(harness, "POST", "/oh-story/audiobook/assets/generate", GENERATE_REQUEST);
+    expect(denied.status).toBe(400);
+    expect(String(asRecord(denied.json)["error"])).toContain("confirm: true");
+
+    const preview = await callRoute(harness, "POST", "/oh-story/audiobook/assets/generate", {
+      ...GENERATE_REQUEST,
+      preview: true,
+    });
+    expect(preview.status).toBe(200);
+    expect(preview.json).toEqual({ estimate: 0, provider: { id: "comfyui", label: "ComfyUI" } });
+    expect(harness.writes).toHaveLength(0);
+    expect(provider.generateCalls).toHaveLength(0);
+  });
+
+  it("ComfyUI 未配置时返回 503 且不调用生成", async () => {
+    const provider = fakeAssetProvider([], { configured: false });
+    const harness = fixture({ provider });
+    const result = await callRoute(harness, "POST", "/oh-story/audiobook/assets/generate", GENERATE_BODY);
+
+    expect(result.status).toBe(503);
+    expect(String(asRecord(result.json)["error"])).toContain("ComfyUI");
+    expect(provider.generateCalls).toHaveLength(0);
+    expect(harness.writes).toHaveLength(0);
+  });
+
+  it("未知 provider/kind/prompt/duration/count 一律 400 且不调用生成", async () => {
+    const provider = fakeAssetProvider([]);
+    const harness = fixture({ provider });
+    const cases: readonly Record<string, unknown>[] = [
+      { provider: "local" },
+      { provider: "suno" },
+      { kind: "narration" },
+      { prompt: "   " },
+      { durationSeconds: 0 },
+      { durationSeconds: "12" },
+      { count: 0 },
+      { count: 9 },
+      { count: 1.5 },
+    ];
+
+    for (const override of cases) {
+      const result = await callRoute(harness, "POST", "/oh-story/audiobook/assets/generate", {
+        ...GENERATE_BODY,
+        ...override,
+      });
+      expect(result.status, JSON.stringify(override)).toBe(400);
+    }
+    expect(provider.generateCalls).toHaveLength(0);
+    expect(harness.writes).toHaveLength(0);
+  });
+
+  it("生成成功返回 files/receipt，已有授权条目保留 license 并补 provider", async () => {
+    const provider = fakeAssetProvider([
+      { path: ASSET_MUSIC_PATH, bytes: 3 },
+      { path: ASSET_RAIN_PATH, bytes: 5 },
+    ]);
+    const harness = fixture({
+      provider,
+      seed: { [AUTHORIZATION_PATH]: JSON.stringify(AUTHORIZATION_DOCUMENT) },
+    });
+    const result = await callRoute(harness, "POST", "/oh-story/audiobook/assets/generate", GENERATE_BODY);
+
+    expect(result.status).toBe(200);
+    const payload = asRecord(result.json);
+    expect(payload["files"]).toEqual([
+      { path: ASSET_MUSIC_PATH, bytes: 3 },
+      { path: ASSET_RAIN_PATH, bytes: 5 },
+    ]);
+    const promptSha256 = createHash("sha256").update(GENERATE_BODY.prompt, "utf8").digest("hex");
+    expect(payload["receipt"]).toEqual({
+      provider: "comfyui",
+      model: "test-model",
+      promptSha256,
+      receiptId: "receipt-1",
+      generatedAt: NOW,
+    });
+    expect(provider.generateCalls).toEqual([{
+      kind: "music",
+      prompt: GENERATE_BODY.prompt,
+      durationSeconds: GENERATE_BODY.durationSeconds,
+      count: GENERATE_BODY.count,
+    }]);
+
+    const saved = JSON.parse(harness.read(AUTHORIZATION_PATH) ?? "{}") as {
+      assets?: readonly Record<string, unknown>[];
+    };
+    const entries = saved.assets ?? [];
+    const existing = entries.find((entry) => entry["path"] === ASSET_MUSIC_PATH);
+    expect(existing).toMatchObject({
+      source: "采购",
+      license: "CC-BY-4.0",
+      allowedUse: ["audiobook"],
+      attribution: "作曲",
+    });
+    expect(existing?.["provider"]).toMatchObject({
+      id: "comfyui",
+      model: "test-model",
+      promptSha256,
+      receiptId: "receipt-1",
+      generatedAt: NOW,
+    });
+    const generated = entries.find((entry) => entry["path"] === ASSET_RAIN_PATH);
+    expect(generated).toMatchObject({
+      source: "comfyui",
+      license: "unverified",
+      allowedUse: ["audiobook"],
+      attribution: "",
+    });
+    expect(generated?.["provider"]).toMatchObject({ id: "comfyui", receiptId: "receipt-1" });
+    expect(harness.writes).toContain(AUTHORIZATION_PATH);
+
+    const view = await callRoute(
+      harness,
+      "GET",
+      `/oh-story/audiobook/assets?path=${encodeURIComponent(PROJECT_PATH)}`,
+    );
+    expect(view.status).toBe(200);
+    const authorized = new Map(
+      ((asRecord(asRecord(view.json)["view"])["assets"] as readonly Record<string, unknown>[])
+        .map((asset) => [asset["path"], asset["authorized"]] as const)),
+    );
+    expect(authorized.get(ASSET_MUSIC_PATH)).toBe(true);
+    expect(authorized.get(ASSET_RAIN_PATH)).toBe(false);
+  });
+
+  it("provider 返回目录外文件时 403，且不写授权文件", async () => {
+    const provider = fakeAssetProvider([{ path: "正文/逃逸.mp3", bytes: 3 }]);
+    const harness = fixture({ provider });
+    const result = await callRoute(harness, "POST", "/oh-story/audiobook/assets/generate", GENERATE_BODY);
+
+    expect(result.status).toBe(403);
+    expect(String(asRecord(result.json)["error"])).toContain("素材");
+    expect(harness.writes).not.toContain(AUTHORIZATION_PATH);
+    expect(provider.generateCalls).toHaveLength(1);
   });
 });
 

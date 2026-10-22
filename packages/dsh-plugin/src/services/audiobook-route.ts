@@ -10,11 +10,32 @@ import {
   type WorkspaceRouteOptions,
 } from "../workspace-route.js";
 import { resolveCast, unassignedSegmentsIn } from "./audiobook-cast.js";
+import {
+  COMFYUI_ASSET_PROVIDER_ID,
+  LocalAssetProvider,
+  bookDirectoryForProject,
+  defaultAssetProviders,
+  validateGeneratedAssets,
+  type AudioAssetGenerationFile,
+  type AudioAssetGenerationRequest,
+  type AudioAssetProvider,
+} from "./audiobook-asset-provider.js";
+import {
+  listAudiobookAssets,
+  loadAssetAuthorizations,
+  saveAssetAuthorizations,
+} from "./audiobook-assets.js";
 import { hostBinaryFileStore } from "./audiobook-binary.js";
 import {
   AUDIOBOOK_ACTIVE_JOB_STATUSES,
   AUDIOBOOK_CACHE_ROOT,
   AUDIOBOOK_ROUTES,
+  type AudiobookAssetGenerationPreview,
+  type AudiobookAssetGenerationResponse,
+  type AudiobookAssetAuthorizationDocument,
+  type AudiobookAssetKind,
+  type AudiobookAssetProviderReceipt,
+  type AudiobookAssetProviderSummary,
   type AudiobookAssignment,
   type AudiobookChapterSummary,
   type AudiobookJob,
@@ -81,6 +102,8 @@ export interface AudiobookRuntime extends AudiobookJobRuntime {
 export interface AudiobookRouteDeps {
   readonly runtime?: (realm: WorkspaceRealm) => AudiobookRuntime;
   readonly runJob?: (realm: WorkspaceRealm, jobId: string, runtime: AudiobookRuntime) => Promise<unknown>;
+  /** 素材生成 provider（测试注入假实现）；缺省用 ComfyUI provider。 */
+  readonly assetProvider?: (realm: WorkspaceRealm, runtime: AudiobookRuntime) => Promise<AudioAssetProvider>;
 }
 
 /** 生产运行时：宿主 TTS 客户端、宿主二进制通道、宿主进程命令与进程环境。 */
@@ -332,6 +355,82 @@ async function sendSegmentAudio(
   response.end(Buffer.from(bytes));
 }
 
+function assetKindOf(value: unknown): AudiobookAssetKind {
+  if (value === "music" || value === "effect") return value;
+  throw new WorkspaceHttpError(400, "kind 必须是 music 或 effect。");
+}
+
+function positiveDuration(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new WorkspaceHttpError(400, "durationSeconds 必须是大于 0 的数字。");
+  }
+  return value;
+}
+
+function generationCount(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 8) {
+    throw new WorkspaceHttpError(400, "count 必须是 1–8 的整数。");
+  }
+  return value;
+}
+
+/** 生成只支持 ComfyUI；本地素材库只登记已有文件（400）。 */
+function assertGeneratableProvider(value: unknown): void {
+  if (value !== undefined && value !== COMFYUI_ASSET_PROVIDER_ID) {
+    throw new WorkspaceHttpError(400, "provider 只支持 comfyui。");
+  }
+}
+
+function providerSummary(provider: AudioAssetProvider): AudiobookAssetProviderSummary {
+  return { id: provider.id, label: provider.label, configured: provider.configured };
+}
+
+async function assetProviderFor(
+  realm: WorkspaceRealm,
+  runtime: AudiobookRuntime,
+  deps: AudiobookRouteDeps,
+): Promise<AudioAssetProvider> {
+  if (deps.assetProvider !== undefined) return deps.assetProvider(realm, runtime);
+  const providers = await defaultAssetProviders(realm, runtime.env);
+  const comfyui = providers.find((provider) => provider.id === COMFYUI_ASSET_PROVIDER_ID);
+  if (comfyui === undefined) throw new WorkspaceHttpError(500, "素材生成 provider 未注册。");
+  return comfyui;
+}
+
+/**
+ * 生成成功后补齐授权：已有条目保留 source/license/allowedUse/attribution，只补/替换
+ * provider 回执；新条目写 `license: "unverified"`（导出预检据此阻断，等待用户补授权）。
+ * 走 `saveAssetAuthorizations` 的 CAS：文档存在用其版本，缺失时按新建处理。
+ */
+async function upsertGeneratedAuthorizations(
+  realm: WorkspaceRealm,
+  project: AudiobookProjectRecord,
+  files: readonly AudioAssetGenerationFile[],
+  provider: AudiobookAssetProviderReceipt,
+): Promise<void> {
+  const existing = await loadAssetAuthorizations(realm, project.path);
+  const assets = [...(existing?.document.assets ?? [])];
+  const indexes = new Map(assets.map((asset, index) => [asset.path, index] as const));
+  for (const file of files) {
+    const index = indexes.get(file.path);
+    const previous = index === undefined ? undefined : assets[index];
+    if (index === undefined || previous === undefined) {
+      indexes.set(file.path, assets.length);
+      assets.push({
+        path: file.path,
+        source: COMFYUI_ASSET_PROVIDER_ID,
+        license: "unverified",
+        allowedUse: ["audiobook"],
+        attribution: "",
+        provider,
+      });
+    } else {
+      assets[index] = { ...previous, provider };
+    }
+  }
+  await saveAssetAuthorizations(realm, project, { schemaVersion: 1, assets }, existing?.version ?? null);
+}
+
 /** 供宿主路由扩展缝调用；命中返回 true，其余交回 `workspace-route.ts`。 */
 export async function handleAudiobookRequest(
   context: Context,
@@ -522,6 +621,107 @@ export async function handleAudiobookRequest(
         send(response, 202, { job: loaded.job });
         return true;
       }
+    }
+
+    if (url.pathname === AUDIOBOOK_ROUTES.assets) {
+      if (method === "GET") {
+        const path = url.searchParams.get("path")?.trim() ?? "";
+        if (path === "") throw new WorkspaceHttpError(400, "缺少有声剧项目路径。");
+        // Task 1 的视图 providers 恒为空，这里用真实 provider 列表覆盖。
+        bookDirectoryForProject(path);
+        const realm = await workspaceRealm(context, url);
+        const record = await loadAudiobookProject(realm, path);
+        const provider = await assetProviderFor(realm, runtimeOf(realm, deps), deps);
+        const view = await listAudiobookAssets(realm, record);
+        const providers: AudiobookAssetProviderSummary[] = [
+          providerSummary(new LocalAssetProvider()),
+          providerSummary(provider),
+        ];
+        send(response, 200, { view: { ...view, providers } });
+        return true;
+      }
+      if (method === "PUT") {
+        const body = await jsonBody(request, BODY_LIMIT);
+        assertNoSecretKeys(body, "body");
+        const path = requiredString(body, "path");
+        bookDirectoryForProject(path);
+        const rawBaseVersion = body["baseVersion"];
+        if (rawBaseVersion !== null && typeof rawBaseVersion !== "string") {
+          throw new WorkspaceHttpError(400, "baseVersion 必须是字符串或 null。");
+        }
+        const baseVersion = rawBaseVersion === null ? null : rawBaseVersion.trim();
+        if (baseVersion === "") throw new WorkspaceHttpError(400, "缺少基础版本号。");
+        const document = body["document"];
+        if (typeof document !== "object" || document === null || Array.isArray(document)) {
+          throw new WorkspaceHttpError(400, "document 必须是授权文档对象。");
+        }
+        const realm = await workspaceRealm(context, url);
+        const record = await loadAudiobookProject(realm, path);
+        const saved = await saveAssetAuthorizations(
+          realm,
+          record,
+          document as AudiobookAssetAuthorizationDocument,
+          baseVersion,
+        );
+        send(response, 200, { record: saved });
+        return true;
+      }
+    }
+
+    if (url.pathname === AUDIOBOOK_ROUTES.assetsGenerate && method === "POST") {
+      const body = await jsonBody(request, BODY_LIMIT);
+      assertNoSecretKeys(body, "body");
+      const path = requiredString(body, "path");
+      bookDirectoryForProject(path);
+      const generation: AudioAssetGenerationRequest = {
+        kind: assetKindOf(body["kind"]),
+        prompt: requiredString(body, "prompt"),
+        durationSeconds: positiveDuration(body["durationSeconds"]),
+        count: generationCount(body["count"]),
+      };
+      assertGeneratableProvider(body["provider"]);
+      const realm = await workspaceRealm(context, url);
+      const runtime = runtimeOf(realm, deps);
+      const provider = await assetProviderFor(realm, runtime, deps);
+      if (body["preview"] === true) {
+        const preview: AudiobookAssetGenerationPreview = {
+          estimate: provider.estimate(generation),
+          provider: { id: provider.id, label: provider.label },
+        };
+        send(response, 200, preview);
+        return true;
+      }
+      if (body["confirm"] !== true) {
+        throw new WorkspaceHttpError(400, "生成素材会调用 ComfyUI 并写入工作区文件，需要显式确认（confirm: true）。");
+      }
+      if (!provider.configured) throw new WorkspaceHttpError(503, "ComfyUI 未配置工作流，无法生成素材。");
+      const record = await loadAudiobookProject(realm, path);
+      const result = await provider.generate(realm, record, generation);
+      // 注入的 provider 可能绕过 ComfyUI 适配器，路由必须再校验一次落点。
+      validateGeneratedAssets(record.path, generation.kind, result.files);
+      const generatedAt = runtime.now();
+      const providerReceipt: AudiobookAssetProviderReceipt = {
+        id: result.provider,
+        model: result.model,
+        promptSha256: result.promptSha256,
+        receiptId: result.receiptId,
+        generatedAt,
+      };
+      if (result.files.length > 0) {
+        await upsertGeneratedAuthorizations(realm, record, result.files, providerReceipt);
+      }
+      const payload: AudiobookAssetGenerationResponse = {
+        files: result.files.map((file) => ({ path: file.path, bytes: file.bytes })),
+        receipt: {
+          provider: result.provider,
+          model: result.model,
+          promptSha256: result.promptSha256,
+          receiptId: result.receiptId,
+          generatedAt,
+        },
+      };
+      send(response, 200, payload);
+      return true;
     }
 
     if (url.pathname === AUDIOBOOK_ROUTES.export && method === "POST") {
