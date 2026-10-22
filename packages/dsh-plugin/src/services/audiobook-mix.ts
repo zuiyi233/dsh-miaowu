@@ -13,8 +13,9 @@ import type { TimedSegment } from "./audiobook-timeline.js";
  * 固定形状（Task 4 契约）：
  * - 旁白：每个输入 `aresample/aformat` 上混立体声，除最后一段外按段间停顿
  *   `apad`，再 `concat` 成 `[voice]`；
- * - cue：`atrim` 到 cue 终点、`asetpts` 归零、`adelay` 到 cue 起点、淡入淡出、
- *   增益、按旁白区间做固定闪避（`duckDb` 换算成线性倍数，无随机参数）；
+ * - cue：`atrim` 到窗口终点（音效按窗口长度，音乐按绝对终点）、`asetpts` 归零、
+ *   淡入（素材起点，必须在 `adelay` 之前才听得见）、`adelay` 到 cue 起点、淡出
+ *   （绝对章内时间）、增益、按旁白区间做固定闪避（`duckDb` 换算成线性倍数，无随机参数）；
  * - 混合：有 cue 用 `amix=duration=first`（以旁白长度为准），无 cue 直接
  *   `[voice]anull[mix]`；输出固定 44.1 kHz 立体声 PCM。
  */
@@ -141,16 +142,18 @@ function voiceLinks(timeline: readonly TimedSegment[]): string[] {
   });
 }
 
-/** cue 链路：每条链路逐项生成，顺序即 Task 4 的目标形状（trim → pts → delay → fade → gain → duck）。 */
+/** cue 链路：trim → pts → 淡入（素材起点）→ delay → 淡出（绝对章内时间）→ gain → duck。 */
 function cueLinks(cue: MixCue, inputIndex: number, voiceIntervals: string): string {
   const duckFactor = String(Math.pow(10, cue.duckDb / 20));
   const fadeOutStart = seconds(cue.endMs - cue.fadeOutMs);
+  // 音效必须裁到自身窗口长度，否则素材会越过 cue 窗口；音乐靠 amix 以旁白长度收尾，保留绝对终点。
+  const trimEnd = cue.kind === "effect" ? seconds(cue.endMs - cue.startMs) : seconds(cue.endMs);
   const filters = [
     RESAMPLE_CHAIN,
-    `atrim=0:${seconds(cue.endMs)}`,
+    `atrim=0:${trimEnd}`,
     "asetpts=PTS-STARTPTS",
-    `adelay=${cue.startMs}|${cue.startMs}`,
     `afade=t=in:st=0:d=${seconds(cue.fadeInMs)}`,
+    `adelay=${cue.startMs}|${cue.startMs}`,
     `afade=t=out:st=${fadeOutStart}:d=${seconds(cue.fadeOutMs)}`,
     `volume=${cue.gainDb}dB`,
     `volume=volume='if(${voiceIntervals},${duckFactor},1)':eval=frame`,

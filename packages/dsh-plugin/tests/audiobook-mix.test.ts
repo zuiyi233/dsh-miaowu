@@ -29,6 +29,25 @@ describe("audiobook mix", () => {
     expect(filterGraph).toContain("amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix]");
     expect(args).toContain("pcm_s16le");
     expect(args.at(-1)).toBe("/tmp/master.wav");
+    const fadeInAt = filterGraph.indexOf("afade=t=in:");
+    const delayAt = filterGraph.indexOf("adelay=");
+    const fadeOutAt = filterGraph.indexOf("afade=t=out:");
+    expect(fadeInAt).toBeGreaterThanOrEqual(0);
+    expect(fadeInAt).toBeLessThan(delayAt);
+    expect(fadeOutAt).toBeGreaterThan(delayAt);
+  });
+
+  it("音效按 cue 窗口长度裁剪，不越过自身窗口", () => {
+    const { filterGraph } = buildMixArgs({
+      voicePaths: ["/tmp/s1.mp3", "/tmp/s2.mp3"],
+      timeline,
+      chapterEndMs: 3_120,
+      cues: [{ id: "cue-fx", kind: "effect", assetPath: "/tmp/slam.wav", startMs: 1_120, endMs: 1_620, fadeInMs: 0, fadeOutMs: 0, gainDb: 0, duckDb: 0 }],
+      outputPath: "/tmp/master.wav",
+    });
+    expect(filterGraph).toContain("atrim=0:0.5");
+    expect(filterGraph).toContain("adelay=1120|1120");
+    expect(filterGraph).not.toContain("atrim=0:1.62");
   });
 
   it("无 cue 时只输出 voice，不引入 amix", () => {
