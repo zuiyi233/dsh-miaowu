@@ -21,7 +21,7 @@ import {
   type CommandRunner,
 } from "../src/services/audiobook-export.js";
 import { manifestChecksum } from "../src/services/audiobook-package.js";
-import { CHAPTERS, memoryRealm, type MemoryRealm } from "./audiobook-fixtures.js";
+import { CHAPTERS, memoryRealm, SANDBOX_POLICY, type MemoryRealm } from "./audiobook-fixtures.js";
 
 /**
  * 完整导出编排测试：内存工作区 + 内存二进制存储 + 假 ffmpeg/ffprobe。
@@ -91,6 +91,12 @@ const SCRIPT: AudiobookScript = {
   ],
 };
 
+/** 解析成功但没有任何片段的脚本：时间轴为空，不能当成可导出。 */
+const EMPTY_SCRIPT: AudiobookScript = { ...SCRIPT, segments: [] };
+
+/** 项目里没有任何章节：未显式选章时选中集为空，同样不能报告就绪。 */
+const EMPTY_PROJECT: AudiobookProject = { ...PROJECT, source: { bookRoot: "正文", chapters: [] } };
+
 const MUSIC_CUE: AudiobookCue = {
   id: "cue-music",
   chapter: CHAPTER,
@@ -157,11 +163,14 @@ function authorizationDocument(project: AudiobookProject): Record<string, unknow
 
 interface FixtureOptions {
   readonly project?: AudiobookProject;
+  readonly script?: AudiobookScript;
   readonly authorized?: boolean;
   readonly cover?: boolean;
   readonly cache?: boolean;
   readonly missingSegments?: readonly string[];
   readonly ffmpeg?: boolean;
+  /** 预置的旧发布清单（模拟上一次成功发布的提交标记）。 */
+  readonly manifest?: string;
 }
 
 interface Fixture {
@@ -216,8 +225,9 @@ function fixture(options: FixtureOptions = {}): Fixture {
   const seed: Record<string, string> = {
     ...CHAPTERS,
     [PROJECT_PATH]: JSON.stringify(project),
-    [SCRIPT_PATH]: JSON.stringify(SCRIPT),
+    [SCRIPT_PATH]: JSON.stringify(options.script ?? SCRIPT),
   };
+  if (options.manifest !== undefined) seed[MANIFEST_PATH] = options.manifest;
   for (const asset of project.cues.map((cue) => cue.asset)) seed[asset] = "ID3";
   if (options.authorized ?? true) seed[AUTHORIZATION_PATH] = JSON.stringify(authorizationDocument(project));
   if (options.cover ?? true) seed[COVER_PATH] = "JPEG";
@@ -342,6 +352,40 @@ describe("preflightAudiobookExport", () => {
     expect(preflight.ready).toBe(false);
     expect(preflight.chapters).toBe(0);
     expect(preflight.issues.map((issue) => issue.code)).toEqual(["chapter-missing"]);
+  });
+
+  it("空脚本报告 script-empty，不计成本也不查缓存", async () => {
+    const harness = fixture({ script: EMPTY_SCRIPT, cache: false });
+
+    const preflight = await preflightAudiobookExport(
+      harness.state.realm,
+      harness.record,
+      harness.runtime,
+      { mp3: false, m4b: false, subtitles: ["srt"], package: false },
+      [CHAPTER],
+    );
+
+    expect(preflight.ready).toBe(false);
+    expect(preflight.chapters).toBe(1);
+    expect(preflight.issues.map((issue) => issue.code)).toEqual(["script-empty"]);
+    expect(preflight.cost).toEqual({ chars: 0, requests: 0, estimatedCost: 0 });
+    expect(harness.state.writes).toHaveLength(0);
+  });
+
+  it("项目没有任何章节时报告 no-chapters 而不是就绪", async () => {
+    const harness = fixture({ project: EMPTY_PROJECT });
+
+    const preflight = await preflightAudiobookExport(
+      harness.state.realm,
+      harness.record,
+      harness.runtime,
+      { mp3: false, m4b: false, subtitles: ["srt"], package: false },
+    );
+
+    expect(preflight.ready).toBe(false);
+    expect(preflight.chapters).toBe(0);
+    expect(preflight.issues.map((issue) => issue.code)).toEqual(["no-chapters"]);
+    expect(harness.state.writes).toHaveLength(0);
   });
 });
 
@@ -479,6 +523,58 @@ describe("exportAudiobook", () => {
     expect(harness.binary.files.has(SUBTITLE_SRT)).toBe(false);
     expect(harness.binary.files.has(M4B_FINAL)).toBe(true);
     expect(result.files.map((file) => file.path)).toEqual([M4B_FINAL]);
+    expect(stagingFiles(harness.binary)).toEqual([]);
+  });
+
+  it("空脚本只导出字幕时导出返回 409，零写入", async () => {
+    const harness = fixture({ script: EMPTY_SCRIPT, cache: false });
+    const before = [...harness.binary.files.keys()];
+
+    await expect(exportAudiobook(
+      harness.state.realm,
+      harness.record,
+      harness.runtime,
+      { mp3: false, m4b: false, subtitles: ["srt"], package: false },
+      [CHAPTER],
+    )).rejects.toMatchObject({ status: 409, message: expect.stringContaining("没有可导出的片段") });
+
+    expect(harness.state.writes).toHaveLength(0);
+    expect([...harness.binary.files.keys()]).toEqual(before);
+    expect(stagingFiles(harness.binary)).toEqual([]);
+  });
+
+  it("重新导出中途失败时旧清单失效，已复制的发布文件被清理", async () => {
+    const oldManifest = JSON.stringify({ schemaVersion: 1, files: [] });
+    const harness = fixture({ manifest: oldManifest });
+    // 封面是最后一个复制项：复制失败前 MP3/SRT/LRC/M4B 都已落进发布目录，必须回滚。
+    const originalCopy = harness.binary.copy;
+    harness.binary.copy = (from, to) => {
+      if (to.displayPath === `${RELEASE_DIRECTORY}/cover.jpg`) return Promise.reject(new Error("磁盘写入失败。"));
+      return originalCopy(from, to);
+    };
+
+    await expect(exportAudiobook(
+      harness.state.realm,
+      harness.record,
+      harness.runtime,
+      FULL_FORMATS,
+      [CHAPTER],
+    )).rejects.toThrow("磁盘写入失败");
+
+    // 旧清单在第一次复制前就被清空成空串：读方不能再把它当成完整发布包的提交标记。
+    const manifest = harness.state.read(MANIFEST_PATH);
+    expect(manifest).toBe("");
+    expect(() => JSON.parse(manifest ?? "")).toThrow(SyntaxError);
+    const invalidation = harness.state.writeCalls.find((call) => call.path === MANIFEST_PATH);
+    expect(invalidation?.content).toBe("");
+    expect(invalidation?.sandboxPolicy).toBe(SANDBOX_POLICY);
+
+    // 本次复制出的包内文件已尽力删除；提升到最终路径的成品按既有约定保留。
+    expect(harness.binary.files.has(`${RELEASE_DIRECTORY}/${CHAPTER}.mp3`)).toBe(false);
+    expect(harness.binary.files.has(`${RELEASE_DIRECTORY}/${CHAPTER}.srt`)).toBe(false);
+    expect(harness.binary.files.has(`${RELEASE_DIRECTORY}/${CHAPTER}.lrc`)).toBe(false);
+    expect(harness.binary.files.has(`${RELEASE_DIRECTORY}/全书.m4b`)).toBe(false);
+    expect(harness.binary.files.has(AUDIO_FINAL)).toBe(true);
     expect(stagingFiles(harness.binary)).toEqual([]);
   });
 });

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { FsTarget } from "@deepseek-ai/dsh-fs";
-import { WorkspaceHttpError, type WorkspaceRealm } from "../workspace-route.js";
+import { mapFsError, WorkspaceHttpError, type WorkspaceRealm } from "../workspace-route.js";
 import {
   assertCuesAuthorized,
   listAudiobookAssets,
@@ -74,6 +74,8 @@ const CONCAT_EXTENSION = ".txt";
 const COVER_FILE = "cover.jpg";
 const BOOK_M4B_FILE = "全书.m4b";
 const RELEASE_DIRECTORY = "发布";
+/** 与 `audiobook-package.ts` 的清单文件名一致：重新发布前先失效旧清单。 */
+const RELEASE_MANIFEST_FILE = "发布清单.json";
 const STAGING_CHAPTER_DIRECTORY = "chapters";
 const STAGING_M4B_DIRECTORY = "m4b";
 /** 混音/归一/编码链路的固定输出规格：44.1 kHz 立体声（N4-C 契约）。 */
@@ -562,8 +564,9 @@ function buildChapterMp3Args(inputPath: string, outputPath: string, bitrateKbps:
 
 /**
  * 完整导出预检：只读脚本、素材授权、封面、缓存音频与 ffmpeg 能力，任何领域问题
- * 都收集进 `issues` 而不抛出（损坏的授权文档/项目文档仍按原错误上抛）。缓存音频
- * 只 stat，不探测时长——预览必须零写入，时长缓存只在实际导出时建立。
+ * 都收集进 `issues` 而不抛出（损坏/超限的授权文档记 `asset-document-invalid`，
+ * 项目文档损坏仍按原错误上抛）。缓存音频只 stat，不探测时长——预览必须零写入，
+ * 时长缓存只在实际导出时建立。
  */
 async function inspectExport(
   realm: WorkspaceRealm,
@@ -593,6 +596,11 @@ async function inspectExport(
   }
   // 输出顺序固定按项目章节顺序，避免请求顺序改变 M4B 章节与清单顺序。
   const ordered = allChapters.filter((name) => selected.includes(name));
+  // 选不中任何章节（项目本身没有章节）不能报告就绪，否则会拿空时间轴去导 0 字节成品。
+  // 请求了不存在章节时已由 chapter-missing 说明原因，不重复报。
+  if (ordered.length === 0 && issues.length === 0) {
+    issues.push({ code: "no-chapters", message: "有声剧项目里没有可导出的章节。" });
+  }
   const cast = resolveCast(project);
   const scripts = new Map<string, AudiobookScript>();
   const assignable = new Set<string>();
@@ -614,8 +622,16 @@ async function inspectExport(
       issues.push({ code: "script-missing", message: `${name}还没有脚本，请先生成脚本。` });
       continue;
     }
+    // 空脚本不能导出：时间轴为空会让混音/M4B/字幕都退化成 0 字节成品。
+    if (loaded.script.segments.length === 0) {
+      issues.push({
+        code: "script-empty",
+        message: `${name}的脚本没有可导出的片段，请重新生成脚本。`,
+        path: loaded.path,
+      });
+      continue;
+    }
     scripts.set(name, loaded.script);
-    chars += loaded.script.segments.reduce((sum, segment) => sum + segment.text.length, 0);
     try {
       await assertScriptSourceFresh(realm, loaded.script);
     } catch (error) {
@@ -628,6 +644,8 @@ async function inspectExport(
     try {
       assertAssignable(cast, loaded.script);
       assignable.add(name);
+      // 成本只统计可导出（新鲜且可指派）的脚本，坏脚本不计入预览费用。
+      chars += loaded.script.segments.reduce((sum, segment) => sum + segment.text.length, 0);
     } catch (error) {
       if (error instanceof WorkspaceHttpError && error.status === 409) {
         issues.push({ code: "unassigned", message: error.message, path: loaded.path });
@@ -637,20 +655,36 @@ async function inspectExport(
     }
   }
 
-  // 授权文档损坏等文档级错误由 listAudiobookAssets 按原状态码上抛。
-  const assets = await listAudiobookAssets(realm, record);
-  const authorization = await loadAssetAuthorizations(realm, record.path);
+  // 授权文档损坏（422）或超限（413）是工作区数据问题：预览要 200 返回 issue，
+  // 而不是把整个预览打成 422/413。坏文档时用空素材视图并跳过 cue 授权校验，
+  // 避免把“文档读不了”二次误报成“素材不存在”。
+  let assets: AudiobookAssetView = { assets: [], authorizationVersion: null, providers: [] };
+  let authorization: AudiobookAuthorizationRecord | undefined;
+  let assetsUsable = true;
+  try {
+    assets = await listAudiobookAssets(realm, record);
+    authorization = await loadAssetAuthorizations(realm, record.path);
+  } catch (error) {
+    if (error instanceof WorkspaceHttpError && (error.status === 422 || error.status === 413)) {
+      assetsUsable = false;
+      issues.push({ code: "asset-document-invalid", message: `素材授权文档无法读取：${error.message}` });
+    } else {
+      throw error;
+    }
+  }
   const selectedSet = new Set(ordered);
   // 只校验选中章节、且脚本已读到的 cue；脚本缺失已在上面报过，不重复归类。
   const cueProject: AudiobookProject = {
     ...project,
     cues: project.cues.filter((cue) => selectedSet.has(cue.chapter) && scripts.has(cue.chapter)),
   };
-  try {
-    await assertCuesAuthorized(cueProject, assets, scripts);
-  } catch (error) {
-    if (error instanceof WorkspaceHttpError) issues.push({ code: "asset-unauthorized", message: error.message });
-    else throw error;
+  if (assetsUsable) {
+    try {
+      await assertCuesAuthorized(cueProject, assets, scripts);
+    } catch (error) {
+      if (error instanceof WorkspaceHttpError) issues.push({ code: "asset-unauthorized", message: error.message });
+      else throw error;
+    }
   }
 
   if (effective.m4b) {
@@ -700,7 +734,8 @@ async function inspectExport(
 
 /**
  * 导出预检（只读）：返回 issues 而不是抛错，`ready` 为假时由调用方决定是否阻断。
- * `cost` 只按选中章节的脚本字符数统计；导出复用缓存，不产生新的 TTS 请求与费用。
+ * `cost` 只按选中章节中可导出（脚本非空、新鲜且可指派）的脚本字符数统计；导出
+ * 复用缓存，不产生新的 TTS 请求与费用。
  */
 export async function preflightAudiobookExport(
   realm: WorkspaceRealm,
@@ -751,8 +786,9 @@ function releaseRights(
  *
  * 全部章节先写 `.oh-story/audiobook/tmp/<uuid>/`：混音 → 两遍 loudnorm → MP3 →
  * 字幕，随后按整书时长拼 M4B；只有全部成功后才改名到 `音频/`、`字幕/`，最后
- * 复制到 `发布/` 并写清单。任何失败都不会把半成品放到最终路径；暂存文件在
- * `finally` 清理（已提升的文件只在最终路径，不会被清理）。
+ * 复制到 `发布/` 并写清单。复制前先把旧清单清空，复制失败时尽力删除本次复制出
+ * 的文件，避免旧清单继续描述半套发布包。任何失败都不会把半成品放到最终路径；
+ * 暂存文件在 `finally` 清理（已提升的文件只在最终路径，不会被清理）。
  */
 export async function exportAudiobook(
   realm: WorkspaceRealm,
@@ -1001,8 +1037,30 @@ export async function exportAudiobook(
       if (!realm.fs.contains(realm.root, releaseRoot) || !realm.fs.contains(audiobookRoot, releaseRoot)) {
         throw new WorkspaceHttpError(403, "发布目录离开了有声剧目录。");
       }
+      // 重新发布前先失效旧清单：清单是发布包的提交标记，复制过程中任何失败都不能让
+      // 上一版清单继续描述已被覆盖或半写入的文件。新清单在全部复制成功后最后写。
+      const manifestTarget = await realm.fs.resolve(
+        `${releaseDirectory}/${RELEASE_MANIFEST_FILE}`,
+        { cwd: realm.cwd },
+      );
+      if (!realm.fs.contains(releaseRoot, manifestTarget)) {
+        throw new WorkspaceHttpError(403, "发布清单离开了发布目录。");
+      }
+      try {
+        await realm.fs.writeText(
+          manifestTarget,
+          "",
+          undefined,
+          undefined,
+          realm.sandboxPolicy.resolve({ session: realm.agent.session }),
+        );
+      } catch (error) {
+        throw mapFsError(error) ?? new WorkspaceHttpError(500, "发布清单失效失败。");
+      }
       const packageNames = new Set<string>();
       const manifestFiles: AudiobookManifestFile[] = [];
+      /** 本次已准备的包内目标：失败时尽力删除，避免留下没有清单的半套文件。 */
+      const packageTargets: FsTarget[] = [];
       const copyIntoPackage = async (source: FsTarget, name: string, durationMs: number | null): Promise<void> => {
         if (packageNames.has(name)) throw new WorkspaceHttpError(409, `发布包文件名重复：${name}`);
         packageNames.add(name);
@@ -1010,6 +1068,7 @@ export async function exportAudiobook(
         const target = await realm.fs.resolve(path, { cwd: realm.cwd });
         if (!realm.fs.contains(releaseRoot, target)) throw new WorkspaceHttpError(403, "发布文件离开了发布目录。");
         await runtime.binary.prepare(target);
+        packageTargets.push(target);
         await runtime.binary.copy(source, target);
         const info = await runtime.binary.stat(target);
         if (info === undefined) throw new WorkspaceHttpError(500, "发布文件复制失败。");
@@ -1019,34 +1078,40 @@ export async function exportAudiobook(
         resultFiles.push({ path, bytes: info.size });
       };
 
-      for (const name of selected) {
-        const mp3 = promotedMp3.get(name);
-        if (mp3 !== undefined) await copyIntoPackage(mp3, `${name}${MP3_EXTENSION}`, chapterEndMs.get(name) ?? null);
-        for (const format of effective.subtitles) {
-          const subtitle = promotedSubtitles.get(name)?.get(format);
-          if (subtitle !== undefined) await copyIntoPackage(subtitle, `${name}.${format}`, null);
+      try {
+        for (const name of selected) {
+          const mp3 = promotedMp3.get(name);
+          if (mp3 !== undefined) await copyIntoPackage(mp3, `${name}${MP3_EXTENSION}`, chapterEndMs.get(name) ?? null);
+          for (const format of effective.subtitles) {
+            const subtitle = promotedSubtitles.get(name)?.get(format);
+            if (subtitle !== undefined) await copyIntoPackage(subtitle, `${name}.${format}`, null);
+          }
         }
-      }
-      if (promotedM4b !== undefined) await copyIntoPackage(promotedM4b, BOOK_M4B_FILE, m4bDurationMs);
-      const coverPath = await assertCover(realm, record.path);
-      const coverTarget = await realm.fs.resolve(coverPath, { cwd: realm.cwd });
-      await copyIntoPackage(coverTarget, COVER_FILE, null);
+        if (promotedM4b !== undefined) await copyIntoPackage(promotedM4b, BOOK_M4B_FILE, m4bDurationMs);
+        const coverPath = await assertCover(realm, record.path);
+        const coverTarget = await realm.fs.resolve(coverPath, { cwd: realm.cwd });
+        await copyIntoPackage(coverTarget, COVER_FILE, null);
 
-      const chapters: AudiobookManifestChapter[] = selected.map((name, index) => ({
-        index: index + 1,
-        title: name,
-        audio: `${RELEASE_DIRECTORY}/${name}${MP3_EXTENSION}`,
-        subtitles: effective.subtitles.map((format) => `${RELEASE_DIRECTORY}/${name}.${format}`),
-      }));
-      const rights = releaseRights(project, selected, inspection.authorization);
-      const written = await writeReleaseManifest(realm, record, {
-        files: [...manifestFiles].sort((left, right) => left.path.localeCompare(right.path, "zh-Hans-CN")),
-        chapters,
-        cost: { chars: inspection.chars, requests: 0, estimatedCost: 0 },
-        licenses: rights.licenses,
-        providerReceipts: rights.providerReceipts,
-      });
-      manifestPath = written.path;
+        const chapters: AudiobookManifestChapter[] = selected.map((name, index) => ({
+          index: index + 1,
+          title: name,
+          audio: `${RELEASE_DIRECTORY}/${name}${MP3_EXTENSION}`,
+          subtitles: effective.subtitles.map((format) => `${RELEASE_DIRECTORY}/${name}.${format}`),
+        }));
+        const rights = releaseRights(project, selected, inspection.authorization);
+        const written = await writeReleaseManifest(realm, record, {
+          files: [...manifestFiles].sort((left, right) => left.path.localeCompare(right.path, "zh-Hans-CN")),
+          chapters,
+          cost: { chars: inspection.chars, requests: 0, estimatedCost: 0 },
+          licenses: rights.licenses,
+          providerReceipts: rights.providerReceipts,
+        });
+        manifestPath = written.path;
+      } catch (error) {
+        // 打包失败：旧清单已被清空，本次复制出的包内文件尽力删除，不留半套发布包。
+        await Promise.all(packageTargets.map((target) => runtime.binary.remove(target).catch(() => undefined)));
+        throw error;
+      }
     }
 
     return manifestPath === undefined ? { files: resultFiles } : { files: resultFiles, manifestPath };

@@ -433,6 +433,17 @@ function chapterSelection(value: unknown): readonly string[] | undefined {
   });
 }
 
+/**
+ * 可选布尔开关：省略返回 undefined，出现但非布尔一律 400。导出路由用它校验
+ * `preview`/`confirm`，避免 `preview: "yes"` 之类输入落进确认分支被当成真导出。
+ */
+function optionalBoolean(body: Readonly<Record<string, unknown>>, key: string): boolean | undefined {
+  const raw = body[key];
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "boolean") throw new WorkspaceHttpError(400, `${key} 必须是布尔值。`);
+  return raw;
+}
+
 function providerSummary(provider: AudioAssetProvider): AudiobookAssetProviderSummary {
   return { id: provider.id, label: provider.label, configured: provider.configured };
 }
@@ -809,19 +820,22 @@ export async function handleAudiobookRequest(
       const body = await jsonBody(request, BODY_LIMIT);
       assertNoSecretKeys(body, "body");
       if (body["formats"] !== undefined) {
+        // preview/confirm 只接受布尔；非布尔输入直接 400，不能落进真导出分支。
+        const preview = optionalBoolean(body, "preview");
+        const confirm = optionalBoolean(body, "confirm");
         const formats = exportFormatsOf(body["formats"]);
         const chapters = chapterSelection(body["chapters"]);
         const path = requiredString(body, "path");
         const realm = await workspaceRealm(context, url);
         const runtime = runtimeOf(realm, deps);
-        if (body["preview"] === true) {
+        if (preview === true) {
           // 预览只读：返回 issues 与成本预估，不要求 confirm，也不写任何文件。
           const record = await loadAudiobookProject(realm, path);
           const preflight = await preflightAudiobookExport(realm, record, runtime, formats, chapters);
           send(response, 200, { preflight });
           return true;
         }
-        if (body["confirm"] !== true) {
+        if (confirm !== true) {
           throw new WorkspaceHttpError(400, "完整导出会调用 ffmpeg 写音频与发布文件，需要显式确认（confirm: true）。");
         }
         const record = await loadAudiobookProject(realm, path);

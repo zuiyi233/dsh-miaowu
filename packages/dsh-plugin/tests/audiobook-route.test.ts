@@ -1509,4 +1509,42 @@ describe("POST /oh-story/audiobook/export 完整导出", () => {
     expect(denied.status).toBe(400);
     expect(harness.writes).toHaveLength(0);
   });
+
+  it("授权文档损坏时预览仍返回 200 并报告 asset-document-invalid", async () => {
+    const harness = fixture({
+      seed: {
+        [PROJECT_PATH]: JSON.stringify(CUE_PROJECT),
+        [ASSET_PATH]: "ID3",
+        [AUTHORIZATION_PATH]: "{broken",
+      },
+    });
+    const preview = await callRoute(harness, "POST", "/oh-story/audiobook/export", {
+      path: PROJECT_PATH, chapters: [CHAPTER], preview: true,
+      formats: { mp3: true, m4b: false, subtitles: [], package: false },
+    });
+
+    expect(preview.status).toBe(200);
+    expect(harness.writes).toHaveLength(0);
+    const preflight = asRecord(asRecord(preview.json)["preflight"]);
+    expect(preflight["ready"]).toBe(false);
+    const issues = JSON.stringify(preflight["issues"]);
+    expect(issues).toContain("asset-document-invalid");
+    expect(issues).toContain("素材授权");
+  });
+
+  it("preview/confirm 非布尔值返回 400 且不执行导出", async () => {
+    const harness = cueFixture(true);
+    const badPreview = await callRoute(harness, "POST", "/oh-story/audiobook/export", {
+      path: PROJECT_PATH, chapters: [CHAPTER], preview: "yes", confirm: true,
+      formats: { mp3: true, m4b: false, subtitles: [], package: false },
+    });
+    expect(badPreview.status).toBe(400);
+
+    const badConfirm = await callRoute(harness, "POST", "/oh-story/audiobook/export", {
+      path: PROJECT_PATH, chapters: [CHAPTER], confirm: "true",
+      formats: { mp3: true, m4b: false, subtitles: [], package: false },
+    });
+    expect(badConfirm.status).toBe(400);
+    expect(harness.writes).toHaveLength(0);
+  });
 });
