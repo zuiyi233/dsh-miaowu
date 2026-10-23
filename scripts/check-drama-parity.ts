@@ -112,8 +112,12 @@ for (const expected of dramaFixture.files) {
 const selftests = manifest.files
   .map(({ path }) => path)
   .filter((path) => path.endsWith("/scripts/selftest.py"));
-if (selftests.length !== manifest.skills.length) {
-  throw new Error(`Expected one Drama selftest per Skill, found ${String(selftests.length)}.`);
+// Since 0.9.0 five Skills ship no Python tooling (their old JSON checkers moved out), so
+// the invariant is one selftest per Skill that still bundles scripts, not per Skill.
+const skillsWithScripts = manifest.skills.filter((skill) => manifest.files.some(({ path }) =>
+  path.startsWith(`skills/${skill}/scripts/`) && path.endsWith(".py") && !path.endsWith("/scripts/selftest.py")));
+if (selftests.length !== skillsWithScripts.length) {
+  throw new Error(`Expected one Drama selftest per Skill with scripts (${String(skillsWithScripts.length)}), found ${String(selftests.length)}.`);
 }
 const python = await dramaPython();
 for (const selftest of selftests) {

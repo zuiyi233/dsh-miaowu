@@ -95,7 +95,7 @@ const DSH_GAME_BRIDGE = [
   "A finished image under game-adaptations/<project>/art/ is only material-ready, never integration-complete: game-build must explicitly wire each locked-in image into build/app/ (for example the title-screen background, scene cards, or character portrait slots), and the reference paths must be recorded in both the game code and design/ART_DIRECTION.md.",
   "After wiring art, re-run the game-qa six-item minimum QA (launch, render, input, coreLoop, outcome, restart) with real rendering evidence for every scene that references art, and record the on-screen art evidence in the corresponding qa/verification.json checks.",
   "Every wired image keeps one stable `- ID：ART-*` line in design/ART_DIRECTION.md, following the short-drama VISUAL-* stable-ID practice; game code references the file registered under that ID.",
-  // NovelToGame 0.6.0 pipeline-contract.md: with no target player available, the whitebox playtest uses a fresh agent that has not read the design or source.
+  // NovelToGame 0.6.1 pipeline-contract.md: with no target player available, the whitebox playtest uses a fresh agent that has not read the design or source.
   "When the whitebox playtest calls for a fresh agent that has not read the design documents or source, run it as a DSH subagent visible in this preset, giving it only the playable entry and normal player input; in director mode, ask the user in this Session first whether a real target player can try it.",
   "The bundled Jin Ping Mei project is a read-only example, not a template to copy mechanically and not proof that another adaptation passed QA.",
   "</novel-to-game-dsh-integration>"

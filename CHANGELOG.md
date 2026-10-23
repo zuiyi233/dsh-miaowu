@@ -26,6 +26,8 @@
 
 ### Changed
 
+- 同步 [Drama Skills 0.9.2](https://github.com/zenstory-ai/drama-skills/releases/tag/v0.9.2)（`fdb7b7c58017e3eae64eca382c2a85ede368dab0`，11 Skills）：跨文档检查支持局部核对、交付分组与「入画」锁范围；时长约束在定档时提前暴露，估时按发声字数换算并列出未计时的画面文字；分镜站位改为场景锚点与机位两层，视频提示词支持 Seedance 2.0 上限、一镜容量、参考图取舍与首尾帧转场。上游把只含 JSON 检查器的 5 个 Skill 的工具移出技能，随包 selftest 从 11 个减到 6 个；修复成片切点掉音、峰值压力拍与局部核对误报。短剧演示 fixture 同步到 0.9.2 的公开示例。
+- 同步 [NovelToGame 0.6.1](https://github.com/zenstory-ai/novel-to-game/releases/tag/v0.6.1)（`c3075f35cc14d4bc94e2829df2bfcc0d9971229e`，7 Skills）：Skill 规则去重、示例文档与代码对齐，删除示例工程中的死防御代码；可玩《金瓶梅》ADV 示例与音频实现同步更新。
 - 默认宿主与开发 cohort 升到 DeepSeek Harness `0.2.1-rc.3`（npm `next`；npm `latest` 仍是 `0.2.1-rc.2`，安装命令不再自称 latest）：`pnpm-workspace.yaml` 的 overrides 与豁免、`packages/dsh-plugin/package.json` 的 devDependencies、两个原生冒烟脚本的默认 `dshVersion` 同步改写，lockfile 重解析为 `+69 -68` 且不留 `0.2.1-rc.2`。peer 范围本就覆盖 rc.3、Cordis 仍是 `4.0.5`，因此对外声明与兼容范围都没改动；逐个字节比对插件直接引用的 13 个 `@deepseek-ai/dsh-*` 宿主包，外加以 peer 声明的 `dsh-api-session-controller`（共 14 个），13 个只有版本号不同，唯一多出的差异是 `dsh-api-session-controller` 里一句 JSDoc 注释，无类型与签名变化。`0.2.0-rc.2` 走廊照旧通过。这是源码与验证层面的升级，真实 profile 未改动。
 - 客户端内联 CSS 改为构建期 esbuild minify，并改为直接输出 UTF-8（默认 ASCII 会把每个中文字符串转成 `\uXXXX`）：样式与文案语义不变，浏览器包从 392,311 字节降到 372,317 字节，继续守住 400,000 字节预算。
 - 发行身份改为 fork 自己的线：发布标签前缀改为 `miaowu-vX.Y.Z`（下一个发布版本起），tarball 名与仓库地址统一为 `dsh-miaowu-dsh-<version>.tgz` 与 `zuiyi233/dsh-miaowu`；发布前先做 fork 源预检，拒绝把上游提交或上游标签当作发布源，并移除只服务上游的恢复工作流。
