@@ -18,13 +18,18 @@ import { buildTimeline, cueWindow, type TimedSegment } from "../src/services/aud
 import { assertCreativePath, mediaMimeTypeForPath } from "../src/workspace-route.js";
 
 /**
- * N4-C 真实 ffmpeg 验收（Task 10a）：仓库里唯一真的启动 ffmpeg/ffprobe 的有声剧用例。
+ * N4-C 真实 ffmpeg 验收（Task 10a）：本文件把已提交的纯构造函数（`buildMixArgs` /
+ * `buildLoudnorm*` / `buildFfmetadata` / `buildM4bArgs` / `buildSubtitleCues`）接到真实
+ * 进程与真实文件上。
  *
- * 其余 `audiobook-*.test.ts` 全部注入假 `CommandRunner`，只证明参数构造正确；本文件
- * 把已提交的纯构造函数（`buildMixArgs` / `buildLoudnorm*` / `buildFfmetadata` /
- * `buildM4bArgs` / `buildSubtitleCues`）接到真实进程与真实文件上，验证三件假实现给
- * 不出来的事实：混音母带的实际时长、两遍 loudnorm 后的实测响度、M4B 的章节表与
- * `attached_pic` 封面流。
+ * 范围说明（勿再写成“唯一真跑 ffmpeg 的用例”）：`audiobook-export.test.ts` 已经有一个
+ * `it.skipIf(!realToolsReady)` 用例，用 `hostCommandRunner` 真跑 ffmpeg 验证单章 MP3 导出
+ * （`exportChapterMp3`）产出可播放成品，所以本文件并非仓库里唯一真的启动 ffmpeg/ffprobe
+ * 的有声剧用例。二者的分工是：本文件专测只有真进程才给得出、假实现覆盖不到的两类结果——
+ * MIX MASTER LOUDNESS 门限（两遍 loudnorm 后混音母带的实测综合 LUFS [-17, -15] 与真峰值
+ * ≤ -1.4 dBTP）与 M4B 的 CHAPTER 章节表 + `attached_pic` 封面流；顺带核对混音母带的实际
+ * 时长与字幕时间轴。其余 `audiobook-*.test.ts`（含 `audiobook-export-full.test.ts`）注入假
+ * `CommandRunner`，只证明参数构造正确。
  *
  * 素材全部由 ffmpeg 自己的 lavfi 源合成，不联网、不读外部素材、无随机数：
  * - 旁白用 `sine`（440/330 Hz、0.4s、`volume=0.25`）而不是 `anullsrc`：静音的
