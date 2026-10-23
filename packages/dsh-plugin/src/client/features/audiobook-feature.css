@@ -1,7 +1,7 @@
 .oh-audiobook-title { margin: 0; font-size: 13px; font-weight: 600; }
 .oh-audiobook-create { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; }
 .oh-audiobook-field { display: flex; flex-direction: column; gap: 3px; color: var(--dsw-alias-label-secondary); }
-.oh-audiobook-field input, .oh-audiobook-field select { min-width: 108px; padding: 4px 6px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); font: inherit; }
+.oh-audiobook-field input, .oh-audiobook-field select, .oh-audiobook-create input, .oh-audiobook-create select { min-width: 108px; padding: 4px 6px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); font: inherit; }
 .oh-audiobook-projects { display: flex; flex-wrap: wrap; gap: 6px; }
 .oh-audiobook-projects button { cursor: pointer; }
 .oh-audiobook-projects button[data-active] { border-color: var(--dsw-alias-state-business-primary); color: var(--dsw-alias-state-business-primary); }

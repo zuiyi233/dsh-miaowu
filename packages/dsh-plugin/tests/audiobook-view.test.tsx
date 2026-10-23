@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AudiobookView, generateConfirmText, parsedSegmentCount } from "../src/client/features/audiobook-feature.js";
-import type { AudiobookOverview, AudiobookProjectView, AudiobookScriptRecord } from "../src/services/audiobook-contract.js";
+import type { AudiobookAssetView, AudiobookOverview, AudiobookProjectView, AudiobookScriptRecord } from "../src/services/audiobook-contract.js";
 import { CREATIVE_DIRECTORIES, mediaMimeTypeForPath } from "../src/workspace-route.js";
 
 const PROJECT = {
@@ -38,6 +38,24 @@ const projectView = (): AudiobookProjectView => ({
 });
 
 const noop = (): void => undefined;
+
+const baseProps = {
+  overview: overviewWithProject(),
+  view: projectView(),
+  busy: false,
+  onRefresh: noop,
+  onCreate: noop,
+  onParse: noop,
+  onDryRun: noop,
+  onGenerate: noop,
+  onExport: noop,
+};
+
+const unauthorizedAssets: AudiobookAssetView = {
+  assets: [{ path: "有声剧/长夜行/素材/音乐/theme.mp3", kind: "music", bytes: 3, authorized: false, license: null }],
+  authorizationVersion: null,
+  providers: [],
+};
 
 describe("AudiobookView", () => {
   it("空项目展示来源与创建入口，缺密钥/缺 ffmpeg 明确提示", () => {
@@ -267,5 +285,32 @@ describe("AudiobookView", () => {
     expect(text).toContain("缓存命中 3 段");
     expect(text).toContain("¥0.001230");
     expect(text).toContain("确认开始生成");
+  });
+
+  it("素材面板展示授权状态，未授权素材不能加入 cue", () => {
+    const html = renderToStaticMarkup(<AudiobookView
+      {...baseProps}
+      assets={unauthorizedAssets}
+      cues={[]}
+      onSaveCues={noop}
+    />);
+    expect(html).toContain("音乐与音效");
+    expect(html).toContain("theme.mp3");
+    expect(html).toContain("未授权");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>加入 cue<\/button>/u);
+  });
+
+  it("导出面板显示预检问题并禁用未就绪的导出", () => {
+    const html = renderToStaticMarkup(<AudiobookView
+      {...baseProps}
+      exportPreflight={{
+        ready: false,
+        issues: [{ code: "cover-missing", message: "缺少封面" }],
+        chapters: 1,
+        cost: { chars: 6, requests: 0, estimatedCost: 0 },
+      }}
+    />);
+    expect(html).toContain("缺少封面");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>完整导出<\/button>/u);
   });
 });
