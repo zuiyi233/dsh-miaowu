@@ -34,7 +34,7 @@
 - **N4-A 已交付（单章单旁白纵向切片）**：`audiobook-*` 服务（项目发现/持久化、确定性切分、内容寻址缓存、OpenAI-compatible TTS、章节 job、ffmpeg 导出、二进制存储）、`/oh-story/audiobook/*` 路由、小说工作台「有声剧」面板；项目/脚本/音频写 `有声剧/`，缓存与任务写 `.oh-story/audiobook/`，不写 DSH 会话、`workspace.json` 或 `~/.dsh`。启动任务、恢复任务与导出都必须 `confirm: true`；`OH_STORY_TTS_API_KEY` 只从宿主环境读取，密钥不入项目、缓存、响应或日志。
 - **N4-A 验证**：`pnpm verify` 退出 0（lint、typecheck、五项资产 parity、DSH boundary、release 25/25、upstream-update 3/3、sync-factory 16/16、eval 7/7、perf 6/6、72 个测试文件 / 834 通过 + 1 跳过、build），浏览器包 386,196 字节（预算 400,000）；`pnpm test:dsh` 与 `pnpm test:dsh:rc` 在 DSH `0.2.1-rc.2` / `0.2.0-rc.2` 上均 `"ok": true`。打包冒烟新增只读 overview 探测（`ttsKey` 必须为 `present`、`sources` 非空且至少一个来源有章节、密钥与绝对路径不泄漏）和「有声剧」面板探测（`TTS 密钥已配置` 文案、无错误、不建项目、不调 TTS）。本机没有 ffmpeg/ffprobe，真实 MP3 编码未验证。详见 [VALIDATION.md](VALIDATION.md) 的 2026-10-21 有声剧审计。
 - **N4-B 已交付（多角色）**：`cast` 恰好一个旁白 + 若干角色，音色映射随项目保存/加载恢复；新增 `GET|PUT /oh-story/audiobook/script` 读取脚本与逐段指派，PUT 用 `baseVersion` CAS 并在改说话人后重算片段 id；重新解析覆盖时按 `(kind, text, sourceStart)` 保留手工指派并返回 `preserved`/`dropped`；成本预估、任务执行与导出按每段角色音色组缓存键，改一段或改单个角色音色只失效相关段；未指派/指向已删除角色的对白会显示计数，并让预估、新建、恢复与导出返回 409。工作台新增角色编辑器与「分段」指派面板。验证与限制见 `docs/VALIDATION.md` 的 2026-10-22 有声剧 N4-B 审计。
-- **N4-C 待交付（完整有声剧）**：本地 BGM/音效与可编辑 cue 时间轴、响度 -16 LUFS ±1 与 true peak ≤ -1.5 dBTP、SRT/LRC、M4B 章节与封面、发布包与授权清单校验。
+- **N4-C 待交付（完整有声剧）**：本地 BGM/音效与可编辑 cue 时间轴、响度 -16 LUFS ±1 与 true peak ≤ -1.5 dBTP、SRT/LRC、M4B 章节与封面、发布包与授权清单校验。（2026-10-24 已交付，见下方「2026-10-24 有声剧 N4-C 交付」。）
 - **N4-D 待交付（批量化与质量）**：≥20 章整书批量、成本报告可审计、无孤儿文件、两周实盘或等效样本。**DSH 重启后的自动续跑也延后到 N4-D**（N4-B 只支持显式恢复排队/进行中/暂停/失败任务，不会在启动时自动继续计费）。
 - **P3**：仍按路线图条件触发（漫画/翻译/版权签约等改编能力不随 N4-A 解锁；有声由 N4 承接）。
 
@@ -43,6 +43,14 @@
 - **N4-B 已交付（多角色）**：`audiobook-cast.ts` 统一解析旁白/角色并判定未指派；项目保存/加载校验 `cast`（恰好一个旁白、id 唯一、保留值 `unknown` 不可用）；脚本服务新增 CAS 说话人指派与按文本/源偏移迁移的重新解析保留；成本预估、任务执行、恢复与导出统一按每段音色组缓存键；项目视图新增 `unassignedSegments`，四道付费/导出入口对未指派对白返回 409。工作台新增角色编辑器、分段指派面板、未指派高亮与按钮禁用。
 - **N4-B 验证**：`pnpm verify` 退出 0（73 个测试文件 / 855 通过 + 1 跳过；lint、typecheck、五项资产 parity、DSH boundary、release 25/25、upstream-update 3/3、sync-factory 16/16、eval 7/7、perf 6/6、build），浏览器包 394,416 字节（预算 400,000）；有声剧 9 个测试文件 168 通过 + 1 跳过（新增 cast 校验、指派 CAS、重解析保留、逐段音色缓存键、只重生成受影响段、未指派四道门禁与 10 章 + 旁白 + 3 角色样本）。`pnpm test:dsh` 与 `pnpm test:dsh:rc` 在 DSH `0.2.1-rc.2` / `0.2.0-rc.2` 上均 `"ok": true`。
 - **限制**：本机仍无 ffmpeg/ffprobe，真实 MP3 编码/拼接/时长未验证；未发起真实付费 TTS。N4-C（BGM/音效、cue 时间轴、响度、SRT/LRC、M4B、封面、发布包）与 N4-D（整书批量、成本审计、重启自动续跑）仍待交付。
+
+## 2026-10-24 有声剧 N4-C 交付
+
+- **N4-C 已交付（完整有声剧）**：`audiobook-assets.ts` 扫描 `素材/音乐`、`素材/音效`，用 CAS 读写 `素材/授权.json` 并以 `assertCuesAuthorized` 拒绝未授权素材挂到 cue；`audiobook-timeline.ts` 用 `DEFAULT_PAUSE_MS = 120` 排出片段时间轴，`buildTimeline`/`cueWindow`/`assertCueWindow` 供混音与字幕共用；`audiobook-duration.ts` 把 ffprobe 实测时长按内容寻址缓存在 `.oh-story/audiobook/durations/`；`audiobook-mix.ts` 生成 concat/apad/amix filter graph 与两遍 loudnorm（目标 −16 LUFS / TP −1.5 / LRA 11）参数并解析测量 JSON；`audiobook-subtitles.ts` 输出 SRT/LRC，按 42 字贪心拆行；`audiobook-m4b.ts` 写 ffmetadata 章节表与 M4B/封面参数（封面缺位在导出前 409）；`audiobook-package.ts` 写 `发布/发布清单.json`（逐文件 sha256 + 可复算 checksum）；`audiobook-asset-provider.ts` 提供 `LocalAssetProvider` 与复用 `oh_story_comfyui` 工具的 `ComfyUiMusicProvider`，生成回执写回授权文档。`audiobook-binary.ts` 增加 `hash`/`copy`。路由新增 `GET|PUT /oh-story/audiobook/assets` 与 `POST /oh-story/audiobook/assets/generate`（生成需 `confirm: true`、`preview` 零写入、ComfyUI 未配置 503、素材越界 403、授权保存失败回滚本次生成文件），`POST /oh-story/audiobook/export` 兼容旧单章 MP3 调用并新增 `formats`（mp3/m4b/subtitles/package）与 `preview`（预检零写入），完整导出按 staging → promote → package → 清单最后写。工作台「有声剧」面板新增 `AssetPanel` 与 `ExportPanel`：未授权素材不能加入 cue，预检未就绪时禁用完整导出，生成/导出前 `window.confirm`，不显示密钥与绝对路径。数据仍在 `有声剧/<书>/`（`素材/`、`封面/`、`字幕/`、`发布/`）与 `.oh-story/audiobook/`（时长缓存、任务、导出临时目录），不写 DSH 会话、`workspace.json` 或 `~/.dsh`。
+- **N4-C 验证**：`pnpm verify` 退出 0（84 个测试文件 / 956 项通过；lint、typecheck、五项资产 parity、DSH boundary、release 25/25、upstream-update 3/3、sync-factory 16/16、eval 7/7、perf 6/6、build），浏览器包 399,864 字节（预算 400,000）。真实 ffmpeg 验收（`tests/audiobook-ffmpeg.test.ts`，ffmpeg/ffprobe 9.0.2 实跑、非伪造）：两遍 loudnorm 后母带实测综合响度 −16.0 LUFS（落在 −16±1 门限内）、真峰值 −10.6 dBFS；混音母带时长 920 ms，与时间轴长度一致；M4B 产出 2 个章节并带 `attached_pic` 封面流。响度读数取自 ffmpeg 9 的 ebur128 `Summary:` 块（`Integrated loudness: I: … LUFS`、`True peak: Peak: … dBFS`）。如实说明：`TP=-1.5` 写死在 loudnorm 第二遍参数里，真峰值上限的判别力有限，该用例是混音/章节/封面嵌入链路的验收，不是独立的限幅器证明。`pnpm test:dsh` 与 `pnpm test:dsh:rc` 在隔离 `DSH_HOME` 下于 DSH `0.2.1-rc.2` / `0.2.0-rc.2` 均 `"ok": true`、退出 0。详见 [VALIDATION.md](VALIDATION.md) 的 2026-10-24 有声剧 N4-C 审计。
+- **N4-C 有意偏离设计文档之处**：cue 与素材路径统一为**工作区相对**（`有声剧/<书>/素材/...`），不是 spec 4.3 示例里的书内相对；发布清单的 `providerReceipts` 收录素材生成回执 + `cost`，spec 4.4 的 TTS endpoint/voice 级回执本切片未做；外部素材生成默认依赖 ComfyUI 配置，未配置时路由返回 503。
+- **N4-D 待交付（批量化与质量）**：≥20 章整书批量与进程中断后的自动续跑、成本与实际请求数审计与孤儿文件治理、TTS 时长 QC 的 0.5–1.8 比值复检、波形预览、真实付费 provider、连续两周实盘。另：本切片未发起真实付费 TTS，也没连真实 ComfyUI（provider 测试注入假 `oh_story_comfyui` 端口），特定 provider 的音色、延迟与价格仍未验证。
+- **P3**：仍按路线图条件触发。
 
 ## 第一优先（高价值，直接对应现有差距）
 
@@ -81,5 +89,5 @@
 ## 工程注记（实施后，2026-09-05，历史）
 
 - 扩展缝：`src/services/registry.ts`（registerWorkspaceExtension + onWorkspaceWrite）+ `src/client/features/registry.ts`（registerWorkbenchFeature + registerFileViewer），并行代理据此无冲突交付
-- 客户端构建已开 esbuild 完整 minify，并自 2026-10-20 起对 `?inline` CSS 做构建期 minify；2026-10-21 起直接输出 UTF-8；`client.js` 386,196 字节（2026-10-21，预算 400,000）
+- 客户端构建已开 esbuild 完整 minify，并自 2026-10-20 起对 `?inline` CSS 做构建期 minify；2026-10-21 起直接输出 UTF-8；`client.js` 386,196 字节（2026-10-21，预算 400,000），2026-10-24 N4-C 后为 399,864 字节（预算不变，余量约 14 B）
 - 历史债务（2026-09-05）：`client/index.tsx` 约 2060 行超 900 行软上限；该债务已于 Phase A-D 拆为 16 行入口壳（见 2026-10-20 复核）。仍延后：短剧生产素材板独立浮动、esbuild 多入口拆包、availableActions 服务端下发（现为前端状态表）
