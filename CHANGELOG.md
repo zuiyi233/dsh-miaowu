@@ -26,6 +26,7 @@
 
 ### Changed
 
+- 默认宿主与开发 cohort 升到 DeepSeek Harness `0.2.1-rc.3`（npm `next`；npm `latest` 仍是 `0.2.1-rc.2`，安装命令不再自称 latest）：`pnpm-workspace.yaml` 的 overrides 与豁免、`packages/dsh-plugin/package.json` 的 devDependencies、两个原生冒烟脚本的默认 `dshVersion` 同步改写，lockfile 重解析为 `+69 -68` 且不留 `0.2.1-rc.2`。peer 范围本就覆盖 rc.3、Cordis 仍是 `4.0.5`，因此对外声明与兼容范围都没改动；逐个字节比对插件直接引用的 13 个 `@deepseek-ai/dsh-*` 宿主包，外加以 peer 声明的 `dsh-api-session-controller`（共 14 个），13 个只有版本号不同，唯一多出的差异是 `dsh-api-session-controller` 里一句 JSDoc 注释，无类型与签名变化。`0.2.0-rc.2` 走廊照旧通过。这是源码与验证层面的升级，真实 profile 未改动。
 - 客户端内联 CSS 改为构建期 esbuild minify，并改为直接输出 UTF-8（默认 ASCII 会把每个中文字符串转成 `\uXXXX`）：样式与文案语义不变，浏览器包从 392,311 字节降到 372,317 字节，继续守住 400,000 字节预算。
 - 发行身份改为 fork 自己的线：发布标签前缀改为 `miaowu-vX.Y.Z`（下一个发布版本起），tarball 名与仓库地址统一为 `dsh-miaowu-dsh-<version>.tgz` 与 `zuiyi233/dsh-miaowu`；发布前先做 fork 源预检，拒绝把上游提交或上游标签当作发布源，并移除只服务上游的恢复工作流。
 - 双语 README 的安装路径按实际发布状态改写：0.1.18 的预构建包与 npm 包都还没发布，推荐从源码构建 0.1.18；最近可用的预构建包 v0.1.16 作为快速试用路径；v0.1.18 的 Release 资产与 npm 安装收进「发布后可用」折叠块。Badge、Releases、Issues、独立 profile 安装与项目表一并指向本 fork，上游只在出处与历史记录中保留。

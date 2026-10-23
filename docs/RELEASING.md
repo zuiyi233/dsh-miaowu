@@ -102,7 +102,7 @@ Before step 1, set the same version in the root and plugin `package.json` and ad
 mismatch or a missing heading.
 
 1. Run `pnpm verify:release` locally. It runs the complete deterministic gate and the
-   packaged Chrome smoke on the default DSH `0.2.1-rc.2` line and on the earlier
+   packaged Chrome smoke on the default DSH `0.2.1-rc.3` line and on the earlier
    `0.2.0-rc.2` line. A host line is not announced from peer metadata or unit tests alone.
 2. Build and pack from a clean tree, then write the checksum file:
 
@@ -214,13 +214,13 @@ Do not announce an npm release until the registry reports the exact version:
 ```bash
 VERSION=<version>
 npm view "@dsh-miaowu/dsh@$VERSION" version dist.integrity
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add "@dsh-miaowu/dsh@$VERSION"
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile web add "@dsh-miaowu/dsh@$VERSION"
 ```
 
 Until publication, `npm view "@dsh-miaowu/dsh" version` returns 404; that is the expected
 unpublished state.
 
-The default public smoke pins DSH `0.2.1-rc.2`. After it passes,
+The default public smoke pins DSH `0.2.1-rc.3`. After it passes,
 repeat the isolated install/start/browser smoke with
 `@deepseek-ai/dsh@0.2.0-rc.2`; never mix host versions within one profile or
 describe a host line as supported before its Chrome run passes.
@@ -231,7 +231,7 @@ last published asset is `v0.1.16`; future releases use the `miaowu-v` tag prefix
 ```bash
 # existing prebuilt asset
 VERSION=0.1.16
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add "https://github.com/zuiyi233/dsh-miaowu/releases/download/v$VERSION/dsh-miaowu-dsh-$VERSION.tgz"
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile web add "https://github.com/zuiyi233/dsh-miaowu/releases/download/v$VERSION/dsh-miaowu-dsh-$VERSION.tgz"
 
 # a future release, where <version> matches the miaowu-v tag
 # https://github.com/zuiyi233/dsh-miaowu/releases/download/miaowu-v<version>/dsh-miaowu-dsh-<version>.tgz

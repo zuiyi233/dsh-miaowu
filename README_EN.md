@@ -46,7 +46,7 @@ The table describes the current source. Published packages pin their upstream co
 | Game | [NovelToGame 0.6.0](https://github.com/zenstory-ai/novel-to-game) · 7 Skills · playable 《金瓶梅》 ADV sample (18+) | `/novel-to-game quick`, `/game-build`, `/game-qa` |
 | Video | [video-recap-skills 0.6.2](https://github.com/zenstory-ai/video-recap-skills/releases/tag/v0.6.2) · 7 Skills (3 user entry points) | `/video-recap`, `/video-script`, `/video-reference` |
 
-> Current source version **0.1.18** (2026-10-19): the 0.1.18 prebuilt package and npm package are not published yet, the last working prebuilt package is **v0.1.16**, and npm is unpublished (`@dsh-miaowu/dsh` returns 404 in the npm registry). The default install pins DeepSeek Harness `0.2.1-rc.2`; the earlier `0.2.0-rc.2` remains supported. See [CHANGELOG.md](CHANGELOG.md) and [Releases](https://github.com/zuiyi233/dsh-miaowu/releases); the two working install paths are under [Installation](#installation). Upgrade steps are in the FAQ entry [“What do I do after upgrading?”](#what-do-i-do-after-upgrading).
+> Current source version **0.1.18** (2026-10-19): the 0.1.18 prebuilt package and npm package are not published yet, the last working prebuilt package is **v0.1.16**, and npm is unpublished (`@dsh-miaowu/dsh` returns 404 in the npm registry). The default install pins DeepSeek Harness `0.2.1-rc.3`; the earlier `0.2.0-rc.2` remains supported. See [CHANGELOG.md](CHANGELOG.md) and [Releases](https://github.com/zuiyi233/dsh-miaowu/releases); the two working install paths are under [Installation](#installation). Upgrade steps are in the FAQ entry [“What do I do after upgrading?”](#what-do-i-do-after-upgrading).
 
 ## The four workbenches
 
@@ -121,8 +121,8 @@ cd dsh-miaowu
 pnpm install --frozen-lockfile
 pnpm --filter @dsh-miaowu/dsh build
 pnpm --filter @dsh-miaowu/dsh pack --pack-destination release
-npx -y --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add ./release/dsh-miaowu-dsh-0.1.18.tgz
-npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
+npx -y --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile web add ./release/dsh-miaowu-dsh-0.1.18.tgz
+npx -y @deepseek-ai/dsh@0.2.1-rc.3 web
 ```
 
 `pack` writes `release/dsh-miaowu-dsh-0.1.18.tgz` (`prepack` builds once more). Skip the first two lines if you are already in a source checkout; if `dsh plugin add` rejects the relative path, pass the absolute path to that file instead.
@@ -130,13 +130,13 @@ npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
 **Quick trial: the last published prebuilt package v0.1.16** (older, so it lacks the 0.1.17 / 0.1.18 updates; this command provides pnpm temporarily, so a machine with only Node.js can run it)
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.16/dsh-miaowu-dsh-0.1.16.tgz &&
-npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.16/dsh-miaowu-dsh-0.1.16.tgz &&
+npx -y @deepseek-ai/dsh@0.2.1-rc.3 web
 ```
 
 The [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) page is authoritative for assets and checksums; its current asset is v0.1.16.
 
-Keep the terminal running; the browser opens automatically by default. If it does not, copy the full `http://127.0.0.1:3080/?token=...` link printed in the terminal — first-time authentication needs the token in the link. Closing the terminal stops the service. Use the same dsh version for install and start. The commands on this page pin `0.2.1-rc.2`, the npm `latest` for DSH. The plugin accepts `>=0.2.0-rc.2 <0.2.1-0` and `>=0.2.1-alpha.1 <0.2.2-0`. If you stay on `0.2.0-rc.2`, use `@deepseek-ai/dsh@0.2.0-rc.2` in both the install and start commands; do not mix host versions. DSH checks compatibility while adding and loading the plugin and reports mismatches (`dsh plugin allow-version` overrides it at your own risk).
+Keep the terminal running; the browser opens automatically by default. If it does not, copy the full `http://127.0.0.1:3080/?token=...` link printed in the terminal — first-time authentication needs the token in the link. Closing the terminal stops the service. Use the same dsh version for install and start. The commands on this page pin `0.2.1-rc.3`, the npm `next` for DSH (`latest` still points at `0.2.1-rc.2`). The plugin accepts `>=0.2.0-rc.2 <0.2.1-0` and `>=0.2.1-alpha.1 <0.2.2-0`. If you stay on `0.2.0-rc.2`, use `@deepseek-ai/dsh@0.2.0-rc.2` in both the install and start commands; do not mix host versions. DSH checks compatibility while adding and loading the plugin and reports mismatches (`dsh plugin allow-version` overrides it at your own risk).
 
 Before creating with AI, add a Provider and API key under DSH's Settings → Models, or set the `DEEPSEEK_API_KEY` environment variable before starting. To only browse existing work, choose "Configure later" in the first-run guide.
 
@@ -177,7 +177,7 @@ DeepSeek writes the screenplay, storyboard and prompts; image, video, speech and
 ```bash
 export OPENAI_API_KEY=...            # images
 export ARK_API_KEY=... SEEDANCE_MODEL=...   # video; use the model / endpoint ID enabled on your account
-npx -y @deepseek-ai/dsh@0.2.1-rc.2 web
+npx -y @deepseek-ai/dsh@0.2.1-rc.3 web
 ```
 
 Configure only what you use: without a video key you can still write storyboards and generate keyframe images. The top of the Production view shows whether each vendor is configured and which variable is missing. At startup the plugin registers the five built-in adapters in a credential-free config file (by default under `oh-story-dsh-<uid>/` in the system temp directory, readable and writable only by the current user; the "generation environment" bar shows the full path), and the agent references it directly when running `production_tool.py run`. To use your own adapter or change timeouts, point `OH_STORY_DRAMA_ADAPTER_CONFIG` at your own file. Each vendor's parameters, resolutions and duration limits are documented in the bundled `short-drama-produce/references/providers/`. Novel covers use whichever image-generation tool is visible in the current Preset.
@@ -192,7 +192,7 @@ Voice references require an explicit capability declaration: generated generic p
 Whichever profile the plugin is installed into, every Session of that profile loads the creation Skills. To keep the stock `web` profile clean, install into a separate profile. Run this from the source root; it uses the 0.1.18 tarball built in the previous section. To skip the build, use the v0.1.16 Release asset instead (replace the relative path with `https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.16/dsh-miaowu-dsh-0.1.16.tgz`):
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.2 dsh plugin --profile story add ./release/dsh-miaowu-dsh-0.1.18.tgz
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile story add ./release/dsh-miaowu-dsh-0.1.18.tgz
 ```
 
 A new profile has no UI by default. Edit `~/.dsh/profiles/story/package.json` and set `dsh.profile.bundles` to:
@@ -208,8 +208,8 @@ A new profile has no UI by default. Edit `~/.dsh/profiles/story/package.json` an
 `@deepseek-ai/dsh-web-app` is DSH's own Web UI package and must load before the creation plugin. The two profiles can then run at the same time on different ports; models, credentials, workspaces and session history are stored centrally by DSH:
 
 ```bash
-npx -y @deepseek-ai/dsh@0.2.1-rc.2 web                          # stock DSH
-npx -y @deepseek-ai/dsh@0.2.1-rc.2 --profile story --port 3081  # creation workbench
+npx -y @deepseek-ai/dsh@0.2.1-rc.3 web                          # stock DSH
+npx -y @deepseek-ai/dsh@0.2.1-rc.3 --profile story --port 3081  # creation workbench
 ```
 
 </details>
@@ -353,11 +353,11 @@ Update the plugin using Installation and restart DSH. If the current version sti
 
 ### The workbench is blank after installing — no panel and no "创作工作台" button?
 
-Check the plugin and DSH versions, then follow [Installation](#installation) using one supported host line: `0.2.1-rc.2` by default, or the earlier `0.2.0-rc.2`. Use that version for both installation and startup, and check that the plugin is loaded in the same profile. If the workbench is still blank, report the versions and terminal error in an issue in this repository. The historical upstream Queue failure is recorded in [#50](https://github.com/zenstory-ai/oh-story-dsh/issues/50).
+Check the plugin and DSH versions, then follow [Installation](#installation) using one supported host line: `0.2.1-rc.3` by default, or the earlier `0.2.0-rc.2`. Use that version for both installation and startup, and check that the plugin is loaded in the same profile. If the workbench is still blank, report the versions and terminal error in an issue in this repository. The historical upstream Queue failure is recorded in [#50](https://github.com/zenstory-ai/oh-story-dsh/issues/50).
 
 ### I also installed Oh Story for Codex or OpenCode — which copy does DSH use?
 
-DSH also reads `~/.agents/skills` and prefers a same-named copy there over the plugin's bundled, DSH-adapted version, so when the two differ, the `~/.agents` copy wins. To make DSH use only the plugin's Skills, point `DSH_AGENTS_HOME` at another directory before starting (for example `DSH_AGENTS_HOME=~/.dsh-agents npx -y @deepseek-ai/dsh@0.2.1-rc.2 web`), or move the same-named folders out of `~/.agents/skills`.
+DSH also reads `~/.agents/skills` and prefers a same-named copy there over the plugin's bundled, DSH-adapted version, so when the two differ, the `~/.agents` copy wins. To make DSH use only the plugin's Skills, point `DSH_AGENTS_HOME` at another directory before starting (for example `DSH_AGENTS_HOME=~/.dsh-agents npx -y @deepseek-ai/dsh@0.2.1-rc.3 web`), or move the same-named folders out of `~/.agents/skills`.
 
 ### Install reports `pnpm not found on PATH`?
 
