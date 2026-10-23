@@ -36,14 +36,20 @@
 
 ## 3. 已知宿主坑（不要重复踩）
 
-0. **空名工具 bug（`unknown tool ""`）——当前状态：未确认修复，先复现再动手**：病根是 `dsh-llm-deepseek` 流式解析对 `block.name`/`block.callId` 覆盖赋值（手册 `docs/faq.md` 的 `unknown tool ""` 条，根因讨论 #725）。本机全局宿主在 2026-10-20 已是 `0.2.1-alpha.5`（仓库默认宿主是 `0.2.1-rc.3`）；2026-09-05 打的那个补丁和同目录备份 `index.js.bak-emptyname-fix` 都已随升级消失。**不要假设它已修好**：先在当前宿主上按手册复现确认，再决定是否重打补丁；补丁改的是 `C:/Users/Administrator/AppData/Roaming/npm/node_modules/@deepseek-ai/dsh/` 下的全局 npm 文件，不在仓库内（`git status` 看不到），`npm i -g @deepseek-ai/dsh` 升级会再次覆盖，重打前必须备份。
+0. **空名工具 bug（`unknown tool ""`）——当前状态：未确认修复，先复现再动手**：病根是 `dsh-llm-deepseek` 流式解析对 `block.name`/`block.callId` 覆盖赋值（手册 `docs/faq.md` 的 `unknown tool ""` 条，根因讨论 #725）。本机全局宿主在 2026-10-20 为 `0.2.1-alpha.5`，2026-10-24 已升到 `0.2.1-rc.3`（与仓库默认宿主一致）；2026-09-05 打的那个补丁和同目录备份 `index.js.bak-emptyname-fix` 都已随升级消失。**不要假设它已修好**：先在当前宿主上按手册复现确认，再决定是否重打补丁；补丁改的是 `C:/Users/Administrator/AppData/Roaming/npm/node_modules/@deepseek-ai/dsh/` 下的全局 npm 文件，不在仓库内（`git status` 看不到），`npm i -g @deepseek-ai/dsh` 升级会再次覆盖，重打前必须备份。
 
-1. **空名工具 bug 的历史证据（2026-09 隔离结论）**：宿主内置 `read`/`write` 发给模型时函数名丢空 → `Error: unknown tool ""` → 400。当时做了三级隔离（完整 profile / 摘本插件 / 双插件全摘只剩官方底座）均复现，结论是与本插件无关；当时在 `0.2.1-alpha.4` 与 `0.2.1-rc.1` 复现，该结论不覆盖现在的全局 `0.2.1-alpha.5`，重新验证前不要当成现行结论引用。手册 `docs/faq.md` 有同族根因（SSE 流式覆盖赋值，`translate.ts` 累加 + 严格类型校验），修宿主源码前先对一下手册方案。
+1. **空名工具 bug 的历史证据（2026-09 隔离结论）**：宿主内置 `read`/`write` 发给模型时函数名丢空 → `Error: unknown tool ""` → 400。当时做了三级隔离（完整 profile / 摘本插件 / 双插件全摘只剩官方底座）均复现，结论是与本插件无关；当时在 `0.2.1-alpha.4` 与 `0.2.1-rc.1` 复现，该结论不覆盖当时的全局 `0.2.1-alpha.5`，重新验证前不要当成现行结论引用。手册 `docs/faq.md` 有同族根因（SSE 流式覆盖赋值，`translate.ts` 累加 + 严格类型校验），修宿主源码前先对一下手册方案。
 2. **畸形 tool 消息污染会话**：空名失败回合的 `tool/result`（`callId: ""`）会被持久化，重载时网关校验 `message must have tool source` 失败 → “历史加载失败”。纯文本会话不受影响。用户真实会话若报此错，先摘畸形消息再谈修复。
 3. **`workspace.json` 是双表结构**：`tables.workspaces` 明细 + `global.workspaceIds` 顺序表。删工作区必须两处一起删，否则 `dsh web` 启动报 `registry order references missing workspace` 直接起不来。改前必备份。
-4. **真实 profile 是生产环境**：`~/.dsh/profiles/web` + 全局 `0.2.1-alpha.5` CLI（仓库默认宿主 `0.2.1-rc.3`）。对真实 profile 跑探针/冒烟必污染 `~/.dsh/sessions` 与 `workspace.json`，跑完必须清理（删探针会话目录 + 移除索引条目 + 清 `%TEMP%` 残留），或一开始就用隔离 `DSH_HOME` 跑。
+4. **真实 profile 是生产环境**：`~/.dsh/profiles/web` + 全局 `0.2.1-rc.3` CLI（仓库默认宿主 `0.2.1-rc.3`）。对真实 profile 跑探针/冒烟必污染 `~/.dsh/sessions` 与 `workspace.json`，跑完必须清理（删探针会话目录 + 移除索引条目 + 清 `%TEMP%` 残留），或一开始就用隔离 `DSH_HOME` 跑。
 5. **空目录没有 UI 是设计**：`hasCreativeProject` 为假且无报错时工作台返回 null，连按钮都不画。冷启动走对话（`story-setup` DSH 版只建小说目录）或手动建 `正文/`，不要当成“插件没加载”。
 6. **Windows 命令行坑**：MSYS tar 遇 `D:/` 盘符当远程主机（加 `--force-local` 或纯 Node）；curl URL 被路径转换（`MSYS_NO_PATHCONV=1`）；`kill $PID` 只杀 wrapper，按 `netstat -ano` 找 LISTENING 真 PID 再 `taskkill //F //T`。
+
+7. **本机 profile 没有自己独立的宿主 cohort（2026-10-24 实测，推翻手册推论）**：`~/.dsh/profiles/node_modules/@deepseek-ai/` 下 223 个条目**全部是符号链接**，指向 `C:/Users/Administrator/AppData/Roaming/npm/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/*`（npm 不把这批卫星提升到顶层）；profile 自己的 `pnpm-lock.yaml` 里根本没有 `@deepseek-ai/dsh`。所以 **`npm i -g` 升宿主就是升生产运行时**，不必也不应去 profile 里 `pnpm install` 重解析。手册 `faq.md` 说的「全局 + profile 两份 cohort 导致 `dsh-tools` 模块级 Symbol 分裂」是**另一种安装布局**，别默认套到本机。
+
+8. **`dsh-better-sidebar` 在本机根本挂不上，且不是我们造成的**：它 `inject: ["webServer","sessions","webRuntime","tools"]`，而 `webRuntime` 这个服务名在 rc.3 与 alpha.5 两套 cohort 里**都是 0 命中**（对照项 `trustedHosts` 两边各 16 命中，证明不是搜索姿势问题）。`dsh web` 启动只会报一行 `1 entry did not activate` 指向它。它的 peer 是 `^0.2.1-alpha.1`，**确实接受 rc.3**，所以是宿主缺服务、不是依赖解析失败——别为了它去降宿主版本。
+
+9. **`koffi` 在本机是装不出的**：npm 分发的 tarball 不含预编译产物（两个 registry 的 `dist.integrity` 一致，排除镜像被改），其 install 脚本 `cnoke --prebuild` 在本机**静默空跑**（退出 0 但不产出 `build/`，缺 MSVC `cl.exe`）。后果：`dsh-fs-local` 的 `win32()` 里 `await import("koffi")` 才炸，启动不受影响（懒加载），但 Windows ACL 沙箱、原生目录选择器、`dsh-win32-process`、JSONL 会话持久化 worker 被真正用到时可能失败。另外 `npm i -g` 默认会用 `allow-scripts` 拦安装脚本，只需放行 `@deepseek-ai/dsh-subprocess-local,koffi,node-pty`（与冒烟脚本的 allowBuilds 对齐），`@google/genai` 与 `protobufjs` 保持拦截。
 
 ## 4. 验证要求
 
