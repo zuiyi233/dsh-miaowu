@@ -155,7 +155,8 @@ export function VaultView({
 
 function VaultFeature({ sessionId }: WorkbenchFeatureProps): JSX.Element {
   const [status, setStatus] = useState<VaultStatusPayload | undefined>(undefined);
-  const [disabled, setDisabled] = useState(false);
+  // 失败关闭：状态未返回前按「未启用」渲染，绝不先闪出写入表单。
+  const [disabled, setDisabled] = useState(true);
   const [names, setNames] = useState<readonly string[]>([]);
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
