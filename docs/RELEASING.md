@@ -55,11 +55,13 @@ The release pipeline now matches this fork's identity:
   deletion is pushed and merged, GitHub still lists it on the default branch; confirm it is
   gone there before assuming the remote has no such workflow.
 - npm is unpublished: `@dsh-miaowu/dsh` returns 404 from the registry. Only the GitHub
-  Release channel exists, and its only release is `v0.1.16`; versions 0.1.17, 0.1.18 and
-  0.1.19 are source-only.
+  Release channel exists, and its only release is `v0.1.16`; 0.1.17 and 0.1.18 are
+  source-only, and 0.1.19 is tagged as `miaowu-v0.1.19` (annotated tag on commit
+  `80bfd19`) but has no Release asset yet because the Release workflow is disabled.
 
 The fork's Release workflow is currently disabled in GitHub Actions: the API reports its
 state as `disabled_manually`, so a `miaowu-v*` tag push starts no run until it is enabled.
+The 0.1.19 tag push on 2026-10-24 produced no Release run, confirming this.
 Enable it from the Actions tab, or list the fork's workflows with `gh workflow list` and
 enable the Release entry by its own ID. In this fork that ID is `350173456`, but a workflow
 ID can change when a workflow is deleted and re-created, so confirm the current ID from the
