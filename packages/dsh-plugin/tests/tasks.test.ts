@@ -3,6 +3,9 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { FileSystem, FsDirEntry, FsInfo, FsTarget, FsVersion } from "@deepseek-ai/dsh-fs";
 import { describe, expect, it } from "vitest";
 import {
+  availableCandidateActions,
+  availableRunActions,
+  availableStepActions,
   clearTaskCaches,
   handleTasksRequest,
   isLegalCandidateTransition,
@@ -18,6 +21,8 @@ import {
   type TaskRun,
 } from "../src/services/tasks.js";
 import type { WorkspaceRealm } from "../src/workspace-route.js";
+import { WorkspaceHttpError } from "../src/workspace-route.js";
+import { onWorkspaceBeforeWrite } from "../src/services/registry.js";
 
 type MemoryFs = Pick<
   FileSystem,
@@ -271,6 +276,13 @@ describe("tasks: pure helpers", () => {
     expect(isLegalCandidateTransition("proposed", "applied")).toBe(false);
     expect(isLegalCandidateTransition("confirmed", "applied")).toBe(true);
     expect(isLegalCandidateTransition("applied", "confirmed")).toBe(false);
+    expect(availableRunActions("pending")).toEqual(["running", "paused", "cancelled", "failed"]);
+    expect(availableRunActions("completed")).toEqual([]);
+    expect(availableStepActions("running")).toEqual(["done", "failed"]);
+    expect(availableStepActions("done")).toEqual([]);
+    expect(availableCandidateActions("proposed")).toEqual(["confirm", "reject", "amend"]);
+    expect(availableCandidateActions("confirmed")).toEqual(["apply", "reject", "amend"]);
+    expect(availableCandidateActions("applied")).toEqual([]);
   });
 
   it("exposes the three demo recipes and strips checkpoints from summaries", () => {
@@ -312,6 +324,8 @@ describe("tasks: run lifecycle", () => {
     const runId = bodyOf<{ run: TaskRun }>(created).run.id;
     // recipe 自动生成 5 步.
     expect(bodyOf<{ run: TaskRun }>(created).run.steps).toHaveLength(5);
+    expect(bodyOf<{ run: { availableActions?: string[] } }>(created).run.availableActions)
+      .toEqual(["running", "paused", "cancelled", "failed"]);
 
     const added = await callTasksIsolated(fs, cwd, "POST", `/oh-story/tasks/run/${runId}/step`, { kind: "加更" });
     expect(added.status).toBe(200);
@@ -319,8 +333,10 @@ describe("tasks: run lifecycle", () => {
 
     const running = await callTasksIsolated(fs, cwd, "POST", `/oh-story/tasks/run/${runId}/step/5/status`, { status: "running" });
     expect(running.status).toBe(200);
+    expect(bodyOf<{ step: { availableActions?: string[] } }>(running).step.availableActions).toEqual(["done", "failed"]);
     const done = await callTasksIsolated(fs, cwd, "POST", `/oh-story/tasks/run/${runId}/step/5/status`, { status: "done", note: "写完" });
     expect(done.status).toBe(200);
+    expect(bodyOf<{ step: { availableActions?: string[] } }>(done).step.availableActions).toEqual([]);
     // 幂等重放不报错.
     const replay = await callTasksIsolated(fs, cwd, "POST", `/oh-story/tasks/run/${runId}/step/5/status`, { status: "done" });
     expect(replay.status).toBe(200);
@@ -339,6 +355,8 @@ describe("tasks: run lifecycle", () => {
 
     const paused = await callTasksIsolated(fs, cwd, "POST", `/oh-story/tasks/run/${runId}/status`, { status: "paused" });
     expect(paused.status).toBe(200);
+    expect(bodyOf<{ run: { availableActions?: string[] } }>(paused).run.availableActions)
+      .toEqual(["running", "cancelled", "failed", "completed"]);
     const resumed = await callTasksIsolated(fs, cwd, "GET", "/oh-story/tasks/resume?kind=novel-chapter");
     expect(resumed.status).toBe(200);
     const resumedRun = bodyOf<{ run: TaskRun }>(resumed).run;
@@ -349,6 +367,8 @@ describe("tasks: run lifecycle", () => {
     const listed = await callTasksIsolated(fs, cwd, "GET", "/oh-story/tasks/runs?kind=novel-chapter");
     expect(listed.status).toBe(200);
     expect(bodyOf<{ runs: Array<Record<string, unknown>> }>(listed).runs[0]).not.toHaveProperty("checkpoint");
+    expect(bodyOf<{ runs: Array<{ availableActions?: string[] }> }>(listed).runs[0]?.availableActions)
+      .toEqual(["running", "cancelled", "failed", "completed"]);
   });
 
   it("rejects illegal run transitions and unknown ids", async () => {
@@ -382,15 +402,20 @@ describe("tasks: candidate staging", () => {
     expect(created.status).toBe(200);
     const candidate = bodyOf<{ candidate: Candidate }>(created).candidate;
     expect(candidate.status).toBe("proposed");
+    expect(bodyOf<{ candidate: { availableActions?: string[] } }>(created).candidate.availableActions)
+      .toEqual(["confirm", "reject", "amend"]);
 
     const confirmed = await callTasksIsolated(fs, cwd, "POST", `/oh-story/tasks/candidates/${candidate.id}/confirm`, { decidedBy: "author" });
     expect(confirmed.status).toBe(200);
     expect(bodyOf<{ candidate: Candidate }>(confirmed).candidate.status).toBe("confirmed");
+    expect(bodyOf<{ candidate: { availableActions?: string[] } }>(confirmed).candidate.availableActions)
+      .toEqual(["apply", "reject", "amend"]);
 
     const applied = await callTasksIsolated(fs, cwd, "POST", `/oh-story/tasks/candidates/${candidate.id}/apply`);
     expect(applied.status).toBe(200);
-    const appliedBody = bodyOf<{ candidate: Candidate; writtenPath?: string; writtenVersion?: string }>(applied);
+    const appliedBody = bodyOf<{ candidate: Candidate & { availableActions: readonly string[] }; writtenPath?: string; writtenVersion?: string }>(applied);
     expect(appliedBody.candidate.status).toBe("applied");
+    expect(appliedBody.candidate.availableActions).toEqual([]);
     expect(appliedBody.writtenPath).toBe("正文/第一章.md");
     expect(typeof appliedBody.writtenVersion).toBe("string");
 
@@ -402,6 +427,38 @@ describe("tasks: candidate staging", () => {
     const replay = await callTasksIsolated(fs, cwd, "POST", `/oh-story/tasks/candidates/${candidate.id}/apply`);
     expect(replay.status).toBe(200);
     expect(bodyOf<{ idempotentReplay?: boolean }>(replay).idempotentReplay).toBe(true);
+  });
+
+  it("file apply 写前通知钩子，钩子失败则不落盘且可重试", async () => {
+    const { fs, files, cwd } = isolatedFs({ "正文/第一章.md": "旧正文" });
+    const draft = await callTasksIsolated(fs, cwd, "POST", "/oh-story/tasks/candidates", {
+      kind: "file",
+      title: "第一章修订",
+      payload: { target: "正文/第一章.md", content: "新正文" },
+      target: "正文/第一章.md",
+    });
+    const id = bodyOf<{ candidate: Candidate }>(draft).candidate.id;
+    await callTasksIsolated(fs, cwd, "POST", `/oh-story/tasks/candidates/${id}/confirm`);
+    const root = cwd.replace(/^\/+/, "");
+    const filePath = `${root}/正文/第一章.md`;
+    const events: { path: string; reason: string }[] = [];
+    const dispose = onWorkspaceBeforeWrite((event) => {
+      events.push({ path: event.path, reason: event.reason });
+      throw new WorkspaceHttpError(500, "快照不可用");
+    });
+    try {
+      const blocked = await callTasksIsolated(fs, cwd, "POST", `/oh-story/tasks/candidates/${id}/apply`);
+      expect(blocked.status).toBe(500);
+      // 目标文件按 cwd 解析后的键此时还不存在：被拦截的写入没有创建它。
+      expect(files.get(filePath)).toBeUndefined();
+    } finally {
+      dispose();
+    }
+    expect(events).toEqual([{ path: "正文/第一章.md", reason: "candidate-apply" }]);
+
+    const retried = await callTasksIsolated(fs, cwd, "POST", `/oh-story/tasks/candidates/${id}/apply`);
+    expect(retried.status).toBe(200);
+    expect(files.get(filePath)?.content).toBe("新正文");
   });
 
   it("rejects unconfirmed apply, and supports reject/amend branches", async () => {

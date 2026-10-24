@@ -13,6 +13,8 @@ import {
   buildContinuityHandoff,
   buildContinuityOverview,
   createContinuitySnapshot,
+  snapshotBeforeHighRiskWrite,
+  verifyContinuityHandoff,
 } from "../src/services/continuity.js";
 import { clearTaskCaches } from "../src/services/tasks.js";
 
@@ -645,6 +647,57 @@ describe("buildContinuityHandoff", () => {
   });
 });
 
+describe("verifyContinuityHandoff", () => {
+  it("匹配清单返回 ok 且零写入；变更、缺失、越界与 checksum 不符分别报告", async () => {
+    const state = memoryFs({
+      "正文/第1章.md": "# 第一章",
+      ".oh-story/shelf.json": JSON.stringify({ schemaVersion: 1, entries: [] }),
+    });
+    const manifest = await buildContinuityHandoff(state.realm, 1024 * 1024, NOW);
+    const writesBeforeVerify = state.writes.length;
+    const clean = await verifyContinuityHandoff(state.realm, manifest, 1024 * 1024);
+    expect(clean.ok).toBe(true);
+    expect(clean.checksumOk).toBe(true);
+    expect(clean.checked).toBe(manifest.files.length);
+    expect(clean.matched).toBe(manifest.files.length);
+    expect(clean.files.every((file) => file.status === "match")).toBe(true);
+    expect(state.writes).toHaveLength(writesBeforeVerify);
+
+    const chapter = await state.realm.fs.resolve("正文/第1章.md", { cwd: CWD });
+    await state.realm.fs.writeText(chapter, "# 改过");
+    const changed = await verifyContinuityHandoff(state.realm, manifest, 1024 * 1024);
+    expect(changed.ok).toBe(false);
+    expect(changed.files.find((file) => file.path === "正文/第1章.md")?.status).toBe("changed");
+
+    const withMissing = {
+      ...manifest,
+      files: [...manifest.files, { path: "正文/不存在.md", bytes: 1, sha256: "0".repeat(64) }],
+    };
+    const missing = await verifyContinuityHandoff(state.realm, withMissing, 1024 * 1024);
+    expect(missing.files.find((file) => file.path === "正文/不存在.md")?.status).toBe("missing");
+
+    const unsafe = await verifyContinuityHandoff(state.realm, {
+      ...manifest,
+      files: [{ path: "../escape.md", bytes: 1, sha256: "0".repeat(64) }],
+    }, 1024 * 1024);
+    expect(unsafe.files[0]?.status).toBe("unsafe");
+
+    const tampered = await verifyContinuityHandoff(state.realm, {
+      ...manifest,
+      checksum: "0".repeat(64),
+    }, 1024 * 1024);
+    expect(tampered.checksumOk).toBe(false);
+    expect(tampered.ok).toBe(false);
+  });
+
+  it("结构非法直接 400，不读取工作区", async () => {
+    const state = memoryFs({ "正文/第1章.md": "# 第一章" });
+    await expect(verifyContinuityHandoff(state.realm, { schemaVersion: 1 }, 1024 * 1024))
+      .rejects.toMatchObject({ status: 400 });
+    expect(state.writes).toHaveLength(0);
+  });
+});
+
 describe("createContinuitySnapshot", () => {
   it("整体快照包含创作树与 .oh-story 状态，但不含 vault 主密钥", async () => {
     const state = memoryFs({
@@ -729,5 +782,57 @@ describe("createContinuitySnapshot", () => {
     await expect(createContinuitySnapshot(state.realm, 1024 * 1024, NOW))
       .rejects.toMatchObject({ status: 413 });
     expect(state.writes).toHaveLength(0);
+  });
+});
+
+describe("snapshotBeforeHighRiskWrite", () => {
+  it("首次写前创建创作树快照，节流窗口内复用同一次快照", async () => {
+    const state = memoryFs({ "正文/第1章.md": "# 第一章" });
+
+    await snapshotBeforeHighRiskWrite(state.realm, 1024 * 1024, NOW);
+    expect(state.writes).toHaveLength(1);
+    expect(state.writes[0]!.path.startsWith(`${WS}/.oh-story/backup/`)).toBe(true);
+
+    await snapshotBeforeHighRiskWrite(state.realm, 1024 * 1024, NOW + 60_000);
+    expect(state.writes).toHaveLength(1);
+
+    await snapshotBeforeHighRiskWrite(state.realm, 1024 * 1024, NOW + 10 * 60_000 + 1);
+    expect(state.writes).toHaveLength(2);
+  });
+
+  it("并发写共享同一次 in-flight 快照", async () => {
+    const state = memoryFs({ "正文/第1章.md": "# 第一章" });
+
+    await Promise.all([
+      snapshotBeforeHighRiskWrite(state.realm, 1024 * 1024, NOW),
+      snapshotBeforeHighRiskWrite(state.realm, 1024 * 1024, NOW),
+      snapshotBeforeHighRiskWrite(state.realm, 1024 * 1024, NOW),
+    ]);
+    expect(state.writes).toHaveLength(1);
+  });
+
+  it("多书歧义与非创作工作区静默跳过，不替用户选书也不阻断写入", async () => {
+    const ambiguous = memoryFs({
+      "正文/甲/第1章.md": "# 甲",
+      "乙/正文/第1章.md": "# 乙",
+    });
+    await snapshotBeforeHighRiskWrite(ambiguous.realm, 1024 * 1024, NOW);
+    expect(ambiguous.writes).toHaveLength(0);
+
+    const empty = memoryFs({ "README.md": "# 空工作区" });
+    await snapshotBeforeHighRiskWrite(empty.realm, 1024 * 1024, NOW);
+    expect(empty.writes).toHaveLength(0);
+  });
+
+  it("快照失败抛 500 阻断写入，且失败不占用节流窗口", async () => {
+    const state = memoryFs({ "正文/第1章.md": "# 第一章" });
+
+    await expect(snapshotBeforeHighRiskWrite(state.realm, 4, NOW))
+      .rejects.toMatchObject({ status: 500 });
+    expect(state.writes).toHaveLength(0);
+
+    // 同一 fs 在失败后立刻重试（未到 10 分钟）仍会重新尝试快照。
+    await snapshotBeforeHighRiskWrite(state.realm, 1024 * 1024, NOW + 1);
+    expect(state.writes).toHaveLength(1);
   });
 });

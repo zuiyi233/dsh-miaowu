@@ -14,6 +14,7 @@ import {
   type WorkspaceRouteOptions,
 } from "../workspace-route.js";
 import {
+  notifyWorkspaceBeforeWrite,
   onWorkspaceWrite,
   registerWorkspaceExtension,
   type WorkspaceWriteEvent,
@@ -306,6 +307,8 @@ export async function rollbackToVersion(
   if (String(info.version) !== baseVersion) {
     throw new WorkspaceHttpError(412, "文件已在磁盘上更新，请先刷新后重试。");
   }
+  // 整体回滚会整篇覆盖正文；先让安全快照钩子落地，失败则中止（不回滚到旧版）。
+  await notifyWorkspaceBeforeWrite({ realm, path, reason: "history-rollback" });
   let outcome;
   try {
     outcome = await realm.fs.writeText(

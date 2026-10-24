@@ -52,3 +52,27 @@ export function notifyWorkspaceWrite(event: WorkspaceWriteEvent): void {
     try { listener(event); } catch { /* audit/index listeners never fail the save */ }
   }
 }
+
+/** A high-risk write that must take a safety snapshot before it lands. */
+export interface WorkspaceBeforeWriteEvent {
+  readonly path: string;
+  readonly reason: "history-rollback" | "candidate-apply";
+  readonly realm: WorkspaceRealm;
+}
+
+const beforeWriteListeners: Array<(event: WorkspaceBeforeWriteEvent) => Promise<void> | void> = [];
+
+/** Pre-write listeners are awaited and may block the write by throwing. */
+export function onWorkspaceBeforeWrite(
+  listener: (event: WorkspaceBeforeWriteEvent) => Promise<void> | void
+): () => void {
+  beforeWriteListeners.push(listener);
+  return () => {
+    const index = beforeWriteListeners.indexOf(listener);
+    if (index >= 0) beforeWriteListeners.splice(index, 1);
+  };
+}
+
+export async function notifyWorkspaceBeforeWrite(event: WorkspaceBeforeWriteEvent): Promise<void> {
+  for (const listener of [...beforeWriteListeners]) await listener(event);
+}

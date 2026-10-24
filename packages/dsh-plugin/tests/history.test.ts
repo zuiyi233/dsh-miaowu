@@ -10,6 +10,7 @@ import type {
 } from "@deepseek-ai/dsh-fs";
 import type { WorkspaceRealm } from "../src/workspace-route.js";
 import { WorkspaceHttpError } from "../src/workspace-route.js";
+import { onWorkspaceBeforeWrite } from "../src/services/registry.js";
 import {
   contentHash,
   createAnnotation,
@@ -209,6 +210,38 @@ describe("rollback", () => {
     const { realm, seed } = setup();
     seed(CHAPTER, "第三版", "disk3");
     await expectHttpError(rollbackToVersion(realm, CHAPTER, "missing", "disk3"), 404);
+  });
+
+  it("写前钩子收到 history-rollback 事件后才写盘", async () => {
+    const { realm, seed, read } = setup();
+    seed(CHAPTER, "第三版", "disk3");
+    await recordSave({ path: CHAPTER, content: "第一版", bytes: 9, version: "s1", realm });
+    const events: { path: string; reason: string; writtenAtNotify: string | undefined }[] = [];
+    const dispose = onWorkspaceBeforeWrite((event) => {
+      events.push({ path: event.path, reason: event.reason, writtenAtNotify: read(CHAPTER) });
+    });
+    try {
+      await rollbackToVersion(realm, CHAPTER, "s1", "disk3");
+    } finally {
+      dispose();
+    }
+    expect(events).toEqual([{ path: CHAPTER, reason: "history-rollback", writtenAtNotify: "第三版" }]);
+    expect(read(CHAPTER)).toBe("第一版");
+  });
+
+  it("写前钩子失败时阻断回滚，正文保持原样", async () => {
+    const { realm, seed, read } = setup();
+    seed(CHAPTER, "第三版", "disk3");
+    await recordSave({ path: CHAPTER, content: "第一版", bytes: 9, version: "s1", realm });
+    const dispose = onWorkspaceBeforeWrite(() => {
+      throw new WorkspaceHttpError(500, "快照不可用");
+    });
+    try {
+      await expectHttpError(rollbackToVersion(realm, CHAPTER, "s1", "disk3"), 500);
+    } finally {
+      dispose();
+    }
+    expect(read(CHAPTER)).toBe("第三版");
   });
 });
 

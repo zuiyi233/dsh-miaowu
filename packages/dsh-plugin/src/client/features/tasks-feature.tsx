@@ -12,6 +12,7 @@ interface StepPayload {
   readonly status: string;
   readonly note?: string | undefined;
   readonly updatedAt: number;
+  readonly availableActions: readonly string[];
 }
 
 interface EventPayload {
@@ -31,6 +32,7 @@ interface RunPayload {
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly resumeCount: number;
+  readonly availableActions: readonly string[];
 }
 
 interface CandidatePayload {
@@ -45,35 +47,13 @@ interface CandidatePayload {
   readonly createdAt: number;
   readonly writtenPath?: string | undefined;
   readonly writtenVersion?: string | undefined;
+  readonly availableActions: readonly string[];
 }
 
 interface ErrorPayload {
   readonly error?: string | undefined;
 }
 
-// 服务端状态机驱动按钮:终态/非法转移一律禁用,避免点了报 409 的死按钮.
-const RUN_NEXT: Record<string, readonly string[]> = {
-  pending: ["running", "paused", "cancelled", "failed"],
-  running: ["awaiting_user", "paused", "completed", "failed", "cancelled"],
-  awaiting_user: ["running", "paused", "completed", "failed", "cancelled"],
-  paused: ["running", "cancelled", "failed", "completed"],
-  failed: ["running", "cancelled"],
-  completed: [],
-  cancelled: [],
-};
-const STEP_NEXT: Record<string, readonly string[]> = {
-  pending: ["running"],
-  running: ["done", "failed"],
-  done: [],
-  failed: [],
-};
-const CANDIDATE_ACTIONS: Record<string, readonly string[]> = {
-  proposed: ["confirm", "reject", "amend"],
-  confirmed: ["apply", "reject", "amend"],
-  rejected: [],
-  amended: [],
-  applied: [],
-};
 const RECIPE_KINDS = ["novel-chapter", "drama-batch", "game-content", "custom"];
 const PAYLOAD_PREVIEW_LENGTH = 160;
 
@@ -343,7 +323,7 @@ function TasksPanel({ sessionId }: WorkbenchFeatureProps): JSX.Element {
           ? <p className="oh-tasks-empty">暂无候选。AI 产出会先落到这里，确认后才可应用写入。</p>
           : <ul className="oh-tasks-list">
             {candidates.map((candidate) => {
-              const actions = CANDIDATE_ACTIONS[candidate.status] ?? [];
+              const actions = candidate.availableActions;
               return <li key={candidate.id} className="oh-tasks-card">
                 <div className="oh-tasks-card-head">
                   <strong className="oh-tasks-title">{candidate.title}</strong>
@@ -423,7 +403,7 @@ function TasksPanel({ sessionId }: WorkbenchFeatureProps): JSX.Element {
               : null}
             <ul className="oh-tasks-steps">
               {selectedRun.steps.map((step) => {
-                const next = STEP_NEXT[step.status] ?? [];
+                const next = step.availableActions;
                 return <li key={step.ordinal} className="oh-tasks-step">
                   <span>#{String(step.ordinal)} {step.kind} · {step.status}{step.note !== undefined ? ` · ${step.note}` : ""}</span>
                   <span className="oh-tasks-actions">
@@ -441,7 +421,7 @@ function TasksPanel({ sessionId }: WorkbenchFeatureProps): JSX.Element {
               })}
             </ul>
             <div className="oh-tasks-actions">
-              {(RUN_NEXT[selectedRun.status] ?? []).map((status) =>
+              {selectedRun.availableActions.map((status) =>
                 <button
                   key={status}
                   type="button"

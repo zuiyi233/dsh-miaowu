@@ -128,10 +128,12 @@ test("--scale small --assert emits a shaped report and reuses an explicit --root
     assert.ok(ids.includes(id), `missing measurement ${id}`);
   }
   for (const item of report.measurements) {
-    assert.equal(item.iterations, 1);
+    assert.equal(item.iterations, item.id === "read-hash-1m" ? 5 : 1);
     assert.equal(typeof item.ms, "number");
     assert.ok(Number.isFinite(item.ms) && item.ms >= 0);
   }
+  const readHash = report.measurements.find((item) => item.id === "read-hash-1m");
+  assert.equal(readHash.details.samplesMs.length, 5);
   assert.equal(report.budgets.length, BUDGETS.length);
   assert.equal(report.assert.enabled, true);
   assert.equal(report.assert.ok, true);

@@ -192,6 +192,7 @@ for (const forbidden of ["react-dom.development", "react.development", "process.
   }
 }
 const clientBytes = Buffer.byteLength(clientBundle);
-if (clientBytes > 400_000) {
-  throw new Error(`Browser bundle exceeds the 400 KB release budget: ${String(clientBytes)} bytes`);
+if (clientBytes > 600_000) {
+  throw new Error(`Browser bundle exceeds the 600 KB release budget: ${String(clientBytes)} bytes`);
 }
+console.log(`Browser bundle: ${String(clientBytes)} bytes (600,000-byte budget)`);

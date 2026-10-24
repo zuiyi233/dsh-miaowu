@@ -1417,6 +1417,22 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
       || payloadContains(handoffPayload, [storyRoot, homedir()])) {
       throw new Error(`Packaged continuity handoff failed: ${JSON.stringify(handoffPayload)}`);
     }
+    const handoffVerifyResponse = await dshFetch(`${origin}/oh-story/continuity/handoff/verify?sessionId=${encodeURIComponent(storySession.sessionId)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ manifest: handoffPayload })
+    });
+    const handoffVerifyPayload = await handoffVerifyResponse.json() as {
+      readonly ok?: boolean;
+      readonly checksumOk?: boolean;
+      readonly checked?: number;
+      readonly matched?: number;
+    };
+    if (!handoffVerifyResponse.ok || handoffVerifyPayload.ok !== true || handoffVerifyPayload.checksumOk !== true
+      || handoffVerifyPayload.checked !== handoffPayload.files.length
+      || handoffVerifyPayload.matched !== handoffPayload.files.length) {
+      throw new Error(`Packaged continuity handoff verify failed: ${JSON.stringify(handoffVerifyPayload)}`);
+    }
     const snapshotWithoutConfirm = await dshFetch(`${origin}/oh-story/continuity/snapshot?sessionId=${encodeURIComponent(storySession.sessionId)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1444,6 +1460,16 @@ const bookWorkspace = await rpc<{ readonly workspace: { readonly workspaceId: st
       || payloadContains(bundlePayload, [storyRoot, homedir()])
       || payloadMatches(bundlePayload, /\bsk-[A-Za-z0-9_-]{8,}/u)) {
       throw new Error(`Packaged redacted support bundle failed: ${JSON.stringify({ status: bundleResponse.status, redacted: bundlePayload.redacted })}`);
+    }
+    const vaultStatus = await dshFetch(`${origin}/oh-story/vault/status?sessionId=${encodeURIComponent(storySession.sessionId)}`);
+    const vaultStatusPayload = await vaultStatus.json() as { readonly enabled?: boolean };
+    if (vaultStatus.status !== 403 || vaultStatusPayload.enabled !== false) {
+      throw new Error(`Vault status was not default-off: ${JSON.stringify({ status: vaultStatus.status, enabled: vaultStatusPayload.enabled })}`);
+    }
+    const vaultList = await dshFetch(`${origin}/oh-story/vault/secrets?sessionId=${encodeURIComponent(storySession.sessionId)}`);
+    const vaultListPayload = await vaultList.json() as { readonly enabled?: boolean; readonly names?: unknown };
+    if (vaultList.status !== 403 || vaultListPayload.enabled !== false || vaultListPayload.names !== undefined) {
+      throw new Error(`Vault list was not default-off or leaked names: ${JSON.stringify({ status: vaultList.status, enabled: vaultListPayload.enabled, names: vaultListPayload.names })}`);
     }
     const preflightResponse = await dshFetch(`${origin}/oh-story/drama-preflight`);
     const preflightPayload = await preflightResponse.json() as {
@@ -1922,7 +1948,7 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
           return {
             button: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
             center: { x, y },
-            top: top === null || topBox === undefined ? null : { tag: top.tagName, className: typeof top.className === "string" ? top.className : null, x: topBox.x, y: topBox.y, width: topBox.width, height: topBox.height },
+            top: top === null || topBox === null ? null : { tag: top.tagName, className: typeof top.className === "string" ? top.className : null, x: topBox.x, y: topBox.y, width: topBox.width, height: topBox.height },
             topIsButton: top === element || element.contains(top),
             tree,
             editor,
@@ -1966,11 +1992,11 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
             buttonText: element.textContent,
             buttonRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
             center: { x, y },
-            top: top === null || topBox === undefined ? null : { tag: top.tagName, className: typeof top.className === "string" ? top.className : null, ariaLabel: top.getAttribute("aria-label"), dataLeaf: top.closest("[data-leaf]")?.getAttribute("data-leaf") ?? null, x: topBox.x, y: topBox.y, width: topBox.width, height: topBox.height },
+            top: top === null || topBox === null ? null : { tag: top.tagName, className: typeof top.className === "string" ? top.className : null, ariaLabel: top.getAttribute("aria-label"), dataLeaf: top.closest("[data-leaf]")?.getAttribute("data-leaf") ?? null, x: topBox.x, y: topBox.y, width: topBox.width, height: topBox.height },
             topIsButton: top === element || element.contains(top),
-            editor: editor === null || editorBox === undefined ? null : { x: editorBox.x, y: editorBox.y, width: editorBox.width, height: editorBox.height },
-            editorCell: editorCellNode === null || editorCellBox === undefined ? null : { x: editorCellBox.x, y: editorCellBox.y, width: editorCellBox.width, height: editorCellBox.height },
-            chatFlow: chatFlowNode === null || chatFlowBox === undefined ? null : { x: chatFlowBox.x, y: chatFlowBox.y, width: chatFlowBox.width, height: chatFlowBox.height },
+            editor: editor === null || editorBox === null ? null : { x: editorBox.x, y: editorBox.y, width: editorBox.width, height: editorBox.height },
+            editorCell: editorCellNode === null || editorCellBox === null ? null : { x: editorCellBox.x, y: editorCellBox.y, width: editorCellBox.width, height: editorCellBox.height },
+            chatFlow: chatFlowNode === null || chatFlowBox === null ? null : { x: chatFlowBox.x, y: chatFlowBox.y, width: chatFlowBox.width, height: chatFlowBox.height },
             layout: scroller?.getAttribute("data-oh-story-layout") ?? null,
             grid: scroller === null ? null : getComputedStyle(scroller).gridTemplateColumns
           };
@@ -2094,7 +2120,7 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         if (!(await riskChips.innerText()).includes("P0 0")) {
           throw new Error(`Continuity panel reported a P0 in the packaged smoke: ${await riskChips.innerText()}`);
         }
-        for (const action of ["刷新", "创建快照", "复制交接清单"]) {
+        for (const action of ["刷新", "创建快照", "复制交接清单", "校验交接清单"]) {
           if (await cockpitPanel.getByRole("button", { name: action, exact: true }).count() !== 1) {
             throw new Error(`Continuity panel is missing the ${action} action.`);
           }
@@ -2105,6 +2131,19 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         }
         await continuityButton.click();
         await cockpitPanel.waitFor({ state: "detached", timeout: 10_000 });
+        const vaultButton = page.getByRole("button", { name: "保险库", exact: true });
+        await vaultButton.waitFor({ state: "visible", timeout: 10_000 });
+        await vaultButton.click();
+        const vaultPanel = page.locator(".oh-vault-panel");
+        await vaultPanel.waitFor({ state: "visible", timeout: 10_000 });
+        if (!(await vaultPanel.innerText()).includes("DSH_MIAOWU_VAULT_ENABLED=1")) {
+          throw new Error("Vault panel did not render the default-off guidance.");
+        }
+        if (await vaultPanel.getByRole("button", { name: "写入 / 更新", exact: true }).count() !== 0) {
+          throw new Error("Vault panel exposed write controls while the vault is disabled.");
+        }
+        await vaultButton.click();
+        await vaultPanel.waitFor({ state: "detached", timeout: 10_000 });
         // The audiobook panel is read-only here: it loads the overview, shows the
         // preflight and must not create a project or call TTS. The TTS key is set
         // in the Host environment, so the positive key chip is the only accepted
@@ -2167,18 +2206,22 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
       const chapterEditor = page.getByRole("textbox", { name: chapterPath });
       await chapterEditor.waitFor({ state: "visible", timeout: 10_000 });
       const editorPosition = await chapterEditor.evaluate((element) => {
-        element.focus();
-        element.setSelectionRange(420, 438);
-        element.scrollTop = 5_000;
-        return { scrollTop: element.scrollTop, selectionStart: element.selectionStart, selectionEnd: element.selectionEnd };
+        const textarea = element as HTMLTextAreaElement;
+        textarea.focus();
+        textarea.setSelectionRange(420, 438);
+        textarea.scrollTop = 5_000;
+        return { scrollTop: textarea.scrollTop, selectionStart: textarea.selectionStart, selectionEnd: textarea.selectionEnd };
       });
       await previewTab.click();
       await sourceTab.click();
-      const restoredPosition = await chapterEditor.evaluate((element) => ({
-        scrollTop: element.scrollTop,
-        selectionStart: element.selectionStart,
-        selectionEnd: element.selectionEnd
-      }));
+      const restoredPosition = await chapterEditor.evaluate((element) => {
+        const textarea = element as HTMLTextAreaElement;
+        return {
+          scrollTop: textarea.scrollTop,
+          selectionStart: textarea.selectionStart,
+          selectionEnd: textarea.selectionEnd
+        };
+      });
       if (Math.abs(restoredPosition.scrollTop - editorPosition.scrollTop) > 1
         || restoredPosition.selectionStart !== editorPosition.selectionStart
         || restoredPosition.selectionEnd !== editorPosition.selectionEnd) {
@@ -2297,7 +2340,10 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
           studio: (await gameStudio.innerText()).slice(0, 2_000),
           iframeCount,
           iframeSrc: iframeCount === 0 ? undefined : await iframe.getAttribute("src"),
-          iframeTitles: await page.locator("iframe").evaluateAll((frames) => frames.map((frame) => ({ title: frame.title, src: frame.src }))),
+          iframeTitles: await page.locator("iframe").evaluateAll((frames) => frames.map((frame) => {
+            const iframe = frame as HTMLIFrameElement;
+            return { title: iframe.title, src: iframe.src };
+          })),
           frames: page.frames().map((frame) => frame.url()),
           responses: gamePreviewResponses,
           pageErrors
@@ -2331,10 +2377,13 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
           tabs: await gameTabs.getByRole("tab", { selected: true }).allTextContents(),
           anchors: await page.locator('[data-slot="conversation.session"]').evaluateAll((elements) => elements.map((element) => element.getAttribute("data-e2e-anchor"))),
           surfaces: await page.locator(".oh-story-split-surface").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-e2e-surface"))),
-          frames: await page.locator("iframe").evaluateAll((elements) => elements.map((element) => ({
-            src: element.src, marker: element.getAttribute("data-e2e-instance"), title: element.title,
-            bounds: element.getBoundingClientRect().toJSON(), display: getComputedStyle(element).display
-          }))),
+          frames: await page.locator("iframe").evaluateAll((elements) => elements.map((element) => {
+            const iframe = element as HTMLIFrameElement;
+            return {
+              src: iframe.src, marker: iframe.getAttribute("data-e2e-instance"), title: iframe.title,
+              bounds: iframe.getBoundingClientRect().toJSON(), display: getComputedStyle(iframe).display
+            };
+          })),
           responses: gamePreviewResponses.slice(-12),
           inner: await frame?.evaluate(() => ({
             instance: document.body.dataset.fixtureInstance, clicks: document.body.dataset.clicks,
@@ -3164,7 +3213,9 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
         composerLocator.getByRole("button", { name: /^(?:Send message|发送消息)$/u }).boundingBox()
       ]);
       if (compactBoxes.some((box) => box === null)) throw new Error("Compact three-column layout lost a required column.");
-      const [compactTree, compactEditor, compactChat, compactComposer, compactModel, compactSend] = compactBoxes as Exclude<(typeof compactBoxes)[number], null>[];
+      type CompactBox = NonNullable<(typeof compactBoxes)[number]>;
+      const [compactTree, compactEditor, compactChat, compactComposer, compactModel, compactSend] =
+        compactBoxes as [CompactBox, CompactBox, CompactBox, CompactBox, CompactBox, CompactBox];
       // Compact stacks the workbench panes (tree above editor) beside the Chat
       // column instead of keeping them side by side.
       const compactOrdered = compactTree.y + compactTree.height <= compactEditor.y + 1
@@ -3193,6 +3244,18 @@ const preloadPath = [...index.matchAll(/\/?plugins\/\?\?[^"'\s]+/gu)]
       if (compactProductionOverflow > 1 || compactProduction.scrollWidth > compactProduction.clientWidth + 1) {
         throw new Error(`500px production view overflowed its DSH editor column: ${JSON.stringify({ compactProductionOverflow, compactProduction })}`);
       }
+      const productionFloatButton = page.getByRole("button", { name: "将生产视图拖出为浮窗", exact: true });
+      await productionFloatButton.waitFor({ state: "visible", timeout: 10_000 });
+      await productionFloatButton.click();
+      const productionWindow = page.locator('.oh-float-window[data-oh-float="drama-production"]');
+      await productionWindow.waitFor({ state: "visible", timeout: 10_000 });
+      await productionWindow.getByRole("tablist", { name: "短剧生产视图" }).waitFor({ state: "visible", timeout: 10_000 });
+      if (await productionWindow.getByRole("tab", { name: "素材", exact: true }).count() !== 1) {
+        throw new Error("Floating drama production view lost its material tab.");
+      }
+      await productionWindow.getByRole("button", { name: "将短剧生产（浮窗）放回工作台", exact: true }).click();
+      await productionWindow.waitFor({ state: "detached", timeout: 10_000 });
+      await page.locator(".oh-story-production").waitFor({ state: "visible", timeout: 10_000 });
       await page.getByRole("tab", { name: "源码" }).click();
       const compactSource = page.getByRole("textbox", { name: compactPath });
       await compactSource.press("End");

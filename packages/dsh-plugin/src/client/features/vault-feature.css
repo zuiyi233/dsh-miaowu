@@ -1,0 +1,29 @@
+.oh-vault-panel { display: flex; flex-direction: column; gap: 10px; min-height: 0; height: 100%; padding: 10px; overflow: auto; color: var(--dsw-alias-label-primary); font-size: 12px; }
+.oh-vault-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.oh-vault-head h3 { margin: 0; font-size: 13px; }
+.oh-vault-head p { margin: 2px 0 0; color: var(--dsw-alias-label-secondary); }
+.oh-vault-badge { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px; line-height: 17px; color: var(--dsw-alias-label-secondary); }
+.oh-vault-badge[data-ready="true"] { color: var(--dsw-alias-state-success-primary, #2e7d32); border-color: currentColor; }
+.oh-vault-action { padding: 4px 9px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-button-ghost-active-fill); cursor: pointer; }
+.oh-vault-action:disabled { opacity: 0.55; cursor: default; }
+.oh-vault-action:not(:disabled):hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oh-vault-action:focus-visible, .oh-vault-form button:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
+.oh-vault-note { margin: 0; padding: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-base); }
+.oh-vault-error { margin: 0; color: var(--dsw-alias-state-danger-primary, #d33); }
+.oh-vault-notice { margin: 0; color: var(--dsw-alias-label-secondary); }
+.oh-vault-form { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.4fr) auto; align-items: end; gap: 8px; padding: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-base); }
+.oh-vault-form label { display: flex; flex-direction: column; gap: 3px; min-width: 0; color: var(--dsw-alias-label-secondary); }
+.oh-vault-form input { min-width: 0; padding: 4px 6px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 5px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); font: inherit; }
+.oh-vault-form button { padding: 5px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-button-ghost-active-fill); cursor: pointer; }
+.oh-vault-form button:disabled { opacity: 0.55; cursor: default; }
+.oh-vault-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.oh-vault-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-base); }
+.oh-vault-item code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oh-vault-actions { display: flex; gap: 5px; flex: none; }
+.oh-vault-actions button { padding: 3px 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 5px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-button-ghost-active-fill); cursor: pointer; }
+.oh-vault-actions button:disabled { opacity: 0.55; cursor: default; }
+.oh-vault-empty { padding: 6px 2px; color: var(--dsw-alias-label-secondary); }
+.oh-vault-revealed { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-base); }
+.oh-vault-revealed header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.oh-vault-revealed input { width: 100%; box-sizing: border-box; padding: 4px 6px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 5px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); font-family: ui-monospace, monospace; }
+.oh-vault-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 4px; color: var(--dsw-alias-label-secondary); }

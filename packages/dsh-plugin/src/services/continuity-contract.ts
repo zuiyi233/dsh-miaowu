@@ -11,6 +11,7 @@ import type { StateEntryStatus } from "./state-contract.js";
 export const CONTINUITY_ROUTES = {
   overview: "/oh-story/continuity",
   handoff: "/oh-story/continuity/handoff",
+  handoffVerify: "/oh-story/continuity/handoff/verify",
   snapshot: "/oh-story/continuity/snapshot",
 } as const;
 
@@ -169,4 +170,20 @@ export interface ContinuitySnapshotResult {
     readonly files: number;
     readonly bytes: number;
   };
+}
+
+export type ContinuityHandoffVerifyStatus = "match" | "changed" | "missing" | "unreadable" | "unsafe";
+
+export interface ContinuityHandoffVerifyFile {
+  readonly path: string;
+  readonly status: ContinuityHandoffVerifyStatus;
+}
+
+export interface ContinuityHandoffVerifyResult {
+  readonly ok: boolean;
+  readonly checksumOk: boolean;
+  readonly checked: number;
+  readonly matched: number;
+  readonly skipped: readonly ContinuityHandoffSkipped[];
+  readonly files: readonly ContinuityHandoffVerifyFile[];
 }

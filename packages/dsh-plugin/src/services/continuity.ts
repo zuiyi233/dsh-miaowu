@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { FsDirEntry, FsTarget } from "@deepseek-ai/dsh-fs";
-import { WorkspaceHttpError, type WorkspaceRealm } from "../workspace-route.js";
+import { readVersionedFile, WorkspaceHttpError, type WorkspaceRealm } from "../workspace-route.js";
 import {
   CONTINUITY_BACKUP_STALE_DAYS,
   CONTINUITY_CANDIDATE_STALE_DAYS,
@@ -12,6 +12,9 @@ import {
   type ContinuityHandoffManifest,
   type ContinuityHandoffSkipReason,
   type ContinuityHandoffSkipped,
+  type ContinuityHandoffVerifyFile,
+  type ContinuityHandoffVerifyResult,
+  type ContinuityHandoffVerifyStatus,
   type ContinuityLevel,
   type ContinuityNextChapter,
   type ContinuityOverview,
@@ -31,7 +34,7 @@ import { listShelf, loadShelf, type ShelfEntry } from "./bookshelf.js";
 import { filterSnoozedReminders, loadForeshadows, loadSnoozes, type Foreshadow, type SnoozeRecord } from "./foreshadows.js";
 import { loadCandidates, loadRuns, type Candidate, type TaskRun } from "./tasks.js";
 import { listVersions, queryAudit } from "./history.js";
-import { collectScopeFiles, createBackup, listBackups, type BackupSummary } from "./backup.js";
+import { collectScopeFiles, createBackup, listBackups, safeBundlePath, type BackupSummary } from "./backup.js";
 import { buildStateInventory } from "./state-inventory.js";
 import { listAnalysisBooks, listSidecarBooks } from "./analysis.js";
 import type { StateInventoryEntry } from "./state-contract.js";
@@ -1046,6 +1049,112 @@ export async function buildContinuityHandoff(
   };
 }
 
+const HANDOFF_SHA256 = /^[0-9a-f]{64}$/u;
+const HANDOFF_SKIP_REASONS: readonly ContinuityHandoffSkipReason[] = [
+  "too-large",
+  "non-utf8",
+  "unreadable",
+  "depth-limit",
+];
+
+function asHandoffManifest(value: unknown): ContinuityHandoffManifest | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.schemaVersion !== 1
+    || typeof record.generatedAt !== "string"
+    || typeof record.root !== "string"
+    || typeof record.checksum !== "string"
+    || !HANDOFF_SHA256.test(record.checksum)
+    || !Array.isArray(record.files)
+    || !Array.isArray(record.skipped)
+    || !Array.isArray(record.excluded)) {
+    return undefined;
+  }
+  const seen = new Set<string>();
+  const files: ContinuityHandoffFile[] = [];
+  for (const item of record.files) {
+    if (typeof item !== "object" || item === null) return undefined;
+    const file = item as Record<string, unknown>;
+    if (typeof file.path !== "string" || file.path === "" || seen.has(file.path)) return undefined;
+    if (typeof file.bytes !== "number" || !Number.isSafeInteger(file.bytes) || file.bytes < 0) return undefined;
+    if (typeof file.sha256 !== "string" || !HANDOFF_SHA256.test(file.sha256)) return undefined;
+    seen.add(file.path);
+    files.push({ path: file.path, bytes: file.bytes, sha256: file.sha256 });
+  }
+  const skipped: ContinuityHandoffSkipped[] = [];
+  for (const item of record.skipped) {
+    if (typeof item !== "object" || item === null) return undefined;
+    const skip = item as Record<string, unknown>;
+    if (typeof skip.path !== "string" || !HANDOFF_SKIP_REASONS.includes(skip.reason as ContinuityHandoffSkipReason)) {
+      return undefined;
+    }
+    skipped.push({ path: skip.path, reason: skip.reason as ContinuityHandoffSkipReason });
+  }
+  if (record.excluded.some((item) => typeof item !== "string")) return undefined;
+  return {
+    schemaVersion: 1,
+    generatedAt: record.generatedAt,
+    root: record.root,
+    files,
+    checksum: record.checksum,
+    skipped,
+    excluded: record.excluded as string[],
+  };
+}
+
+/**
+ * 校验一份交接清单：只读当前工作区并逐文件比对 sha256，绝不写入。
+ * 清单自身的 checksum 先复算；不完整（有 skipped）或任一文件不匹配都不算 ok。
+ */
+export async function verifyContinuityHandoff(
+  realm: WorkspaceRealm,
+  input: unknown,
+  maxBytes: number
+): Promise<ContinuityHandoffVerifyResult> {
+  const manifest = asHandoffManifest(input);
+  if (manifest === undefined) throw new WorkspaceHttpError(400, "交接清单结构不合法。");
+  const checksumOk = handoffChecksum(manifest.files) === manifest.checksum;
+  const results: ContinuityHandoffVerifyFile[] = [];
+  for (const file of manifest.files) {
+    if (!safeBundlePath(file.path)) {
+      results.push({ path: file.path, status: "unsafe" });
+      continue;
+    }
+    let target: FsTarget;
+    try {
+      target = await realm.fs.resolve(file.path, { cwd: realm.cwd });
+    } catch {
+      results.push({ path: file.path, status: "unreadable" });
+      continue;
+    }
+    if (!realm.fs.contains(realm.root, target)) {
+      results.push({ path: file.path, status: "unsafe" });
+      continue;
+    }
+    let status: ContinuityHandoffVerifyStatus;
+    try {
+      const current = await readVersionedFile(realm.fs, target, maxBytes);
+      status = sha256(current.content) === file.sha256 ? "match" : "changed";
+    } catch {
+      try {
+        status = (await realm.fs.stat(target)) === undefined ? "missing" : "unreadable";
+      } catch {
+        status = "unreadable";
+      }
+    }
+    results.push({ path: file.path, status });
+  }
+  const matched = results.filter((file) => file.status === "match").length;
+  return {
+    ok: checksumOk && manifest.skipped.length === 0 && matched === manifest.files.length,
+    checksumOk,
+    checked: manifest.files.length,
+    matched,
+    skipped: manifest.skipped,
+    files: results,
+  };
+}
+
 export async function createContinuitySnapshot(
   realm: WorkspaceRealm,
   maxBytes: number,
@@ -1071,4 +1180,76 @@ export async function createContinuitySnapshot(
     path: outcome.path,
     counts: { files: outcome.counts.files, bytes: outcome.counts.bytes },
   };
+}
+
+const PRE_WRITE_SNAPSHOT_INTERVAL_MS = 10 * 60 * 1000;
+
+interface PreWriteSnapshotState {
+  lastAt: number;
+  inFlight: Promise<boolean> | undefined;
+}
+
+/** 按文件系统实例节流；同一工作区连续回滚/应用候选不重复写前快照。 */
+const preWriteSnapshots = new WeakMap<object, PreWriteSnapshotState>();
+
+function preWriteSnapshotError(error: unknown): WorkspaceHttpError {
+  const detail = error instanceof WorkspaceHttpError
+    ? error.message
+    : error instanceof Error ? error.message : String(error);
+  return new WorkspaceHttpError(500, `写入前自动快照失败，已阻止本次写入：${detail}`);
+}
+
+/**
+ * 高风险整文件覆盖前的安全快照。
+ *
+ * 非创作工作区与多书歧义（自动路径不替用户选书）静默跳过；节流窗口内复用上一次
+ * 成功快照；其余失败一律抛 500 阻断写入——没有安全网时不覆盖正文。快照只写
+ * `.oh-story/backup/`，不含 DSH 会话与 vault 主密钥。
+ */
+export async function snapshotBeforeHighRiskWrite(
+  realm: WorkspaceRealm,
+  maxBytes: number,
+  now: number = Date.now()
+): Promise<void> {
+  const key = realm.fs as object;
+  const existing = preWriteSnapshots.get(key);
+  if (existing?.inFlight !== undefined) {
+    try {
+      await existing.inFlight;
+      return;
+    } catch (error) {
+      throw preWriteSnapshotError(error);
+    }
+  }
+  if (existing !== undefined && now - existing.lastAt < PRE_WRITE_SNAPSHOT_INTERVAL_MS) return;
+  // 判定与写盘都放进同一个 in-flight promise，并发写入共享一次快照。
+  const next: PreWriteSnapshotState = { lastAt: existing?.lastAt ?? 0, inFlight: undefined };
+  const pending = (async (): Promise<boolean> => {
+    const detection = await detectProject(realm);
+    if (detection.candidates.length === 0) return false;
+    if (detection.root === "" && detection.candidates.length > 1) return false;
+    // 只收创作树，不重收 `.oh-story`：历史 JSONL 会随版本累积并可能超过单文件上限，
+    // 把自动快照拖成必然 413，反而永久阻断回滚。状态目录仍有手动整体快照保护。
+    await createBackup(
+      realm,
+      "snapshot",
+      detection.root === "" ? undefined : detection.root,
+      maxBytes,
+      now,
+      { requireComplete: true }
+    );
+    return true;
+  })();
+  next.inFlight = pending;
+  preWriteSnapshots.set(key, next);
+  let created: boolean;
+  try {
+    created = await pending;
+  } catch (error) {
+    if (preWriteSnapshots.get(key) === next) preWriteSnapshots.delete(key);
+    throw preWriteSnapshotError(error);
+  } finally {
+    next.inFlight = undefined;
+  }
+  if (created) next.lastAt = now;
 }

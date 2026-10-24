@@ -459,27 +459,61 @@ export async function listBackups(realm: BackupRealm): Promise<BackupSummary[]> 
   } catch {
     return [];
   }
+  let cache = backupSummaryCache.get(realm.fs);
+  if (cache === undefined || cache.cwd !== realm.cwd) {
+    cache = { cwd: realm.cwd, byName: new Map() };
+    backupSummaryCache.set(realm.fs, cache);
+  }
   const summaries: BackupSummary[] = [];
+  const seen = new Set<string>();
   for (const entry of entries) {
     if (entry.type !== "file" || !entry.name.endsWith(".json")) continue;
     if (!realm.fs.contains(realm.root, entry.target) || !realm.fs.contains(dir, entry.target)) continue;
+    seen.add(entry.name);
+    const version = String(entry.version ?? "");
+    const size = String(entry.size ?? "");
+    const memo = cache.byName.get(entry.name);
+    if (memo !== undefined && memo.version === version && memo.size === size) {
+      if (memo.summary !== undefined) summaries.push(memo.summary);
+      continue;
+    }
+    let summary: BackupSummary | undefined;
     try {
       const file = await readVersionedFile(realm.fs, entry.target, BACKUP_READ_MAX_BYTES);
       const bundle = asBackupBundle(JSON.parse(file.content) as unknown);
-      if (bundle === undefined) continue;
-      summaries.push({
-        path: `${BACKUP_DIR}/${entry.name}`,
-        kind: bundle.kind,
-        createdAt: bundle.createdAt,
-        counts: bundle.counts,
-        hashShort: bundle.hash.slice(0, 8),
-      });
+      if (bundle !== undefined) {
+        summary = {
+          path: `${BACKUP_DIR}/${entry.name}`,
+          kind: bundle.kind,
+          createdAt: bundle.createdAt,
+          counts: bundle.counts,
+          hashShort: bundle.hash.slice(0, 8),
+        };
+      }
     } catch {
-      continue;
+      summary = undefined;
     }
+    cache.byName.set(entry.name, { version, size, summary });
+    if (summary !== undefined) summaries.push(summary);
+  }
+  for (const name of [...cache.byName.keys()]) {
+    if (!seen.has(name)) cache.byName.delete(name);
   }
   return summaries.sort((left, right) => right.createdAt - left.createdAt);
 }
+
+interface BackupSummaryCacheEntry {
+  readonly version: string;
+  readonly size: string;
+  readonly summary: BackupSummary | undefined;
+}
+
+interface BackupSummaryCache {
+  readonly cwd: string;
+  readonly byName: Map<string, BackupSummaryCacheEntry>;
+}
+
+const backupSummaryCache = new WeakMap<object, BackupSummaryCache>();
 
 /** 按相对路径读取一份备份:非法路径 403,坏 JSON/坏结构 400. */
 export async function loadBackupFile(realm: BackupRealm, relPath: string): Promise<BackupBundle> {

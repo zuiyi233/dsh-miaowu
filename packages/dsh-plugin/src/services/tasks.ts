@@ -13,7 +13,7 @@ import {
   type WorkspaceRealm,
   type WorkspaceRouteOptions,
 } from "../workspace-route.js";
-import { registerWorkspaceExtension } from "./registry.js";
+import { notifyWorkspaceBeforeWrite, registerWorkspaceExtension } from "./registry.js";
 
 /**
  * 功能 B2 candidate staging + B3 run/step/checkpoint 共享底座.
@@ -61,6 +61,24 @@ export interface TaskRun {
 }
 
 export type RunSummary = Omit<TaskRun, "checkpoint">;
+
+export type CandidateAction = "confirm" | "reject" | "amend" | "apply";
+
+export interface RunPayload extends TaskRun {
+  readonly availableActions: readonly RunStatus[];
+}
+
+export interface RunSummaryPayload extends RunSummary {
+  readonly availableActions: readonly RunStatus[];
+}
+
+export interface StepPayload extends TaskStep {
+  readonly availableActions: readonly StepStatus[];
+}
+
+export interface CandidatePayload extends Candidate {
+  readonly availableActions: readonly CandidateAction[];
+}
 
 export interface Candidate {
   readonly id: string;
@@ -150,6 +168,21 @@ export function isLegalStepTransition(from: StepStatus, to: StepStatus): boolean
   return STEP_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
+/** 服务端唯一真源：按钮能做什么由状态机决定，前端不再复制转移表。 */
+export function availableRunActions(status: RunStatus): readonly RunStatus[] {
+  return [...RUN_TRANSITIONS[status]];
+}
+
+export function availableStepActions(status: StepStatus): readonly StepStatus[] {
+  return [...STEP_TRANSITIONS[status]];
+}
+
+export function availableCandidateActions(status: CandidateStatus): readonly CandidateAction[] {
+  if (status === "proposed") return ["confirm", "reject", "amend"];
+  if (status === "confirmed") return ["apply", "reject", "amend"];
+  return [];
+}
+
 /** 候选状态机:proposed 可确认/拒绝/修订;confirmed 可应用/拒绝/修订;终态不可动. */
 export function isLegalCandidateTransition(from: CandidateStatus, to: CandidateStatus): boolean {
   if (from === to) return true;
@@ -162,6 +195,22 @@ export function summarizeRun(run: TaskRun): RunSummary {
   const { checkpoint: _dropped, ...rest } = run;
   void _dropped;
   return rest;
+}
+
+export function runPayload(run: TaskRun): RunPayload {
+  return { ...run, availableActions: availableRunActions(run.status) };
+}
+
+export function runSummaryPayload(run: TaskRun): RunSummaryPayload {
+  return { ...summarizeRun(run), availableActions: availableRunActions(run.status) };
+}
+
+export function stepPayload(step: TaskStep): StepPayload {
+  return { ...step, availableActions: availableStepActions(step.status) };
+}
+
+export function candidatePayload(candidate: Candidate): CandidatePayload {
+  return { ...candidate, availableActions: availableCandidateActions(candidate.status) };
 }
 
 export function parseListLimit(raw: string | null): number {
@@ -426,6 +475,8 @@ export async function commitFileCandidate(
     if (!(error instanceof WorkspaceHttpError) || error.status !== 404) throw error;
     baseVersion = undefined;
   }
+  // 候选应用同样是整文件覆盖，写前快照失败即中止，避免无安全网的落盘。
+  await notifyWorkspaceBeforeWrite({ realm, path: rawTarget, reason: "candidate-apply" });
   const outcome = baseVersion === undefined
     ? await realm.fs.writeText(target, content, undefined, undefined, sandboxFor(realm) as never)
     : await realm.fs.writeText(
@@ -552,7 +603,7 @@ async function handleTasksRequest(
       const run = createRunRecord(kind, meta);
       const runs = await loadRuns(realm);
       await saveRuns(realm, [...runs, run]);
-      send(response, 200, { run: summarizeRun(run) });
+      send(response, 200, { run: runSummaryPayload(run) });
       return true;
     }
     if (request.method === "GET" && rest.length === 1 && rest[0] === "runs") {
@@ -564,7 +615,7 @@ async function handleTasksRequest(
         && (statuses === undefined || statuses.includes(run.status))
       );
       const items = filtered.slice(0, parseListLimit(url.searchParams.get("limit")));
-      send(response, 200, { runs: items.map(summarizeRun), total: filtered.length });
+      send(response, 200, { runs: items.map(runSummaryPayload), total: filtered.length });
       return true;
     }
     if (request.method === "GET" && rest.length === 1 && rest[0] === "resume") {
@@ -573,14 +624,14 @@ async function handleTasksRequest(
       const rawStatuses = parseStatusList(url.searchParams.get("status"), RUN_STATUSES);
       const found = selectResumeRun(runs, kind, rawStatuses ?? ["paused", "failed"]);
       if (found === undefined) throw new WorkspaceHttpError(404, "没有可恢复的任务。");
-      send(response, 200, { run: found });
+      send(response, 200, { run: runPayload(found) });
       return true;
     }
     if (request.method === "GET" && rest.length === 2 && rest[0] === "run") {
       const runs = await loadRuns(realm);
       const found = runs.find((run) => run.id === rest[1]);
       if (found === undefined) throw new WorkspaceHttpError(404, "任务不存在。");
-      send(response, 200, { run: found });
+      send(response, 200, { run: runPayload(found) });
       return true;
     }
     if (request.method === "POST" && rest.length === 3 && rest[0] === "run" && rest[2] === "step") {
@@ -594,7 +645,7 @@ async function handleTasksRequest(
       const step: TaskStep = { ordinal: found.steps.length, kind, status: "pending", updatedAt: now };
       const next: TaskRun = { ...found, steps: [...found.steps, step], updatedAt: now };
       await saveRuns(realm, replaceRun(runs, next));
-      send(response, 200, { step });
+      send(response, 200, { step: stepPayload(step) });
       return true;
     }
     if (request.method === "POST" && rest.length === 5 && rest[0] === "run" && rest[2] === "step" && rest[4] === "status") {
@@ -612,7 +663,7 @@ async function handleTasksRequest(
       if (step === undefined) throw new WorkspaceHttpError(404, "步骤不存在。");
       const nextStatus = status as StepStatus;
       if (step.status === nextStatus) {
-        send(response, 200, { step, idempotentReplay: true });
+        send(response, 200, { step: stepPayload(step), idempotentReplay: true });
         return true;
       }
       if (!isLegalStepTransition(step.status, nextStatus)) {
@@ -631,7 +682,7 @@ async function handleTasksRequest(
         updatedAt: now,
       };
       await saveRuns(realm, replaceRun(runs, next));
-      send(response, 200, { step: nextStep });
+      send(response, 200, { step: stepPayload(nextStep) });
       return true;
     }
     if (request.method === "POST" && rest.length === 3 && rest[0] === "run" && rest[2] === "checkpoint") {
@@ -643,7 +694,7 @@ async function handleTasksRequest(
       const now = Date.now();
       const next: TaskRun = { ...found, checkpoint: body.checkpoint, updatedAt: now };
       await saveRuns(realm, replaceRun(runs, next));
-      send(response, 200, { run: next });
+      send(response, 200, { run: runPayload(next) });
       return true;
     }
     if (request.method === "POST" && rest.length === 3 && rest[0] === "run" && rest[2] === "status") {
@@ -657,7 +708,7 @@ async function handleTasksRequest(
       if (found === undefined) throw new WorkspaceHttpError(404, "任务不存在。");
       const nextStatus = status as RunStatus;
       if (found.status === nextStatus) {
-        send(response, 200, { run: summarizeRun(found), idempotentReplay: true });
+        send(response, 200, { run: runSummaryPayload(found), idempotentReplay: true });
         return true;
       }
       if (!isLegalRunTransition(found.status, nextStatus)) {
@@ -672,7 +723,7 @@ async function handleTasksRequest(
         resumeCount: resumed ? found.resumeCount + 1 : found.resumeCount,
       };
       await saveRuns(realm, replaceRun(runs, next));
-      send(response, 200, { run: summarizeRun(next) });
+      send(response, 200, { run: runSummaryPayload(next) });
       return true;
     }
     if (request.method === "POST" && rest.length === 3 && rest[0] === "run" && rest[2] === "event") {
@@ -705,7 +756,7 @@ async function handleTasksRequest(
         target: requireString(body.target),
         runId: requireString(body.runId),
       });
-      send(response, 200, { candidate });
+      send(response, 200, { candidate: candidatePayload(candidate) });
       return true;
     }
     if (request.method === "GET" && rest.length === 1 && rest[0] === "candidates") {
@@ -717,7 +768,7 @@ async function handleTasksRequest(
         statuses.includes(item.status) && (kind === undefined || kind === "" || item.kind === kind)
       );
       const list = filtered.slice(0, parseListLimit(url.searchParams.get("limit")));
-      send(response, 200, { candidates: list, total: filtered.length });
+      send(response, 200, { candidates: list.map(candidatePayload), total: filtered.length });
       return true;
     }
     if (request.method === "POST" && rest.length === 3 && rest[0] === "candidates" && rest[2] === "confirm") {
@@ -725,7 +776,7 @@ async function handleTasksRequest(
       const found = items.find((item) => item.id === rest[1]);
       if (found === undefined) throw new WorkspaceHttpError(404, "候选不存在。");
       if (found.status === "confirmed") {
-        send(response, 200, { candidate: found, idempotentReplay: true });
+        send(response, 200, { candidate: candidatePayload(found), idempotentReplay: true });
         return true;
       }
       if (!isLegalCandidateTransition(found.status, "confirmed")) {
@@ -739,7 +790,7 @@ async function handleTasksRequest(
         decidedBy: requireString(body.decidedBy),
       };
       await saveCandidates(realm, items.map((item) => (item.id === next.id ? next : item)));
-      send(response, 200, { candidate: next });
+      send(response, 200, { candidate: candidatePayload(next) });
       return true;
     }
     if (request.method === "POST" && rest.length === 3 && rest[0] === "candidates" && rest[2] === "reject") {
@@ -747,7 +798,7 @@ async function handleTasksRequest(
       const found = items.find((item) => item.id === rest[1]);
       if (found === undefined) throw new WorkspaceHttpError(404, "候选不存在。");
       if (found.status === "rejected") {
-        send(response, 200, { candidate: found, idempotentReplay: true });
+        send(response, 200, { candidate: candidatePayload(found), idempotentReplay: true });
         return true;
       }
       if (!isLegalCandidateTransition(found.status, "rejected")) {
@@ -761,7 +812,7 @@ async function handleTasksRequest(
         decidedBy: requireString(body.decidedBy),
       };
       await saveCandidates(realm, items.map((item) => (item.id === next.id ? next : item)));
-      send(response, 200, { candidate: next });
+      send(response, 200, { candidate: candidatePayload(next) });
       return true;
     }
     if (request.method === "POST" && rest.length === 3 && rest[0] === "candidates" && rest[2] === "apply") {
@@ -773,7 +824,7 @@ async function handleTasksRequest(
         await saveCandidates(realm, items.map((item) => (item.id === next.id ? next : item)));
       }
       send(response, 200, {
-        candidate: next,
+        candidate: candidatePayload(next),
         ...(idempotentReplay ? { idempotentReplay: true } : {}),
         ...(next.writtenPath !== undefined ? { writtenPath: next.writtenPath } : {}),
         ...(next.writtenVersion !== undefined ? { writtenVersion: next.writtenVersion } : {}),
@@ -806,7 +857,7 @@ async function handleTasksRequest(
         ...items.map((item) => (item.id === previous.id ? previous : item)),
         revised,
       ]);
-      send(response, 200, { candidate: revised, previous });
+      send(response, 200, { candidate: candidatePayload(revised), previous: candidatePayload(previous) });
       return true;
     }
     send(response, 404, { error: "Tasks route not found." });

@@ -240,6 +240,7 @@ export const WORKBENCH_MODES = ["story", "drama", "game", "video"] as const;
 export const EDITOR_MODES = ["preview", "source", "production"] as const;
 export const GAME_FLOAT_ID = "game-studio";
 export const VIDEO_FLOAT_ID = "video-studio";
+export const DRAMA_PRODUCTION_FLOAT_ID = "drama-production";
 
 export function groupForPath(path: string): string {
   if (path === "short-drama.json") return "项目";

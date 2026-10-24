@@ -227,6 +227,23 @@ describe("三类备份创建", () => {
     expect(verifyBundleHash(bundle as BackupBundle)).toBe(true);
   });
 
+  it("备份摘要按文件版本增量缓存：重复列表不重读，新增备份只读新文件", async () => {
+    const { realm } = setup(SEED);
+    await createBackup(realm, "bundle", "正文", 1_000_000, Date.UTC(2026, 8, 5));
+    const readBytes = vi.mocked(realm.fs.readBytes);
+    await listBackups(realm);
+    const firstReads = readBytes.mock.calls.length;
+    expect(firstReads).toBeGreaterThan(0);
+    await listBackups(realm);
+    expect(readBytes.mock.calls.length).toBe(firstReads);
+    await createBackup(realm, "snapshot", "大纲", 1_000_000, Date.UTC(2026, 8, 5, 0, 0, 1));
+    const beforeSecondList = readBytes.mock.calls.length;
+    const summaries = await listBackups(realm);
+    expect(summaries).toHaveLength(2);
+    // 只解析新增的那一份备份，旧摘要直接复用。
+    expect(readBytes.mock.calls.length).toBe(beforeSecondList + 1);
+  });
+
   it("整体备份收录 有声剧/ 下的项目文本", async () => {
     const { realm } = setup({ ...SEED, "有声剧/长夜行/project.json": '{"schemaVersion":1}' });
     const paths = (await collectScopeFiles(realm, undefined, 1_000_000)).map((file) => file.path);

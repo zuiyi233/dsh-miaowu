@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -261,7 +261,7 @@ describe("vault 路由（启用后 secrets 增删查）", () => {
     }
   });
 
-  it("写入只存密文、返回不含 value；点名可读、无名 400、未知名 404", async () => {
+  it("写入只存密文、返回不含 value；点名可读、无名列名称、未知名 404", async () => {
     const cwd = tempCwd();
     try {
       const created = await callVault(cwd, "POST", "/oh-story/vault/secrets", { name: "mimo.key-01", value: "sk-live-token" });
@@ -277,9 +277,29 @@ describe("vault 路由（启用后 secrets 增删查）", () => {
       expect(read.status).toBe(200);
       expect(bodyOf<{ name: string; value: string }>(read)).toEqual({ name: "mimo.key-01", value: "sk-live-token" });
       const noName = await callVault(cwd, "GET", "/oh-story/vault/secrets");
-      expect(noName.status).toBe(400);
+      expect(noName.status).toBe(200);
+      expect(bodyOf<{ names: string[] }>(noName).names).toEqual(["mimo.key-01"]);
       const missing = await callVault(cwd, "GET", "/oh-story/vault/secrets?name=nope");
       expect(missing.status).toBe(404);
+    } finally {
+      cleanup(cwd);
+    }
+  });
+
+  it("无 name 只返回排序后的名称，不含明文；空库不创建文件", async () => {
+    const cwd = tempCwd();
+    try {
+      const empty = await callVault(cwd, "GET", "/oh-story/vault/secrets");
+      expect(empty.status).toBe(200);
+      expect(bodyOf<{ enabled: boolean; names: string[] }>(empty)).toEqual({ enabled: true, names: [] });
+      expect(existsSync(join(cwd, ".oh-story"))).toBe(false);
+      await callVault(cwd, "POST", "/oh-story/vault/secrets", { name: "zeta", value: "z-value" });
+      await callVault(cwd, "POST", "/oh-story/vault/secrets", { name: "alpha", value: "a-value" });
+      const listed = await callVault(cwd, "GET", "/oh-story/vault/secrets");
+      const body = bodyOf<{ enabled: boolean; names: string[] }>(listed);
+      expect(Object.keys(body).sort()).toEqual(["enabled", "names"]);
+      expect(body.names).toEqual(["alpha", "zeta"]);
+      expect(JSON.stringify(body)).not.toContain("value");
     } finally {
       cleanup(cwd);
     }

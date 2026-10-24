@@ -54,6 +54,7 @@ import {
   GROUP_ORDER,
   WORKBENCH_MODES,
   EDITOR_MODES,
+  DRAMA_PRODUCTION_FLOAT_ID,
   GAME_FLOAT_ID,
   VIDEO_FLOAT_ID,
   json,
@@ -1053,6 +1054,40 @@ export function CreativeWorkbench({
     </div>;
   }
 
+  const productionPanel = productionAvailable && episodeProduction !== undefined
+    ? <DramaProductionView
+        sessionId={sessionId}
+        production={episodeProduction}
+        reviewDocument={reviewDocument}
+        sessionRunning={sessionRunning}
+        queue={productionQueue}
+        section={productionSection}
+        selectedId={productionSelectedId}
+        jobs={productionJobs}
+        versions={productionVersions}
+        libraryVersions={productionLibrary}
+        selections={productionSelections}
+        manualReferences={productionReferences}
+        sequence={productionSequence}
+        canvas={productionCanvas}
+        viewport={productionViewport}
+        onSectionChange={setProductionSection}
+        onSelect={setProductionSelectedId}
+        onNavigate={navigateProductionTarget}
+        onJobsChange={setProductionJobs}
+        onSelectionsChange={setProductionSelections}
+        onManualReferencesChange={setProductionReferences}
+        onOpenMedia={(path) => { revealPath(path); }}
+        onSequenceChange={setProductionSequence}
+        onCanvasChange={setProductionCanvas}
+        onViewportChange={setProductionViewport}
+        onDispatchPrompt={sendProductionPrompt}
+        onCancelTurn={cancelProduction}
+        onRemoveQueued={removeQueuedProduction}
+        onRefresh={reload}
+      />
+    : undefined;
+
   return <div ref={surfaceRef} className="oh-story-split-surface" data-open="true" data-workbench={workbench}>
     <style>{styles}</style>
     {(workbench === "game" || workbench === "video") && <div className="oh-game-mobile-switcher" role="tablist" aria-label={workbench === "game" ? "窄屏游戏工作台" : "窄屏视频工作台"}>
@@ -1214,6 +1249,14 @@ export function CreativeWorkbench({
           {(dirty || saving) && selected !== undefined && <button className="oh-story-save" type="button" disabled={saving || buffer?.missing === true} onClick={() => { void savePath(selected); }}>
             {saving ? "保存中…" : "保存"}
           </button>}
+          {editorMode === "production" && productionPanel !== undefined && <button
+            className="oh-story-save"
+            type="button"
+            title={floats[DRAMA_PRODUCTION_FLOAT_ID] === undefined ? "将生产视图拖出为浮窗" : "将生产视图放回工作台"}
+            aria-label={floats[DRAMA_PRODUCTION_FLOAT_ID] === undefined ? "将生产视图拖出为浮窗" : "将生产视图放回工作台"}
+            aria-pressed={floats[DRAMA_PRODUCTION_FLOAT_ID] !== undefined}
+            onClick={() => { toggleStudioFloat(DRAMA_PRODUCTION_FLOAT_ID); }}
+          >⧉</button>}
         </div>
       </header>
       {activity !== undefined && activityPath !== undefined && activityPath === selected && <div className="oh-story-stream" data-stage={activity.stage} role="status" aria-live="polite">● {activity.stage === "running" ? "Agent 正在应用修改" : "Agent 正在生成文件内容"}</div>}
@@ -1246,38 +1289,10 @@ export function CreativeWorkbench({
             });
             setSelected(workspace === undefined ? undefined : preferredWorkbenchFile(workspace.files, workbench, workspace.bookDirectories));
           }}>放弃本地草稿</button></div>
-        : editorMode === "production" && productionAvailable && episodeProduction !== undefined
-          ? <DramaProductionView
-              sessionId={sessionId}
-              production={episodeProduction}
-              reviewDocument={reviewDocument}
-              sessionRunning={sessionRunning}
-              queue={productionQueue}
-              section={productionSection}
-              selectedId={productionSelectedId}
-              jobs={productionJobs}
-              versions={productionVersions}
-              libraryVersions={productionLibrary}
-              selections={productionSelections}
-              manualReferences={productionReferences}
-              sequence={productionSequence}
-              canvas={productionCanvas}
-              viewport={productionViewport}
-              onSectionChange={setProductionSection}
-              onSelect={setProductionSelectedId}
-              onNavigate={navigateProductionTarget}
-              onJobsChange={setProductionJobs}
-              onSelectionsChange={setProductionSelections}
-              onManualReferencesChange={setProductionReferences}
-              onOpenMedia={(path) => { revealPath(path); }}
-              onSequenceChange={setProductionSequence}
-              onCanvasChange={setProductionCanvas}
-              onViewportChange={setProductionViewport}
-              onDispatchPrompt={sendProductionPrompt}
-              onCancelTurn={cancelProduction}
-              onRemoveQueued={removeQueuedProduction}
-              onRefresh={reload}
-            />
+        : editorMode === "production" && productionPanel !== undefined
+          ? floats[DRAMA_PRODUCTION_FLOAT_ID] === undefined
+            ? productionPanel
+            : <div className="oh-story-editor-empty">生产视图在浮窗中。<button type="button" onClick={() => { setFloat(DRAMA_PRODUCTION_FLOAT_ID, undefined); }}>放回工作台</button></div>
         : editorMode === "view" && selectedViewer !== undefined && selected !== undefined
           ? <FileViewerHost viewer={selectedViewer} sessionId={sessionId} path={selected} content={buffer.content} onClose={() => { setEditorMode("preview"); }} />
         : previewable && editorMode === "preview"
@@ -1343,5 +1358,16 @@ export function CreativeWorkbench({
       </aside>;
     })()}
     </>}
+    {floats[DRAMA_PRODUCTION_FLOAT_ID] !== undefined && productionPanel !== undefined && workbench === "drama" && (() => {
+      const geometry = floats[DRAMA_PRODUCTION_FLOAT_ID];
+      if (geometry === undefined) return null;
+      return <FreeWindow
+        panelId={DRAMA_PRODUCTION_FLOAT_ID}
+        title="短剧生产（浮窗）"
+        geometry={geometry}
+        onMove={(panelId, next) => { setFloat(panelId, next); }}
+        onDock={(panelId) => { setFloat(panelId, undefined); }}
+      >{productionPanel}</FreeWindow>;
+    })()}
   </div>;
 }

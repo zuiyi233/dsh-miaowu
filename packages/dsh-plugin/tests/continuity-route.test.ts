@@ -2,7 +2,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Context } from "@deepseek-ai/cordis";
 import type { FileSystem, FsDirEntry, FsInfo, FsTarget, FsVersion, FsWriteIntent, FsWriteOutcome } from "@deepseek-ai/dsh-fs";
 import { describe, expect, it } from "vitest";
-import { handleContinuityRequest } from "../src/services/continuity-route.js";
+import { handleContinuityRequest, registerContinuityPreWriteGuard } from "../src/services/continuity-route.js";
+import { notifyWorkspaceBeforeWrite } from "../src/services/registry.js";
+import type { WorkspaceRealm } from "../src/workspace-route.js";
 import type {
   ContinuityHandoffManifest,
   ContinuityOverview,
@@ -233,6 +235,35 @@ describe("GET /oh-story/continuity/handoff", () => {
   });
 });
 
+describe("POST /oh-story/continuity/handoff/verify", () => {
+  it("校验生成的清单且零写入；文件变化后报告 changed", async () => {
+    const harness = setup(workspaceSeed());
+    const generated = await callRoute(harness, "GET", "/oh-story/continuity/handoff");
+    expect(generated.status).toBe(200);
+    const manifest = generated.body as ContinuityHandoffManifest;
+    const writesBefore = harness.writes.length;
+    const clean = await callRoute(harness, "POST", "/oh-story/continuity/handoff/verify", { manifest });
+    expect(clean.status).toBe(200);
+    expect(asRecord(clean.body).ok).toBe(true);
+    expect(asRecord(clean.body).checksumOk).toBe(true);
+    expect(harness.writes).toHaveLength(writesBefore);
+
+    harness.store.set(keyOf("正文/第1章 开端.md"), { content: "# 改过", version: "manual" });
+    const changed = await callRoute(harness, "POST", "/oh-story/continuity/handoff/verify", { manifest });
+    expect(changed.status).toBe(200);
+    expect(asRecord(changed.body).ok).toBe(false);
+    expect(asRecord(changed.body).files).toContainEqual({ path: "正文/第1章 开端.md", status: "changed" });
+    expect(harness.writes).toHaveLength(writesBefore);
+  });
+
+  it("结构非法返回 400", async () => {
+    const harness = setup(workspaceSeed());
+    const result = await callRoute(harness, "POST", "/oh-story/continuity/handoff/verify", { manifest: { schemaVersion: 1 } });
+    expect(result.status).toBe(400);
+    expect(harness.writes).toHaveLength(0);
+  });
+});
+
 describe("POST /oh-story/continuity/snapshot", () => {
   it("缺少 confirm 时 400 且不写入", async () => {
     const harness = setup(workspaceSeed());
@@ -270,5 +301,29 @@ describe("未知路由", () => {
     expect(unknown.handled).toBe(false);
     const wrongMethod = await callRoute(harness, "GET", "/oh-story/continuity/snapshot");
     expect(wrongMethod.handled).toBe(false);
+  });
+});
+
+describe("高风险写前快照守卫", () => {
+  it("注册后写前通知会先落一份备份，重复注册复用同一监听", async () => {
+    const harness = setup(workspaceSeed());
+    const realm = {
+      fs: harness.fs as unknown as FileSystem,
+      cwd: CWD,
+      root: targetOf(CWD),
+    } as unknown as WorkspaceRealm;
+    const dispose = registerContinuityPreWriteGuard(2 * 1024 * 1024);
+    expect(registerContinuityPreWriteGuard(2 * 1024 * 1024)).toBe(dispose);
+    try {
+      await notifyWorkspaceBeforeWrite({
+        realm,
+        path: "正文/第1章 开端.md",
+        reason: "history-rollback",
+      });
+    } finally {
+      dispose();
+    }
+    const backups = harness.writes.filter((path) => path.includes("/.oh-story/backup/"));
+    expect(backups).toHaveLength(1);
   });
 });

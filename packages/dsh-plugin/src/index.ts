@@ -57,7 +57,7 @@ export async function apply(context: Context, config: Config = {}): Promise<void
   registerOhStoryProductionTool(context);
   registerOhStoryTaskTool(context);
   await registerOhStoryRoleTool(context);
-  registerWorkspaceServices();
+  registerWorkspaceServices({ maxBytes: config.editorMaxBytes ?? 2_097_152 });
   runStartupPrecheck(context);
   registerWorkspaceRoute(context, { maxBytes: config.editorMaxBytes ?? 2_097_152, trustedHosts });
   // Register the bundled media adapters for this host up front so the first

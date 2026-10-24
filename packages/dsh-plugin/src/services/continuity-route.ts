@@ -7,12 +7,14 @@ import {
   WorkspaceHttpError,
   type WorkspaceRouteOptions,
 } from "../workspace-route.js";
-import { registerWorkspaceExtension } from "./registry.js";
+import { onWorkspaceBeforeWrite, registerWorkspaceExtension } from "./registry.js";
 import { CONTINUITY_ROUTES } from "./continuity-contract.js";
 import {
   buildContinuityHandoff,
   buildContinuityOverview,
   createContinuitySnapshot,
+  snapshotBeforeHighRiskWrite,
+  verifyContinuityHandoff,
 } from "./continuity.js";
 
 /**
@@ -43,6 +45,13 @@ export async function handleContinuityRequest(
       send(response, 200, await buildContinuityHandoff(realm, options.maxBytes));
       return true;
     }
+    if (url.pathname === CONTINUITY_ROUTES.handoffVerify && request.method === "POST") {
+      // 校验只读工作区；清单本身可能有数千文件，不能套用快照的 64 KB 小体限。
+      const body = await jsonBody(request, options.maxBytes);
+      const realm = await workspaceRealm(context, url);
+      send(response, 200, await verifyContinuityHandoff(realm, body.manifest, options.maxBytes));
+      return true;
+    }
     if (url.pathname === CONTINUITY_ROUTES.snapshot && request.method === "POST") {
       const body = await jsonBody(request, BODY_LIMIT);
       if (body.confirm !== true) {
@@ -65,6 +74,22 @@ export async function handleContinuityRequest(
 }
 
 registerWorkspaceExtension({ name: "continuity", handle: handleContinuityRequest });
+
+let preWriteGuard: (() => void) | undefined;
+
+/** 由插件入口在拿到 editorMaxBytes 后调用；重复调用复用同一个监听。 */
+export function registerContinuityPreWriteGuard(maxBytes: number): () => void {
+  if (preWriteGuard === undefined) {
+    const dispose = onWorkspaceBeforeWrite(async (event) => {
+      await snapshotBeforeHighRiskWrite(event.realm, maxBytes);
+    });
+    preWriteGuard = () => {
+      dispose();
+      preWriteGuard = undefined;
+    };
+  }
+  return preWriteGuard;
+}
 
 export function registerContinuityExtension(): void {
   // 扩展在模块顶层注册，保留具名导出供测试与入口显式引用。

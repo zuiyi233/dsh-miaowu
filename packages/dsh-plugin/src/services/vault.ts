@@ -312,6 +312,18 @@ async function handleVaultStatus(
   send(response, 200, { enabled: true, ready: await isVaultReady(vaultPaths(realm.cwd)) });
 }
 
+/** 只列名称，不触碰主密钥、不回显任何明文；名称排序保证面板稳定。 */
+async function handleVaultListSecrets(
+  context: Context,
+  url: URL,
+  response: ServerResponse
+): Promise<void> {
+  const realm = await workspaceRealm(context, url);
+  const entries = await readSecretEntries(vaultPaths(realm.cwd).storePath);
+  const names = Object.keys(entries).sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+  send(response, 200, { enabled: true, names });
+}
+
 async function handleVaultCreateSecret(
   context: Context,
   request: IncomingMessage,
@@ -415,7 +427,11 @@ async function dispatchVaultRequest(
     return true;
   }
   if (kind === "secrets" && method === "GET") {
-    await handleVaultReadSecret(context, url, response);
+    if ((url.searchParams.get("name") ?? "") === "") {
+      await handleVaultListSecrets(context, url, response);
+    } else {
+      await handleVaultReadSecret(context, url, response);
+    }
     return true;
   }
   if (kind === "secrets" && method === "DELETE") {

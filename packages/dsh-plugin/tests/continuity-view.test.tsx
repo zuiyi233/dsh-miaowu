@@ -79,6 +79,7 @@ function render(overview: ContinuityOverview): string {
     onRefresh={() => undefined}
     onSnapshot={() => undefined}
     onHandoff={() => undefined}
+    onVerifyHandoff={() => undefined}
   />);
 }
 
@@ -96,6 +97,7 @@ describe("ContinuityView", () => {
     expect(html).toContain("第 13 章");
     expect(html).toContain("创建快照");
     expect(html).toContain("复制交接清单");
+    expect(html).toContain("校验交接清单");
   });
 
   it("列表为空时给出空状态且不报错", () => {
@@ -114,6 +116,7 @@ describe("ContinuityView", () => {
       onRefresh={() => undefined}
       onSnapshot={() => undefined}
       onHandoff={() => undefined}
+      onVerifyHandoff={() => undefined}
       handoffFallback={'{"schemaVersion":1}'}
     />);
     expect(html).toContain("可手动复制的交接清单");

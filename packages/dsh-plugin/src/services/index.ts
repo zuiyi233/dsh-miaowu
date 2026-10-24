@@ -12,7 +12,9 @@ import "./vault.js";
 import "./diagnostics-route.js";
 import "./continuity-route.js";
 import "./audiobook-route.js";
+import { registerContinuityPreWriteGuard } from "./continuity-route.js";
 
-export function registerWorkspaceServices(): void {
-  // Feature modules above register themselves on import; nothing else to mount here.
+export function registerWorkspaceServices(options: { readonly maxBytes?: number } = {}): void {
+  // 高风险写前快照使用与编辑器一致的单文件上限，避免配置不同导致误拒。
+  registerContinuityPreWriteGuard(options.maxBytes ?? 2_097_152);
 }

@@ -404,8 +404,24 @@ async function time(run) {
   return { ms: roundMs(performance.now() - started), value };
 }
 
-function measurement(id, label, timing, details) {
-  return { id, label, iterations: 1, ms: timing.ms, details };
+async function timeMedian(iterations, run) {
+  const samples = [];
+  let value;
+  for (let index = 0; index < iterations; index += 1) {
+    const timing = await time(run);
+    samples.push(timing.ms);
+    value = timing.value;
+  }
+  const sorted = [...samples].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+  return { ms: roundMs(median), value, samples };
+}
+
+function measurement(id, label, timing, details, iterations = 1) {
+  return { id, label, iterations, ms: timing.ms, details };
 }
 
 async function collectTextFiles(root, relativeDir, out) {
@@ -502,7 +518,7 @@ export async function measureWorkspace(root, corpus) {
     })
   );
 
-  const readHash = await time(async () => {
+  const readHash = await timeMedian(5, async () => {
     const digest = createHash("sha256");
     let chars = 0;
     for (const filePath of chapterPaths) {
@@ -518,8 +534,9 @@ export async function measureWorkspace(root, corpus) {
   measurements.push(
     measurement("read-hash-1m", "read+sha256 1M CJK chars", readHash, {
       chars: readHash.value.chars,
-      sha256: readHash.value.sha256
-    })
+      sha256: readHash.value.sha256,
+      samplesMs: readHash.samples
+    }, 5)
   );
 
   const runsPath = path.join(root, ".oh-story", "tasks", "runs.json");

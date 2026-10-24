@@ -11,6 +11,7 @@ import "./bookshelf-feature.js";
 import "./diagnostics-feature.js";
 import "./continuity-feature.js";
 import "./audiobook-feature.js";
+import "./vault-feature.js";
 
 export function registerClientFeatures(): void {
   // Feature modules above register themselves on import; nothing else to mount here.

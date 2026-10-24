@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CONTINUITY_LEVEL_ORDER,
   type ContinuityHandoffManifest,
+  type ContinuityHandoffVerifyResult,
   type ContinuityLevel,
   type ContinuityOverview,
   type ContinuityRisk,
@@ -104,6 +105,7 @@ export interface ContinuityViewProps {
   readonly onRefresh: () => void;
   readonly onSnapshot: () => void;
   readonly onHandoff: () => void;
+  readonly onVerifyHandoff: () => void;
   readonly onReveal?: ((path: string, line: number, offset: number) => void) | undefined;
   readonly notice?: string | undefined;
   readonly error?: string | undefined;
@@ -117,6 +119,7 @@ export function ContinuityView({
   onRefresh,
   onSnapshot,
   onHandoff,
+  onVerifyHandoff,
   onReveal,
   notice,
   error,
@@ -135,6 +138,7 @@ export function ContinuityView({
         <button type="button" className="oh-diag-action" disabled={busy} onClick={onRefresh}>刷新</button>
         <button type="button" className="oh-diag-action" disabled={busy} onClick={onSnapshot}>创建快照</button>
         <button type="button" className="oh-diag-action" disabled={busy} onClick={onHandoff}>复制交接清单</button>
+        <button type="button" className="oh-diag-action" disabled={busy} onClick={onVerifyHandoff}>校验交接清单</button>
       </div>
     </div>
     <div className="oh-diag-chips" role="group" aria-label="风险汇总">
@@ -209,6 +213,7 @@ function ContinuityPanel({ sessionId, onReveal }: WorkbenchFeatureProps): JSX.El
   const [handoffFallback, setHandoffFallback] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState<string | undefined>(undefined);
   const requestId = useRef(0);
+  const handoffInputRef = useRef<HTMLInputElement | null>(null);
   const busy = pending !== undefined;
 
   const load = useCallback(async (signal?: AbortSignal): Promise<void> => {
@@ -291,8 +296,53 @@ function ContinuityPanel({ sessionId, onReveal }: WorkbenchFeatureProps): JSX.El
     }
   }, [sessionId]);
 
+  const verifyHandoff = useCallback(async (file: File): Promise<void> => {
+    setPending("verify-handoff");
+    setError(undefined);
+    setNotice(undefined);
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(await file.text()) as unknown;
+    } catch {
+      setError("交接清单不是合法 JSON。");
+      setPending(undefined);
+      return;
+    }
+    try {
+      const response = await fetch(endpoint("continuity/handoff/verify", sessionId), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ manifest }),
+      });
+      const result = await jsonOrThrow<ContinuityHandoffVerifyResult>(response);
+      const problems = result.files.filter((item) => item.status !== "match");
+      if (result.ok) {
+        setNotice(`交接清单校验通过：${String(result.checked)} 个文件全部匹配。`);
+      } else {
+        const details = problems.slice(0, 5).map((item) => `${item.path}（${item.status}）`).join("；");
+        const skipped = result.skipped.length === 0 ? "" : `；清单自身跳过 ${String(result.skipped.length)} 个文件`;
+        setNotice(`交接清单未通过：checksum ${result.checksumOk ? "一致" : "不一致"}，匹配 ${String(result.matched)}/${String(result.checked)}${details === "" ? "" : `；${details}`}${skipped}。`);
+      }
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "校验交接清单失败。");
+    } finally {
+      setPending(undefined);
+    }
+  }, [sessionId]);
+
   return <div className="oh-diag-panel">
     <style>{STYLES}</style>
+    <input
+      ref={handoffInputRef}
+      type="file"
+      accept="application/json,.json"
+      hidden
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (file !== undefined) void verifyHandoff(file);
+      }}
+    />
     {overview === undefined
       ? <div className="oh-diag-state">
         {error !== undefined
@@ -308,6 +358,7 @@ function ContinuityPanel({ sessionId, onReveal }: WorkbenchFeatureProps): JSX.El
         onRefresh={refresh}
         onSnapshot={() => { void snapshot(); }}
         onHandoff={() => { void handoff(); }}
+        onVerifyHandoff={() => { handoffInputRef.current?.click(); }}
         onReveal={onReveal}
         notice={notice}
         error={error}
