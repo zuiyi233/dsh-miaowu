@@ -114,6 +114,14 @@ mismatch or a missing heading.
    cd release && sha256sum dsh-miaowu-dsh-<version>.tgz > SHA256SUMS
    ```
 
+   Pack only after the release commit exists, and compare the tarball's
+   `package/lib/client.js` with `packages/dsh-plugin/lib/client.js`. A pack made
+   before a later fix keeps the old browser bundle even though the version and
+   tag look correct; 0.1.19 hit this and the stale tarball was rebuilt before
+   anything was uploaded. Normalize `SHA256SUMS` to `<hash>  <name>\n` (two
+   spaces, no `*`), because `release.mjs verify-manifest` compares it byte for
+   byte.
+
 3. On a fork `main` commit, create an annotated `miaowu-v<version>` tag and validate it:
 
    ```bash
