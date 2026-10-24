@@ -22,9 +22,9 @@
 | 备份三件套 | 小说 / 短剧面板 + `/oh-story/backup/*` | 随插件可用 | `.oh-story/backup/` |
 | 伏笔闭环 | 小说工作台面板 | 随插件可用 | `.oh-story/foreshadows.json`、`foreshadows-snooze.json` |
 | 书架 | 小说 / 短剧工作台面板 | 随插件可用 | `.oh-story/shelf.json` |
-| 可选凭据保险库 | HTTP 路由，无独立面板 | **默认关闭** | `.oh-story/vault/`；需 `DSH_MIAOWU_VAULT_ENABLED=1` |
+| 可选凭据保险库 | HTTP 路由 + 小说/短剧工作台「保险库」面板 | **默认关闭** | `.oh-story/vault/`；需 `DSH_MIAOWU_VAULT_ENABLED=1` |
 | 自诊断 | 小说 / 短剧工作台「自诊断」面板 + `/oh-story/diagnostics` | 随插件可用 | 六组只读检查、支持包、显式修复；状态盘点见 `.oh-story/` |
-| 连续性驾驶舱 | 小说 / 短剧工作台「驾驶舱」面板 + `/oh-story/continuity` | 随插件可用 | 今天视图、P0/P1/P2 风险、显式快照、可复制交接清单（manifest + SHA-256） |
+| 连续性驾驶舱 | 小说 / 短剧工作台「驾驶舱」面板 + `/oh-story/continuity` | 随插件可用 | 今天视图、P0/P1/P2 风险、显式快照、可复制交接清单与导入校验（manifest + SHA-256）、回滚 / 候选应用前自动创建创作树快照 |
 | 有声剧（N4-C） | 小说工作台「有声剧」面板 + `/oh-story/audiobook/*` | 需 TTS 服务；混音/字幕/M4B/发布包导出需 ffmpeg/ffprobe；外部素材生成需 ComfyUI 配置 | `有声剧/` 项目、脚本、音频、`素材/`、`封面/`、`字幕/`、`发布/`；`.oh-story/audiobook/` 缓存、时长、任务与导出临时目录；旁白 + 多角色、逐段指派、cue 时间轴、响度归一、M4B 与发布清单 |
 | `worldbuilding` / `publishing` / `finalize` | 三个自有 Skills | 随插件可用 | 通过 Skills 目录发现，`/worldbuilding` 等入口 |
 | ComfyUI 本地接入 | 短剧生产适配器 + `oh_story_comfyui` 工具 | 需外部配置 | 本机或局域网 ComfyUI 服务 + API-format 工作流；有声剧的外部素材生成复用同一工具（`ComfyUiMusicProvider`），未配置时素材生成路由返回 503 |
@@ -44,7 +44,8 @@
 
 - 「驾驶舱」面板调用 `GET /oh-story/continuity`，把书架、伏笔与 snooze、run / 候选、最近审计保存、备份新鲜度、历史文件、状态盘点异常、章节文件与 `追踪/_tracking-state.json` 聚合成「今天」视图：下一章、到期伏笔、暂停 / 失败 run、待确认候选、最近保存与最近备份。只读、无模型调用、不写 `~/.dsh` 或会话。
 - 确定性风险规则按 P0/P1/P2 分级：状态损坏或密钥库只有密文没有主密钥、schema 比插件新、多本书缺少或写坏 `.active-book`、追踪状态无法解析、失败 / 暂停的 run、待确认候选、到期伏笔、从未备份或超过 7 天未备份、追踪落后最新章节、最新章节没有历史快照、检索索引未建立、拆书 sidecar 缺失、回收站即将到期。每条风险在有文件可指向时给出可打开的相对路径，并附下一步；`正文/书名/` 与 `书名/正文/` 两种布局的候选会统一判定，多书一律不静默挑第一本。用户可编辑状态里出现的绝对路径 / `..` 会被过滤，不进入面板。
-- `POST /oh-story/continuity/snapshot` 是面板唯一写入动作，必须 `confirm: true`，只写 `.oh-story/backup/`：按当前书根补收 `书名/正文/` 布局，包含 `.oh-story` 状态、不含 vault 主密钥；超过单文件上限或达到 2000 文件截断时拒绝写入。`GET /oh-story/continuity/handoff` 生成项目交接清单（文本资产 + 选定 `.oh-story` 状态 + 排序后的 SHA-256 校验和），不可读 / 超限的状态文件列入 `skipped`，达到 2000 个文件上限时拒绝而不是静默截断。多书歧义时两者都返回 409，要求先写 `.active-book`。面板可复制该清单。
+- `POST /oh-story/continuity/snapshot` 是面板唯一写入动作，必须 `confirm: true`，只写 `.oh-story/backup/`：按当前书根补收 `书名/正文/` 布局，包含 `.oh-story` 状态、不含 vault 主密钥；超过单文件上限或达到 2000 文件截断时拒绝写入。`GET /oh-story/continuity/handoff` 生成项目交接清单（文本资产 + 选定 `.oh-story` 状态 + 排序后的 SHA-256 校验和），不可读 / 超限的状态文件列入 `skipped`，达到 2000 个文件上限时拒绝而不是静默截断；`POST /oh-story/continuity/handoff/verify` 导入该清单后逐文件复算 SHA-256 并复算 checksum，只读不写。多书歧义时快照与交接都返回 409，要求先写 `.active-book`。面板可复制清单、选择清单文件校验。
+- 历史回滚与候选应用是整文件覆盖：落盘前宿主写前钩子会按当前书自动创建一份创作树快照（10 分钟节流、并发共享、失败即 500 阻断），不重收 `.oh-story` 以避免历史 JSONL 增长导致必然失败；`.oh-story` 状态仍由手动整体快照保护。备份摘要按文件版本增量缓存，新增备份只解析新文件。
 - P2-A 结构评测骨架见 [EVALUATION.md](EVALUATION.md)：固定语料 + 确定性 rubric + 双版本对比 + badcase 清单，**不调用模型、不是发布门禁**。P2-B 原始原语基准见 [PERFORMANCE.md](PERFORMANCE.md)，明确不是插件级 UI SLO。
 
 ## 有声剧（N4-C）
@@ -89,6 +90,7 @@
 
 - Agent 用 `oh_story_task stage_candidate` 登记建议，**只登记、不写文件**；候选在「任务与候选」面板由人确认、修订、拒绝或应用，应用时才经文件写入并记录目标路径与版本。
 - run 有 `pending/running/awaiting_user/paused/completed/failed/cancelled` 状态与 step 进度；`oh_story_task checkpoint_run` 为长任务落检查点。恢复入口返回最近一个 `paused` 或 `failed` 的 run，并带上它的检查点与已走步骤。
+- run / step / candidate 的可用动作由服务端 `availableActions` 随响应下发，与状态机同源；面板不再维护第二张转移表。非法动作仍由路由以 409 拒绝。
 - 内置 `novel-chapter`、`drama-batch`、`game-content` 三个 recipe 只是通用底座示例；未命中 recipe 的 run 不会自动生成步骤。任务状态不替代 DSH 自己的运行记录与审批。
 
 ### 备份三件套
@@ -111,7 +113,8 @@
 ### 可选凭据保险库
 
 - AES-256-GCM；主密钥与密文都在工作区 `.oh-story/vault/`，文件权限收紧为仅当前用户。
-- **默认关闭**：只有启动 DSH 前设置 `DSH_MIAOWU_VAULT_ENABLED=1` 才启用；未启用时相关路由返回 403 且不落任何文件。开启后提供状态、读写密钥与原子轮换，没有独立工作台面板。
+- **默认关闭**：只有启动 DSH 前设置 `DSH_MIAOWU_VAULT_ENABLED=1` 才启用；未启用时相关路由返回 403 且不落任何文件。开启后提供状态、只列名称、按名读取、写入/更新、删除与原子轮换；小说/短剧工作台「保险库」面板默认只显示名称，明文只在显式「读取」后出现，列表接口不返回任何值。
+- 工作台面板只在 `DSH_MIAOWU_VAULT_ENABLED=1` 时提供写入、读取、删除与轮换；关闭时只显示开关说明，不渲染写入控件。
 - 不接管 `MIMO_API_KEY`、`FISH_API_KEY`、ComfyUI 或 DSH 的 Provider 凭据；这些仍走环境变量或 DSH 自身配置。保险库是给创作者自管附加密钥用的，不是 DSH 凭据存储的替代品。
 
 ## 创作流程
@@ -148,6 +151,7 @@
 
 - 三栏、分屏与浮动布局按会话存于浏览器存储的 `oh-story.layout.v1.<sessionId>`，不同会话互不串用；布局设置里的「重置」清空这些键。
 - 工作台开合选择按工作区路径记住，优先于「工作区里有没有创作项目」的默认判断；浏览器禁用站点数据时只在当前会话内生效。
+- 短剧生产视图（含「素材」「镜头」等 tab）可从编辑器头部「⧉」拖出为浮窗，浮窗内仍可切换 tab 与派发任务；放回后回到编辑器原位，浮窗几何随会话布局持久化。
 - 布局、画布视野、选中引用等都属于界面状态，不是创作事实；项目文件仍是唯一权威。
 
 ## 明确边界

@@ -42,7 +42,7 @@
 | 游戏 | [NovelToGame 0.6.1](https://github.com/zenstory-ai/novel-to-game/releases/tag/v0.6.1) · 7 Skills · 《金瓶梅》ADV 可玩示例（18+） | `/novel-to-game quick`、`/game-build`、`/game-qa` |
 | 视频 | [video-recap-skills 0.6.2](https://github.com/zenstory-ai/video-recap-skills/releases/tag/v0.6.2) · 7 Skills（3 个用户入口） | `/video-recap`、`/video-script`、`/video-reference` |
 
-> 当前源码版本 **0.1.18**（2026-10-19）：0.1.18 的预构建包与 npm 包都尚未发布，最近可用的预构建包是 **v0.1.16**，npm 未发布（`@dsh-miaowu/dsh` 在 registry 返回 404）。默认安装固定使用 DeepSeek Harness `0.2.1-rc.3`；仍支持更早的 `0.2.0-rc.2`。变更见 [CHANGELOG.md](CHANGELOG.md) 与 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases)；两条可用安装路径见[安装](#安装)。升级步骤见常见问题[「升级到新版本后要做什么」](#升级到新版本后要做什么)。
+> 当前源码版本 **0.1.19**（2026-10-24）：0.1.19 的预构建包与 npm 包都尚未发布，最近可用的预构建包是 **v0.1.16**，npm 未发布（`@dsh-miaowu/dsh` 在 registry 返回 404）。默认安装固定使用 DeepSeek Harness `0.2.1-rc.3`；仍支持更早的 `0.2.0-rc.2`。变更见 [CHANGELOG.md](CHANGELOG.md) 与 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases)；两条可用安装路径见[安装](#安装)。升级步骤见常见问题[「升级到新版本后要做什么」](#升级到新版本后要做什么)。
 
 ## 四个工作台
 
@@ -104,7 +104,7 @@
 - **备份三件套**：作品包、快照、整体备份；恢复一律写入新目录、不覆盖原项目，离线 JSON 导入走同一套校验。媒体文件只跳过字节，整体备份不含 DSH 会话与 Provider 凭据；启用保险库时 full 备份只收 `vault/secrets.json` 这类文本/JSON 条目，**不含 `vault/master.key`**，没有单独备份的密钥就无法解密，请把主密钥按敏感文件另行保管。
 - **伏笔闭环**：埋设、按章提醒、回收状态机与 snooze；可从拆书 sidecar 只读导入。
 - **书架**：发现并管理多作品；归档只隐藏记录，30 天回收站与永久移除都不删除工作区文件。
-- **可选凭据保险库**：AES-256-GCM，默认关闭；只有设置 `DSH_MIAOWU_VAULT_ENABLED=1` 才启用，不接管 DSH 环境凭据。
+- **可选凭据保险库**：AES-256-GCM，默认关闭；只有设置 `DSH_MIAOWU_VAULT_ENABLED=1` 才启用，不接管 DSH 环境凭据。小说/短剧工作台提供「保险库」面板：默认只列名称，明文仅在显式读取后显示。
 - **三个自有 Skills**：`worldbuilding`（先建世界观）、`publishing`（投稿包与发行跟踪）、`finalize`（完结结算与伏笔回收门禁）。
 - **ComfyUI 本地接入**：短剧生产适配器与 `oh_story_comfyui` 工具，按 API-format 工作流的占位符调用本机 ComfyUI；未配置工作流时显式报错，不静默切换生图通道。
 - **喵呜小说工坊预设**：标准模式全能力加中文小说创作 persona，从源码 checkout 安装到 DSH 的 Agent 预设目录。
@@ -116,9 +116,9 @@
 
 ## 安装
 
-需要 Node.js 24+。**源码版本是 0.1.18，但 0.1.18 的预构建包与 npm 包都还没发布**：本仓库 GitHub Release 目前只有 `v0.1.16`，npm registry 上 `@dsh-miaowu/dsh` 返回 404（2026-10-20 核对）。现在有两条可用路径。
+需要 Node.js 24+。**源码版本是 0.1.19，但 0.1.19 的预构建包与 npm 包都还没发布**：本仓库 GitHub Release 目前只有 `v0.1.16`，npm registry 上 `@dsh-miaowu/dsh` 返回 404（2026-10-24 核对）。现在有两条可用路径。
 
-**推荐：从源码构建当前 0.1.18**（需要本机 pnpm，没有就先 `npm i -g pnpm`）
+**推荐：从源码构建当前 0.1.19**（需要本机 pnpm，没有就先 `npm i -g pnpm`）
 
 ```bash
 git clone https://github.com/zuiyi233/dsh-miaowu.git
@@ -126,13 +126,13 @@ cd dsh-miaowu
 pnpm install --frozen-lockfile
 pnpm --filter @dsh-miaowu/dsh build
 pnpm --filter @dsh-miaowu/dsh pack --pack-destination release
-npx -y --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile web add ./release/dsh-miaowu-dsh-0.1.18.tgz
+npx -y --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile web add ./release/dsh-miaowu-dsh-0.1.19.tgz
 npx -y @deepseek-ai/dsh@0.2.1-rc.3 web
 ```
 
-`pack` 在 `release/` 下产出 `dsh-miaowu-dsh-0.1.18.tgz`（`prepack` 会自动再构建一次）。已经在源码 checkout 里时跳过前两行；`dsh plugin add` 若不接受相对路径，换成该文件的绝对路径。
+`pack` 在 `release/` 下产出 `dsh-miaowu-dsh-0.1.19.tgz`（`prepack` 会自动再构建一次）。已经在源码 checkout 里时跳过前两行；`dsh plugin add` 若不接受相对路径，换成该文件的绝对路径。
 
-**快速试用：最近发布的预构建包 v0.1.16**（较旧，不含 0.1.17 / 0.1.18 的更新；这条命令会临时提供 pnpm，只装了 Node.js 的机器也能执行）
+**快速试用：最近发布的预构建包 v0.1.16**（较旧，不含 0.1.17–0.1.19 的更新；这条命令会临时提供 pnpm，只装了 Node.js 的机器也能执行）
 
 ```bash
 npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.16/dsh-miaowu-dsh-0.1.16.tgz &&
@@ -148,7 +148,7 @@ npx -y @deepseek-ai/dsh@0.2.1-rc.3 web
 <details>
 <summary>发布后可用：GitHub Release 预构建包与 npm 安装</summary>
 
-**现在没有 0.1.18 的预构建包，也没有 npm 包**（2026-10-20 检查：Release 资产 404，registry 404），不要把版本号套进旧链接，不存在的资产会 404。发布后到 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) 页复制 tarball 的完整下载地址；下一次发布的标签以 `miaowu-v` 开头，资产路径形如 `.../download/miaowu-v<version>/<asset>.tgz`，`<version>` 与 `<asset>` 都以页面显示为准。安装时把上面源码构建命令里的 `./release/dsh-miaowu-dsh-0.1.18.tgz` 换成该地址即可；npm 同理，确认 `@dsh-miaowu/dsh@<version>` 已发布后再替换包名。发布前请使用源码构建路径或 v0.1.16 预构建包。
+**现在没有 0.1.19 的预构建包，也没有 npm 包**（2026-10-24 检查：Release 资产 404，registry 404），不要把版本号套进旧链接，不存在的资产会 404。发布后到 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) 页复制 tarball 的完整下载地址；下一次发布的标签以 `miaowu-v` 开头，资产路径形如 `.../download/miaowu-v<version>/<asset>.tgz`，`<version>` 与 `<asset>` 都以页面显示为准。安装时把上面源码构建命令里的 `./release/dsh-miaowu-dsh-0.1.19.tgz` 换成该地址即可；npm 同理，确认 `@dsh-miaowu/dsh@<version>` 已发布后再替换包名。发布前请使用源码构建路径或 v0.1.16 预构建包。
 
 </details>
 
@@ -194,10 +194,10 @@ npx -y @deepseek-ai/dsh@0.2.1-rc.3 web
 <details>
 <summary>装进独立 profile，按需启动</summary>
 
-插件装进哪个 profile，那个 profile 的每个 Session 就都会加载创作 Skills。想让原版 `web` 保持干净，就把插件装进独立 profile。下面的命令在源码根目录执行，用的是上一节源码构建出的 0.1.18 tarball；想跳过构建，可换成 v0.1.16 的 Release 资产（相对路径换成 `https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.16/dsh-miaowu-dsh-0.1.16.tgz`）：
+插件装进哪个 profile，那个 profile 的每个 Session 就都会加载创作 Skills。想让原版 `web` 保持干净，就把插件装进独立 profile。下面的命令在源码根目录执行，用的是上一节源码构建出的 0.1.19 tarball；想跳过构建，可换成 v0.1.16 的 Release 资产（相对路径换成 `https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.16/dsh-miaowu-dsh-0.1.16.tgz`）：
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile story add ./release/dsh-miaowu-dsh-0.1.18.tgz
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile story add ./release/dsh-miaowu-dsh-0.1.19.tgz
 ```
 
 新 profile 默认没有界面。编辑 `~/.dsh/profiles/story/package.json`，把 `dsh.profile.bundles` 改成：
@@ -374,7 +374,9 @@ DSH 的 `plugin add` 内部需要 pnpm，单独运行 `npx @deepseek-ai/dsh ... 
 
 ### 升级到新版本后要做什么？
 
-按[安装](#安装)一节执行目标版本的命令：源码路径是 `git pull` 后重新 `build` + `pack`，再对新的 tarball 执行 `dsh plugin add`；预构建包目前只发布了 v0.1.16，0.1.17 / 0.1.18 只能走源码构建，后续版本改为使用 Releases 页上的 `miaowu-v*` 资产并复制页面给出的完整地址，不要手写版本号；npm 发布后才能直接安装 `@dsh-miaowu/dsh@<版本>`。装好后重启 DSH。安装与启动使用同一个宿主版本；当前支持范围见[安装](#安装)。Skills 与 Roles 随插件打包，无需在项目里重新部署。
+按[安装](#安装)一节执行目标版本的命令：源码路径是 `git pull` 后重新 `build` + `pack`，再对新的 tarball 执行 `dsh plugin add`；预构建包目前只发布了 v0.1.16，0.1.17–0.1.19 只能走源码构建，后续版本改为使用 Releases 页上的 `miaowu-v*` 资产并复制页面给出的完整地址，不要手写版本号；npm 发布后才能直接安装 `@dsh-miaowu/dsh@<版本>`。装好后重启 DSH。安装与启动使用同一个宿主版本；当前支持范围见[安装](#安装)。Skills 与 Roles 随插件打包，无需在项目里重新部署。
+
+0.1.19 收口可靠性：历史回滚与候选应用写盘前自动创建创作树快照，交接清单可在驾驶舱导入校验，备份摘要按文件增量缓存；同时补齐保险库只读面板、服务端下发任务可用动作与短剧生产浮窗。不需要迁移，重装后重启即可。
 
 本仓库 0.1.17 / 0.1.18 跟随上游 Oh Story 0.9.0 与 NovelToGame 0.6.0，并包含插件侧 P2/P3 界面修复；逐项变更见 [CHANGELOG.md](CHANGELOG.md)。
 

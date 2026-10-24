@@ -1,15 +1,22 @@
 # dsh-miaowu 待开发清单
 
 > 来源：参考项目（DSH-better-sidebar / NarraLume / Scriverse / oh-story-dsh 上游）借鉴分析 + `docs/小说全流程覆盖评估.md` 差距核查
-> 基线：dsh-miaowu v0.1.6（oh-story-dsh fork + rebrand，2026-09-04）· 更新日期：2026-09-05 · 复核日期：2026-10-21
+> 基线：dsh-miaowu v0.1.6（oh-story-dsh fork + rebrand，2026-09-04）· 更新日期：2026-09-05 · 复核日期：2026-10-24
 > 实施状态：✅ 已完成（2026-09-05，四个 Phase 全部落库，`pnpm verify` 全绿）· ⏳ 部分/简化交付 · ⬜ 未做
 > 参考素材：`参考项目/` 目录下各调研文档（已被 git 忽略，仅本机留存）
+
+## 2026-10-24 N3-2 / N2 可靠性收尾
+
+- **N3-2 已交付**：保险库 `GET /oh-story/vault/secrets` 无 `name` 时只返回排序后的条目名（不读主密钥、不返回密文），工作台新增默认关闭说明的「保险库」面板；任务 run/step/candidate 的 `availableActions` 改由服务端状态机随响应下发，前端删除重复转移表；短剧生产视图可拖出独立浮窗并复用会话/工作区布局持久化；`read-hash-1m` 改为 5 次取中位数（预算仍 500 ms）；`native-dsh-smoke.ts` 的 41 个类型错误清零并纳入 `pnpm typecheck:lint`，冒烟新增 vault 默认关闭、短剧浮窗、availableActions 与交接校验探测；客户端包体预算按决策放宽到 600,000 字节并打印实际大小（不拆包）。
+- **N2 已交付**：新增 `onWorkspaceBeforeWrite` 写前钩子并接入历史回滚与候选应用：按 `realm.fs` 10 分钟节流、并发共享 in-flight、非创作工作区与多书歧义静默跳过，快照失败以 500 阻断写入；自动快照只收创作树（不重收 `.oh-story`，避免历史 JSONL 增长把快照拖成必然 413）。`POST /oh-story/continuity/handoff/verify` 与驾驶舱「校验交接清单」对导入的 manifest 逐文件复算 SHA-256 并复算 checksum，零写入。备份摘要改为按文件 version/size 增量缓存，新增备份只解析新文件。
+- **验证**：`pnpm verify` 退出 0（85 个测试文件 / 974 项；ESLint、两套 tsc、五项资产 parity、DSH boundary、release 25/25、upstream-update 3/3、sync-factory 16/16、evaluation 7/7、performance 6/6、build）；浏览器包 412,086 字节 / 600,000。`pnpm test:dsh`（DSH 0.2.1-rc.3）与 `pnpm test:dsh:rc`（DSH 0.2.0-rc.2）均 `"ok": true`。
+- **未完成**：G2「100 个项目日用的 2 周实盘」未执行，不能用合成数据宣称通过；跨项目书架扫描仍不在单工作区切片内。
 
 ## 2026-10-20 复核
 
 - **Phase A-D 已交付**：全文检索、候选暂存、长任务恢复、备份、版本/审计/批注、布局、拆书结构化、世界观、保险库等均已落库；`pnpm verify` 在代码状态 `abacaa3` 退出 0（lint、typecheck、五项资产 parity、DSH boundary、release 25/25、upstream-update、56 个测试文件 / 561 项、build）。打包冒烟 `pnpm test:dsh` 与 `pnpm test:dsh:rc` 在 DSH 0.2.1-rc.2 / 0.2.0-rc.2 上均为 `"ok": true`（2026-10-20，修复 Windows 8.3 临时路径后）。`client/index.tsx` 已拆为 16 行入口壳，仅该入口脱离 900 行软上限；`client/creative-workbench.tsx` 仍为 1347 行，软上限债务未整体关闭。
 - **发布管线已适配 fork**：发布身份（仓库/包名/tarball 前缀）由 `packages/dsh-plugin/package.json` 派生；稳定 tag 为 `miaowu-vX.Y.Z`；`release.yml` 只接受该前缀，并拒绝上游 `v*` tag、缺 fork 入口或源提交不在 `main` 上（`main` 的祖先）的发布；上游专用 `recover-v0.1.13.yml` 已删除。**仍待办**：npm 首次发布（granular `NPM_TOKEN`）与 0.1.16 之后的预构建包发布，目前 0.1.17 / 0.1.18 只有源码；发布前还需在 GitHub 为 `main` 开启分支保护（`ci-proof` 要求 `branches/main.protected === true`，2026-10-20 仍为 false），并启用当前 `disabled_manually` 的 Release 工作流。
-- **剩余 P2 / 延后项**：短剧生产素材/分镜板浮动面板、esbuild 多入口拆包、`availableActions` 服务端下发（现为前端状态表）、保险库 UI；`scripts/native-dsh-smoke.ts` 在 `tsc -p tsconfig.lint.json --noEmit` 下有 41 个既有类型错误（不在 `pnpm verify` 门禁内）。
+- **剩余 P2 / 延后项**：esbuild 多入口拆包（2026-10-24 决策暂不做，预算放宽到 600,000）；真 provider 质量评测仍需付费授权，未运行。
 - **明确不在范围**：改编 P3（有声/漫画/翻译/版权签约）不随本轮交付，见 `docs/小说全流程覆盖评估.md`。
 
 ## 2026-10-20 P1-A 自诊断 / P1-C 同步工厂骨架
@@ -52,6 +59,17 @@
 - **N4-D 待交付（批量化与质量）**：≥20 章整书批量与进程中断后的自动续跑、成本与实际请求数审计与孤儿文件治理、TTS 时长 QC 的 0.5–1.8 比值复检、波形预览、真实付费 provider、连续两周实盘。另：本切片未发起真实付费 TTS，也没连真实 ComfyUI（provider 测试注入假 `oh_story_comfyui` 端口），特定 provider 的音色、延迟与价格仍未验证。
 - **P3**：仍按路线图条件触发。
 
+## 2026-10-24 客户端包体门禁放宽（N3 决策）
+
+- **决策**：客户端不做 esbuild 多入口拆包。宿主 `dsh-client-modules` 原生支持包内懒加载 chunk（`require.async("./client.xxx.js")` + `__ModuleLoader__.load({ chunk })`），官方插件已有先例；本轮按用户决策直接放宽预算，保留单 bundle 形态。
+- **变更**：`scripts/build-dsh-plugin.ts` 的浏览器包预算从 400,000 提到 600,000，构建成功时打印实际字节。当前 `client.js` 为 399,864 字节。
+- **影响**：每次启动仍加载整包；600,000 是上限不是目标，后续 UI 增长需继续盯住。N3 其余项（保险库 UI、短剧生产素材/分镜板浮动面板、`availableActions` 服务端下发、`read-hash-1m` 结论）按原路线推进。
+
+## 2026-10-24 N3-1 工程债清零
+
+- **类型门禁**：`scripts/native-dsh-smoke.ts` 在 `tsc -p tsconfig.lint.json --noEmit` 下的 41 个既有类型错误已清零（`topBox` / `editorBox` / `editorCellBox` / `chatFlowBox` 的 null 收窄，textarea / iframe 断言，紧凑布局六元组断言）；新增 `pnpm typecheck:lint` 并加入 `pnpm verify` / `pnpm verify:portable`。
+- **验证**：`pnpm verify` 退出 0（84 个测试文件 / 956 项通过；lint、typecheck、typecheck:lint、五项资产 parity、DSH boundary、release 25/25、upstream-update 3/3、sync-factory 16/16、eval 7/7、perf 6/6、build）；浏览器包 399,864 字节（预算 600,000）。`pnpm test:dsh` 在隔离 `DSH_HOME`、DSH `0.2.1-rc.3` 上 `"ok": true`，退出 0；`pnpm test:dsh:rc` 在 DSH `0.2.0-rc.2` 上 `"ok": true`，退出 0。
+
 ## 第一优先（高价值，直接对应现有差距）
 
 | # | 功能 | 借鉴来源 | 落点 | 状态 | 落点（实施后） |
@@ -61,7 +79,7 @@
 | 3 | 长任务可中断可恢复 | NarraLume（steps/checkpoints/runs）、Scriverse（analysis_tasks 状态机） | 短剧批次生产 / 小说长文生成 | ✅ | `src/services/tasks.ts` run/step/checkpoint：resume 返回最近 paused/failed run 含 checkpoint；内置 novel-chapter / drama-batch / game-content 三 recipe；任务中心面板；Agent 侧新增 `oh_story_task checkpoint_run` 工具，长写 agent 可在中断前落检查点，工作台按 resume 恢复 |
 | 4 | 备份三件套 | NarraLume（bundle/snapshot/全库备份） | workspace 数据层 | ✅ | `src/services/backup.ts` + 备份面板：bundle/snapshot/full（hash+counts+sizeBytes），恢复一律新目录不覆盖，支持离线 JSON 导入；备份→篡改→恢复回归测试 |
 | 5 | 版本化 + 审计 + 行级批注 | Scriverse（entity_versions/audit_logs/行 ID 锚定） | 小说编辑器 / 短剧五文档 | ✅ | `src/services/history.ts` + 历史面板：保存快照（≤50/文件去重）+ 回滚（CAS 412）+ audit.jsonl 留痕 + 行级批注（quote 窗口重锚 moved/stale），LCS 逐行 diff 展示 |
-| 6 | 异步双面板 + 自由窗口 | DSH-better-sidebar | 游戏/视频两栏 + 素材浮动 | ✅（素材板浮动为 ⏳ 简化） | `src/client/layout/`（split-tree/split-pane/free-window）+ 会话隔离布局持久化（oh-story.layout.v1.<sessionId>）；故事/短剧 tree\|editor 递归 split、游戏/视频 Studio 浮动镜像 + 回 dock；短剧生产素材/分镜板独立浮动留后续（需 split 第三 leaf） |
+| 6 | 异步双面板 + 自由窗口 | DSH-better-sidebar | 游戏/视频两栏 + 素材浮动 | ✅ | `src/client/layout/`（split-tree/split-pane/free-window）+ 会话隔离布局持久化（oh-story.layout.v1.<sessionId>）；故事/短剧 tree\|editor 递归 split、游戏/视频 Studio 浮动镜像 + 回 dock；短剧生产视图整体浮窗（含素材/镜头 tab） |
 | 7 | **拆书结果结构化** | NarraLume（ImportAnalysis JSON）、Scriverse | 拆文库 | ✅ | `src/services/analysis.ts` + 分析面板：拆文库 Markdown → sidecar JSON（实体/关系/时间线/伏笔/场景 + 原文证据行号），parse/query/export 路由 |
 | 8 | **独立世界观构建入口** | 参考项目（世界观维度体系）+ 全流程断档① | 新建/扩展 skill 或独立 workflow | ✅ | `packages/knowledge/dsh-miaowu/skills/worldbuilding/`（自有子包 + 自建 manifest + parity）：先建世界观再开书，产物落 story-long-write Phase 2 设定/ 目录，story-architect 经 oh_story_role 协作 |
 
@@ -89,5 +107,5 @@
 ## 工程注记（实施后，2026-09-05，历史）
 
 - 扩展缝：`src/services/registry.ts`（registerWorkspaceExtension + onWorkspaceWrite）+ `src/client/features/registry.ts`（registerWorkbenchFeature + registerFileViewer），并行代理据此无冲突交付
-- 客户端构建已开 esbuild 完整 minify，并自 2026-10-20 起对 `?inline` CSS 做构建期 minify；2026-10-21 起直接输出 UTF-8；`client.js` 386,196 字节（2026-10-21，预算 400,000），2026-10-24 N4-C 后为 399,864 字节（预算不变，余量约 14 B）
-- 历史债务（2026-09-05）：`client/index.tsx` 约 2060 行超 900 行软上限；该债务已于 Phase A-D 拆为 16 行入口壳（见 2026-10-20 复核）。仍延后：短剧生产素材板独立浮动、esbuild 多入口拆包、availableActions 服务端下发（现为前端状态表）
+- 客户端构建已开 esbuild 完整 minify，并自 2026-10-20 起对 `?inline` CSS 做构建期 minify；2026-10-21 起直接输出 UTF-8；`client.js` 386,196 字节（2026-10-21，预算 400,000），2026-10-24 N4-C 后为 399,864 字节；同日预算放宽到 600,000（余量 200,136 字节）
+- 历史债务（2026-09-05）：`client/index.tsx` 约 2060 行超 900 行软上限；该债务已于 Phase A-D 拆为 16 行入口壳（见 2026-10-20 复核）。仍延后：esbuild 多入口拆包（2026-10-24 决策暂不做）

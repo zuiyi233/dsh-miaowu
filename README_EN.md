@@ -46,7 +46,7 @@ The table describes the current source. Published packages pin their upstream co
 | Game | [NovelToGame 0.6.1](https://github.com/zenstory-ai/novel-to-game/releases/tag/v0.6.1) · 7 Skills · playable 《金瓶梅》 ADV sample (18+) | `/novel-to-game quick`, `/game-build`, `/game-qa` |
 | Video | [video-recap-skills 0.6.2](https://github.com/zenstory-ai/video-recap-skills/releases/tag/v0.6.2) · 7 Skills (3 user entry points) | `/video-recap`, `/video-script`, `/video-reference` |
 
-> Current source version **0.1.18** (2026-10-19): the 0.1.18 prebuilt package and npm package are not published yet, the last working prebuilt package is **v0.1.16**, and npm is unpublished (`@dsh-miaowu/dsh` returns 404 in the npm registry). The default install pins DeepSeek Harness `0.2.1-rc.3`; the earlier `0.2.0-rc.2` remains supported. See [CHANGELOG.md](CHANGELOG.md) and [Releases](https://github.com/zuiyi233/dsh-miaowu/releases); the two working install paths are under [Installation](#installation). Upgrade steps are in the FAQ entry [“What do I do after upgrading?”](#what-do-i-do-after-upgrading).
+> Current source version **0.1.19** (2026-10-24): the 0.1.19 prebuilt package and npm package are not published yet, the last working prebuilt package is **v0.1.16**, and npm is unpublished (`@dsh-miaowu/dsh` returns 404 in the npm registry). The default install pins DeepSeek Harness `0.2.1-rc.3`; the earlier `0.2.0-rc.2` remains supported. See [CHANGELOG.md](CHANGELOG.md) and [Releases](https://github.com/zuiyi233/dsh-miaowu/releases); the two working install paths are under [Installation](#installation). Upgrade steps are in the FAQ entry [“What do I do after upgrading?”](#what-do-i-do-after-upgrading).
 
 ## The four workbenches
 
@@ -99,7 +99,7 @@ The capabilities below are provided by this repository (`dsh-miaowu`) on top of 
 - **Backup trio**: bundle, snapshot and full backup; restore always writes a new directory and never overwrites the original, and offline JSON import goes through the same checks. Media bytes are skipped and the full backup excludes DSH sessions and provider credentials; when the vault is enabled, a full backup includes text/JSON entries such as `vault/secrets.json` but **not `vault/master.key`**, so a restore without a separately backed-up key cannot decrypt it. Treat the master key as a sensitive file.
 - **Foreshadow loop**: planting, per-chapter reminders, a resolution state machine and snooze; analysis sidecars can be imported read-only.
 - **Bookshelf**: discover and manage multiple works; archiving only hides a record, and the 30-day recycle bin and permanent removal never delete workspace files.
-- **Optional credential vault**: AES-256-GCM, off by default; it only works when `DSH_MIAOWU_VAULT_ENABLED=1` is set and never takes over DSH environment credentials.
+- **Optional credential vault**: AES-256-GCM, off by default; it only works when `DSH_MIAOWU_VAULT_ENABLED=1` is set and never takes over DSH environment credentials. The story/drama workbench includes a Vault panel that lists names only; plaintext appears only after an explicit read.
 - **Three fork-owned Skills**: `worldbuilding` (build the world first), `publishing` (submission packages and release tracking) and `finalize` (completion settlement and a foreshadow-resolution gate).
 - **Local ComfyUI integration**: short-drama production adapters and the `oh_story_comfyui` tool call a local ComfyUI through API-format workflow placeholders; a missing workflow is an explicit error, never a silent switch to another image path.
 - **喵呜小说工坊 preset**: the full standard-mode tool surface plus a Chinese fiction-writing persona, installed from a source checkout into DSH's Agent preset directory.
@@ -111,9 +111,9 @@ See [docs/FORK-FEATURES.md](docs/FORK-FEATURES.md) for enablement, optional stat
 
 ## Installation
 
-Requires Node.js 24+. **The source is version 0.1.18, but the 0.1.18 prebuilt package and npm package are not published yet**: this repository's GitHub Release only has `v0.1.16`, and `@dsh-miaowu/dsh` returns 404 in the npm registry (checked 2026-10-20). Two paths work today.
+Requires Node.js 24+. **The source is version 0.1.19, but the 0.1.19 prebuilt package and npm package are not published yet**: this repository's GitHub Release only has `v0.1.16`, and `@dsh-miaowu/dsh` returns 404 in the npm registry (checked 2026-10-24). Two paths work today.
 
-**Recommended: build the current 0.1.18 from source** (needs pnpm on the machine; `npm i -g pnpm` if missing)
+**Recommended: build the current 0.1.19 from source** (needs pnpm on the machine; `npm i -g pnpm` if missing)
 
 ```bash
 git clone https://github.com/zuiyi233/dsh-miaowu.git
@@ -121,13 +121,13 @@ cd dsh-miaowu
 pnpm install --frozen-lockfile
 pnpm --filter @dsh-miaowu/dsh build
 pnpm --filter @dsh-miaowu/dsh pack --pack-destination release
-npx -y --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile web add ./release/dsh-miaowu-dsh-0.1.18.tgz
+npx -y --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile web add ./release/dsh-miaowu-dsh-0.1.19.tgz
 npx -y @deepseek-ai/dsh@0.2.1-rc.3 web
 ```
 
-`pack` writes `release/dsh-miaowu-dsh-0.1.18.tgz` (`prepack` builds once more). Skip the first two lines if you are already in a source checkout; if `dsh plugin add` rejects the relative path, pass the absolute path to that file instead.
+`pack` writes `release/dsh-miaowu-dsh-0.1.19.tgz` (`prepack` builds once more). Skip the first two lines if you are already in a source checkout; if `dsh plugin add` rejects the relative path, pass the absolute path to that file instead.
 
-**Quick trial: the last published prebuilt package v0.1.16** (older, so it lacks the 0.1.17 / 0.1.18 updates; this command provides pnpm temporarily, so a machine with only Node.js can run it)
+**Quick trial: the last published prebuilt package v0.1.16** (older, so it lacks the 0.1.17–0.1.19 updates; this command provides pnpm temporarily, so a machine with only Node.js can run it)
 
 ```bash
 npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.16/dsh-miaowu-dsh-0.1.16.tgz &&
@@ -143,7 +143,7 @@ Before creating with AI, add a Provider and API key under DSH's Settings → Mod
 <details>
 <summary>Available after publication: GitHub Release prebuilt package and npm install</summary>
 
-**There is no 0.1.18 prebuilt package and no npm package today** (checked 2026-10-20: Release asset 404, registry 404), so do not slot the version number into an old link — a non-existent asset returns 404. After publication, copy the tarball's full download URL from the [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) page; the next release's tag starts with `miaowu-v`, and the asset path looks like `.../download/miaowu-v<version>/<asset>.tgz`, with `<version>` and `<asset>` exactly as shown there. Install by replacing `./release/dsh-miaowu-dsh-0.1.18.tgz` in the source-build command above with that URL; for npm, confirm `@dsh-miaowu/dsh@<version>` is published and substitute the package name. Until then, use the source build or the v0.1.16 prebuilt package.
+**There is no 0.1.19 prebuilt package and no npm package today** (checked 2026-10-24: Release asset 404, registry 404), so do not slot the version number into an old link — a non-existent asset returns 404. After publication, copy the tarball's full download URL from the [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) page; the next release's tag starts with `miaowu-v`, and the asset path looks like `.../download/miaowu-v<version>/<asset>.tgz`, with `<version>` and `<asset>` exactly as shown there. Install by replacing `./release/dsh-miaowu-dsh-0.1.19.tgz` in the source-build command above with that URL; for npm, confirm `@dsh-miaowu/dsh@<version>` is published and substitute the package name. Until then, use the source build or the v0.1.16 prebuilt package.
 
 </details>
 
@@ -189,10 +189,10 @@ Voice references require an explicit capability declaration: generated generic p
 <details>
 <summary>Install into a separate profile and start on demand</summary>
 
-Whichever profile the plugin is installed into, every Session of that profile loads the creation Skills. To keep the stock `web` profile clean, install into a separate profile. Run this from the source root; it uses the 0.1.18 tarball built in the previous section. To skip the build, use the v0.1.16 Release asset instead (replace the relative path with `https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.16/dsh-miaowu-dsh-0.1.16.tgz`):
+Whichever profile the plugin is installed into, every Session of that profile loads the creation Skills. To keep the stock `web` profile clean, install into a separate profile. Run this from the source root; it uses the 0.1.19 tarball built in the previous section. To skip the build, use the v0.1.16 Release asset instead (replace the relative path with `https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.16/dsh-miaowu-dsh-0.1.16.tgz`):
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile story add ./release/dsh-miaowu-dsh-0.1.18.tgz
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile story add ./release/dsh-miaowu-dsh-0.1.19.tgz
 ```
 
 A new profile has no UI by default. Edit `~/.dsh/profiles/story/package.json` and set `dsh.profile.bundles` to:
@@ -377,7 +377,9 @@ Yes. The type, asset, unit-test and build gate runs on both macOS and Windows in
 
 ### What do I do after upgrading?
 
-Run the target-version command from [Installation](#installation): on the source path, `git pull`, rebuild, `pack`, then `dsh plugin add` the new tarball; v0.1.16 is the only published prebuilt package, so 0.1.17 / 0.1.18 require the source build, and future releases use the `miaowu-v*` assets on the Releases page — copy the full URL shown there instead of editing a version number; install `@dsh-miaowu/dsh@<version>` only once npm is published. Then restart DSH. Use the same host version for installation and startup; see [Installation](#installation) for the supported range. Skills and Roles ship with the plugin and need no redeployment into projects.
+Run the target-version command from [Installation](#installation): on the source path, `git pull`, rebuild, `pack`, then `dsh plugin add` the new tarball; v0.1.16 is the only published prebuilt package, so 0.1.17–0.1.19 require the source build, and future releases use the `miaowu-v*` assets on the Releases page — copy the full URL shown there instead of editing a version number; install `@dsh-miaowu/dsh@<version>` only once npm is published. Then restart DSH. Use the same host version for installation and startup; see [Installation](#installation) for the supported range. Skills and Roles ship with the plugin and need no redeployment into projects.
+
+Version 0.1.19 closes the reliability gaps: history rollback and candidate apply now take an automatic creative-tree snapshot before overwriting, the continuity dashboard can verify an imported handoff manifest, and backup summaries are cached incrementally per file. It also adds the read-only vault panel, server-sourced task `availableActions`, and the drama production float window. No migration is needed; reinstall and restart.
 
 This repository's 0.1.17 / 0.1.18 versions follow upstream Oh Story 0.9.0 and NovelToGame 0.6.0 and include the plugin-side P2/P3 interface fixes; see [CHANGELOG.md](CHANGELOG.md) for each change.
 

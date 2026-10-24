@@ -22,7 +22,7 @@
 
 DSH 的 `plugin add` 内部需要 pnpm，单独运行 `npx @deepseek-ai/dsh ... plugin add` 不会自动补上它；源码构建需要本机已有 pnpm，下面的 v0.1.16 预构建包命令则会临时提供。
 
-当前源码版本是 0.1.18，但 0.1.18 的预构建包与 npm 包都还没发布（`@dsh-miaowu/dsh` 在 registry 返回 404）。推荐从源码构建：
+当前源码版本是 0.1.19，但 0.1.19 的预构建包与 npm 包都还没发布（`@dsh-miaowu/dsh` 在 registry 返回 404）。推荐从源码构建：
 
 ```bash
 git clone https://github.com/zuiyi233/dsh-miaowu.git
@@ -30,18 +30,18 @@ cd dsh-miaowu
 pnpm install --frozen-lockfile
 pnpm --filter @dsh-miaowu/dsh build
 pnpm --filter @dsh-miaowu/dsh pack --pack-destination release
-npx -y --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile web add ./release/dsh-miaowu-dsh-0.1.18.tgz
+npx -y --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile web add ./release/dsh-miaowu-dsh-0.1.19.tgz
 npx -y @deepseek-ai/dsh@0.2.1-rc.3 web
 ```
 
-快速试用可装最近发布的预构建包 v0.1.16（较旧，不含 0.1.17 / 0.1.18 的更新）：
+快速试用可装最近发布的预构建包 v0.1.16（较旧，不含 0.1.17–0.1.19 的更新）：
 
 ```bash
 npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile web add https://github.com/zuiyi233/dsh-miaowu/releases/download/v0.1.16/dsh-miaowu-dsh-0.1.16.tgz &&
 npx -y @deepseek-ai/dsh@0.2.1-rc.3 web
 ```
 
-预构建包与校验和以 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) 页为准；0.1.18 及后续版本的 npm 包与预构建包发布后，按该页 `miaowu-v*` 资产给出的完整地址安装，不要手写版本号。
+预构建包与校验和以 [Releases](https://github.com/zuiyi233/dsh-miaowu/releases) 页为准；0.1.19 及后续版本的 npm 包与预构建包发布后，按该页 `miaowu-v*` 资产给出的完整地址安装，不要手写版本号。
 
 保持终端运行。若浏览器未自动打开，访问终端打印的完整 `http://127.0.0.1:3080/?token=...` 链接完成首次认证。
 
@@ -96,10 +96,10 @@ Oh Story 0.9.0 按写书步骤重整参考资料，书稿、设定、追踪和�
 
 ## 按需加载
 
-插件装进哪个 profile，那个 profile 的每个 Session 都能发现创作 Skills，具体指令在使用时读取；工作台只在有创作项目时显示。想让原版 `web` 保持干净、只在创作时打开工作台，就装进独立 profile（用安装一节源码构建出的 0.1.18 tarball；跳过构建可换成 v0.1.16 的 Release 资产地址）：
+插件装进哪个 profile，那个 profile 的每个 Session 都能发现创作 Skills，具体指令在使用时读取；工作台只在有创作项目时显示。想让原版 `web` 保持干净、只在创作时打开工作台，就装进独立 profile（用安装一节源码构建出的 0.1.19 tarball；跳过构建可换成 v0.1.16 的 Release 资产地址）：
 
 ```bash
-npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile story add ./release/dsh-miaowu-dsh-0.1.18.tgz
+npx -y --package pnpm@11.7.0 --package @deepseek-ai/dsh@0.2.1-rc.3 dsh plugin --profile story add ./release/dsh-miaowu-dsh-0.1.19.tgz
 ```
 
 新 profile 默认没有界面。编辑 `~/.dsh/profiles/story/package.json`，把 `dsh.profile.bundles` 改成 `["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsh-miaowu/dsh"]`，顺序照抄，这个包不用另外安装。

@@ -1,6 +1,6 @@
 {
   "name": "@dsh-miaowu/dsh",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "A DSH plugin for fiction, short-drama, interactive-game, and video-recap production",
   "keywords": [
     "deepseek-harness",

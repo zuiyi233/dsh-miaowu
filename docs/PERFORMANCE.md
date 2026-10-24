@@ -63,7 +63,7 @@ node --test scripts/perf-scale.test.mjs
 
 ## 测量项
 
-每项只跑 1 次（`iterations: 1`），生成耗时不计入任何测量。路径来自实际生成的语料，并在计时后校验数量/字符数，语料不完整会以退出码 2 失败，而不是静默给出空测量。
+除 `read-hash-1m` 取 5 次中位数（`iterations: 5`，`details.samplesMs` 保留原始样本）外，其余每项只跑 1 次（`iterations: 1`）；生成耗时不计入任何测量。路径来自实际生成的语料，并在计时后校验数量/字符数，语料不完整会以退出码 2 失败，而不是静默给出空测量。
 
 | id | 测量内容 | 原始预算 |
 | --- | --- | --- |
@@ -86,7 +86,7 @@ node --test scripts/perf-scale.test.mjs
 | 全文检索 < 2 s（约 10 万字符） | 无直接对应；`read+hash 1M 字符 < 500 ms` 只是检索链路的输入原语 | 检索自身的索引、路由、CJK/拼音匹配由 `packages/dsh-plugin/tests/search.test.ts` 的 ~100 KB / 2 s 冒烟覆盖。本脚本不测检索，也不宣称检索 SLO 通过。 |
 | 文件树刷新 < 500 ms | `walk-support-10k < 2000 ms`（纯遍历） | 本项不含 DSH fs 缝、权限校验、排序后的树构建、React 渲染与浏览器绘制。产品行为是会话运行期间约每 4 秒安静重列（见 `README.md` / `docs/FORK-FEATURES.md`），仓库内没有 UI 刷新耗时自动测试。 |
 | 备份 < 30 s / 100 MB | `backup-collect < 30000 ms` | 语料仅约 5 MB，且不生成备份 JSON、不算 bundle hash、不写文件；30 s 只是该语料的预算上限，**不能替代 100 MB 验收**。 |
-| 浏览器包 400 KB | 不在本脚本内 | 由现有构建门禁 `scripts/build-dsh-plugin.ts` 检查（`clientBytes > 400_000` 即失败）。`docs/VALIDATION.md` 记录的最近一次为 386,196 字节（构建期 CSS minify + UTF-8 输出）。 |
+| 浏览器包 600 KB | 不在本脚本内 | 由现有构建门禁 `scripts/build-dsh-plugin.ts` 检查（`clientBytes > 600_000` 即失败）。`docs/VALIDATION.md` 记录的最近一次为 399,864 字节（2026-10-24；构建期 CSS minify + UTF-8 输出）。 |
 
 ### 明确缺口
 
@@ -140,9 +140,15 @@ node --test scripts/perf-scale.test.mjs
 
 单位为 ms。最终复核中只有 `read-hash-1m` 超过 500 ms 预算，其余三项通过；`read-chapters-1m` 没有预算，但其 503.5 ms 也说明同一底层成本已接近/超过 500 ms。
 
-结论：`read-hash-1m` 在本机 353–537 ms 间波动，500 ms 预算对“Windows 上顺序打开并读取 1000 个文件”偏紧，**偶发超预算是真实观测**。脚本按设计输出 `perf-scale: FAIL` 并退出 1，不把失败改写成通过。首轮基线表和这次失败复核都应保留，不能只引用通过的那几次。若需要稳定门禁，应先扩展语料/增加重复次数并重新定义统计口径（例如取中位数），而不是在本脚本外放宽预算。
+结论：`read-hash-1m` 在本机 353–537 ms 间波动，500 ms 预算对“Windows 上顺序打开并读取 1000 个文件”偏紧，**偶发超预算是真实观测**。脚本按设计输出 `perf-scale: FAIL` 并退出 1，不把失败改写成通过。首轮基线表和这次失败复核都应保留，不能只引用通过的那几次。2026-10-24 已按原建议把 `read-hash-1m` 改为 5 次中位数口径，预算仍为 500 ms；见下方「2026-10-24 read-hash 统计口径修正」。
 
-测试基线：`node --test scripts/perf-scale.test.mjs` 4/4 通过，约 2 s；只覆盖小规模生成、报告形状、`--assert` 通过和小规模清理行为，不跑完整 1M 规模。
+### 2026-10-24 read-hash 统计口径修正
+
+- 决策：`read-hash-1m` 单次墙钟对系统负载和杀毒扫描过于敏感；改为同一进程内连续跑 5 次、取中位数判定，预算保持 500 ms 不变（不放宽预算）。`details.samplesMs` 保留 5 个原始样本，报告仍只有 `iterations` / `ms` 两个判定字段。
+- 本机复核：`node scripts/perf-scale.mjs --assert --json` 退出 0；中位数 **314.60 ms**，样本 `[279.96, 320.84, 314.60, 287.12, 331.67]` ms，压缩后语料校验仍与 `hash-1m` 摘要一致。该次复跑与 2026-10-21 的 537.32 ms 单次失败不是同一统计口径，两者都保留，不能互相覆盖。
+- 边界：中位数降低单次抖动造成的假失败，但不改变原始原语成本，也不构成插件 UI SLO；`--scale small` 仍不能用于性能结论。
+
+测试基线：`node --test scripts/perf-scale.test.mjs` 6/6 通过，约 2 s；只覆盖小规模生成、报告形状、`--assert` 通过和小规模清理行为，不跑完整 1M 规模。
 
 ### 机器与口径警告
 

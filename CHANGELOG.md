@@ -11,6 +11,8 @@
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-10-24
+
 ### Added
 
 - 小说 / 短剧工作台新增「自诊断」面板：按宿主、运行时、工作区、数据、凭据、集成六组检查，用 P0/P1/P2 标出「为什么不能用」；报告只读，支持包必须显式确认并按路径、密钥、会话载荷和绝对路径脱敏。可确认执行的修复只有重建检索索引、重跑全量备份与检查过期锁；过期锁在当前 DSH 文件系统接口没有删除能力时只报告、不代删。
@@ -23,6 +25,10 @@
 - 小说工作台新增「有声剧」面板（N4-A 纵向切片）：从 `正文/` 发现书籍与章节，确定性切分为旁白片段，按内容寻址缓存（`.oh-story/audiobook/cache/<sha256>/`）调用 OpenAI-compatible TTS，按章预估成本、生成音频，并用 ffmpeg 拼接导出 192 kbps MP3。启动任务、恢复暂停/失败任务与导出都需要显式确认；`OH_STORY_TTS_API_KEY` 只从宿主环境读取，端点与模型可由 `OH_STORY_TTS_BASE_URL` / `OH_STORY_TTS_MODEL` 回退，密钥不写入项目、缓存、响应或日志。项目、脚本与音频写在工作区 `有声剧/`，缓存与任务写在 `.oh-story/audiobook/`，不写 DSH 会话、`workspace.json` 或 `~/.dsh`。当前只支持单章单旁白，没有 BGM、M4B、字幕、多角色与重启自动续跑；N4-B/C/D 仍待交付。
 - 有声剧 N4-B 多角色：`cast` 成为唯一音色表（恰好一个旁白 + 若干角色，id 唯一且不能占用 `unknown`），项目保存/加载恢复音色映射；新增 `GET|PUT /oh-story/audiobook/script` 读取单章脚本与逐段指派说话人，PUT 按 `baseVersion` 做 CAS 并在改说话人后重算片段 id；重新解析覆盖时按 `(kind, text, sourceStart)` 保留文本未变片段的指派，并返回 `preserved` / `dropped` 计数。成本预估、任务执行与导出改为按每段角色音色查内容寻址缓存，改一段指派或改单个角色音色只失效相关段。未指派、或指向已删除角色的对白会在章节摘要显示计数，并让预估、新建、恢复与导出返回 409，阻止整章完成。工作台新增角色编辑器与「分段」指派面板。
 - 有声剧 N4-C 完整成品：素材与授权（扫描 `素材/音乐`、`素材/音效`，`素材/授权.json` 以 CAS 读写，未授权素材不能挂 cue，导出前再校验一次）、可编辑 cue 时间轴（段间固定 120 ms 静音，混音与字幕共用同一份毫秒网格）、ffprobe 实测时长的内容寻址缓存（`.oh-story/audiobook/durations/`）、两遍 loudnorm 混音（目标 −16 LUFS / TP −1.5 / LRA 11）、SRT 与 LRC 字幕（每行贪心合并到 42 字）、带章节表与 `attached_pic` 封面的 M4B，以及发布包 `有声剧/<书>/发布/` 目录 + `发布清单.json`（逐文件 sha256，校验和可由 `path` + `sha256` 复算）。新增 `GET|PUT /oh-story/audiobook/assets` 与 `POST /oh-story/audiobook/assets/generate`：外部素材走 `LocalAssetProvider` 或复用 `oh_story_comfyui` 工具的 `ComfyUiMusicProvider`，生成回执写回授权文档；`preview` 零写入，真生成必须 `confirm: true`，ComfyUI 未配置返回 503，素材越界返回 403，授权保存失败回滚本次生成的文件。`POST /oh-story/audiobook/export` 兼容旧的单章 MP3 调用，新增 `formats`（mp3/m4b/subtitles/package，package 强制含 SRT+LRC 字幕）与 `preview` 预检（列出未授权素材、缺封面、缺缓存片段、缺 ffmpeg、章节缺失、空脚本等问题与成本预估，零写入），真导出按暂存 → 提升 → 打包 → 清单最后写编排，中途失败会让旧清单失效并清理已复制的发布文件。工作台「有声剧」面板新增素材面板与导出面板：预检未就绪时禁用完整导出，生成与导出前显式确认，界面不显示密钥与绝对路径。导出依赖本机 `ffmpeg`/`ffprobe`；整书 ≥20 章批量、进程中断后的自动续跑、成本与实际请求数审计、TTS 时长比值复检与波形预览留给 N4-D。
+- 小说 / 短剧工作台的「驾驶舱」新增交接清单导入校验：`POST /oh-story/continuity/handoff/verify` 接收清单后逐文件复算 SHA-256、复算排序 checksum，并报告 `match` / `changed` / `missing` / `unreadable` / `unsafe`，全程零写入；面板提供「校验交接清单」选择本地 JSON 文件。
+- 工作台新增「保险库」面板：默认关闭并说明启用方式；`GET /oh-story/vault/secrets` 不带 `name` 时只返回排序后的条目名，不读主密钥、不返回密文，明文只在用户显式读取单个条目后显示。
+- 历史回滚与候选应用写盘前自动创建创作树快照：按工作区文件系统 10 分钟节流、并发写共享一次快照；非创作工作区与多书歧义静默跳过；快照失败以 500 阻断本次覆盖。自动快照只收创作树，`.oh-story` 状态仍由手动整体快照保护。
+- 短剧生产视图可从编辑器拖出为独立浮窗，素材与镜头 tab 一并保留，继续复用按会话 / 工作区的布局持久化。
 
 ### Changed
 
@@ -30,6 +36,10 @@
 - 同步 [NovelToGame 0.6.1](https://github.com/zenstory-ai/novel-to-game/releases/tag/v0.6.1)（`c3075f35cc14d4bc94e2829df2bfcc0d9971229e`，7 Skills）：Skill 规则去重、示例文档与代码对齐，删除示例工程中的死防御代码；可玩《金瓶梅》ADV 示例与音频实现同步更新。
 - 默认宿主与开发 cohort 升到 DeepSeek Harness `0.2.1-rc.3`（npm `next`；npm `latest` 仍是 `0.2.1-rc.2`，安装命令不再自称 latest）：`pnpm-workspace.yaml` 的 overrides 与豁免、`packages/dsh-plugin/package.json` 的 devDependencies、两个原生冒烟脚本的默认 `dshVersion` 同步改写，lockfile 重解析为 `+69 -68` 且不留 `0.2.1-rc.2`。peer 范围本就覆盖 rc.3、Cordis 仍是 `4.0.5`，因此对外声明与兼容范围都没改动；逐个字节比对插件直接引用的 13 个 `@deepseek-ai/dsh-*` 宿主包，外加以 peer 声明的 `dsh-api-session-controller`（共 14 个），13 个只有版本号不同，唯一多出的差异是 `dsh-api-session-controller` 里一句 JSDoc 注释，无类型与签名变化。`0.2.0-rc.2` 走廊照旧通过。这是源码与验证层面的升级，真实 profile 未改动。
 - 客户端内联 CSS 改为构建期 esbuild minify，并改为直接输出 UTF-8（默认 ASCII 会把每个中文字符串转成 `\uXXXX`）：样式与文案语义不变，浏览器包从 392,311 字节降到 372,317 字节，继续守住 400,000 字节预算。
+- 按 2026-10-24 决策，客户端包体预算从 400,000 放宽到 600,000 字节且暂不拆包；构建打印实际大小（当前 412,086 字节），600,000 是上限而不是目标。
+- 任务 run / step / candidate 的可用动作（`availableActions`）改由服务端状态机随响应下发，客户端删除重复的状态转移表，按钮只渲染服务端声明当前可执行的动作。
+- 性能门禁的 `read-hash-1m` 从单次采样改为 5 次取中位数（预算仍为 500 ms），并输出原始样本，避免单次抖动被当作回归或通过。
+- 备份摘要改为按文件 `version` / `size` 增量缓存：目录不变时不重复读取，新增或改动备份时只重新解析受影响的文件。
 - 发行身份改为 fork 自己的线：发布标签前缀改为 `miaowu-vX.Y.Z`（下一个发布版本起），tarball 名与仓库地址统一为 `dsh-miaowu-dsh-<version>.tgz` 与 `zuiyi233/dsh-miaowu`；发布前先做 fork 源预检，拒绝把上游提交或上游标签当作发布源，并移除只服务上游的恢复工作流。
 - 双语 README 的安装路径按实际发布状态改写：0.1.18 的预构建包与 npm 包都还没发布，推荐从源码构建 0.1.18；最近可用的预构建包 v0.1.16 作为快速试用路径；v0.1.18 的 Release 资产与 npm 安装收进「发布后可用」折叠块。Badge、Releases、Issues、独立 profile 安装与项目表一并指向本 fork，上游只在出处与历史记录中保留。
 - 新增 [docs/FORK-FEATURES.md](docs/FORK-FEATURES.md)，双语 README 增加「Fork 专有能力」一节：全文检索（CJK + 拼音）、版本历史/回滚/审计/行级批注、候选暂存、run/checkpoint/resume、备份三件套、伏笔闭环、书架、可选凭据保险库、`worldbuilding`/`publishing`/`finalize` 三个自有 Skills、ComfyUI 本地接入、喵呜小说工坊预设、运行中文件树刷新与按会话/工作区布局持久化。

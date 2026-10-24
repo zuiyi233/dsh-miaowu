@@ -1,6 +1,6 @@
 {
   "name": "dsh-miaowu",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "private": true,
   "description": "A DSH plugin for fiction, short-drama, playable game, and video-recap production",
   "license": "MIT",
@@ -14,6 +14,7 @@
     "build:dsh-plugin": "pnpm --filter @dsh-miaowu/dsh build",
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
+    "typecheck:lint": "tsc -p tsconfig.lint.json --noEmit",
     "lint": "eslint . --max-warnings=0",
     "test": "pnpm test:unit",
     "test:unit": "pnpm -r --if-present test",
@@ -42,8 +43,8 @@
     "assets:sync:video": "tsx scripts/sync-video-recap-assets.ts",
     "assets:check": "tsx scripts/check-upstream-parity.ts && tsx scripts/check-drama-parity.ts && tsx scripts/check-novel-to-game-parity.ts && tsx scripts/check-video-recap-parity.ts && tsx scripts/check-dsh-miaowu-parity.ts",
     "dsh:boundary": "tsx scripts/check-dsh-boundary.ts",
-    "verify": "pnpm lint && pnpm typecheck && pnpm assets:check && pnpm dsh:boundary && pnpm test:release && pnpm test:upstream-updates && pnpm test:sync-upstream && pnpm test:eval && pnpm test:perf && pnpm test:unit && pnpm build",
-    "verify:portable": "pnpm typecheck && pnpm assets:check && pnpm test:release && pnpm test:sync-upstream && pnpm test:eval && pnpm test:perf && pnpm test:unit && pnpm build",
+    "verify": "pnpm lint && pnpm typecheck && pnpm typecheck:lint && pnpm assets:check && pnpm dsh:boundary && pnpm test:release && pnpm test:upstream-updates && pnpm test:sync-upstream && pnpm test:eval && pnpm test:perf && pnpm test:unit && pnpm build",
+    "verify:portable": "pnpm typecheck && pnpm typecheck:lint && pnpm assets:check && pnpm test:release && pnpm test:sync-upstream && pnpm test:eval && pnpm test:perf && pnpm test:unit && pnpm build",
     "verify:release": "pnpm verify && pnpm test:dsh && pnpm test:dsh:rc",
     "pack:release": "pnpm --filter @dsh-miaowu/dsh pack --pack-destination release",
     "test:dsh:rc": "tsx scripts/native-dsh-smoke.ts 0.2.0-rc.2"
